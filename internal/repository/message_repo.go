@@ -187,18 +187,27 @@ func (r *MessageRepo) GetAttachmentMediaForMessage(ctx context.Context, messageI
 	return item, blob, nil
 }
 
-// DeleteBySession deletes all message_attachments and messages for a chat_session.
+// DeleteBySession deletes all message_attachments and messages for a chat_session in a single transaction.
 // Returns the number of messages deleted.
 func (r *MessageRepo) DeleteBySession(ctx context.Context, chatSession string) (int64, error) {
-	_, err := r.pool.Exec(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("DeleteBySession begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	_, err = tx.Exec(ctx, `
 		DELETE FROM message_attachments
 		WHERE message_id IN (SELECT id FROM messages WHERE chat_session = $1)`, chatSession)
 	if err != nil {
 		return 0, fmt.Errorf("DeleteBySession attachments: %w", err)
 	}
-	tag, err := r.pool.Exec(ctx, `DELETE FROM messages WHERE chat_session = $1`, chatSession)
+	tag, err := tx.Exec(ctx, `DELETE FROM messages WHERE chat_session = $1`, chatSession)
 	if err != nil {
-		return 0, fmt.Errorf("DeleteBySession: %w", err)
+		return 0, fmt.Errorf("DeleteBySession messages: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("DeleteBySession commit: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }

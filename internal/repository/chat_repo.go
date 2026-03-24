@@ -87,6 +87,27 @@ func (r *ChatRepo) TurnCount(ctx context.Context, conversationID int64) (int64, 
 	return n, err
 }
 
+// TurnCountsBatch returns a map of conversation_id → turn count for all given IDs in one query.
+func (r *ChatRepo) TurnCountsBatch(ctx context.Context, ids []int64) (map[int64]int64, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT conversation_id, COUNT(*) FROM chat_turns WHERE conversation_id = ANY($1) GROUP BY conversation_id`,
+		ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("TurnCountsBatch: %w", err)
+	}
+	defer rows.Close()
+	counts := make(map[int64]int64, len(ids))
+	for rows.Next() {
+		var id, n int64
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("TurnCountsBatch scan: %w", err)
+		}
+		counts[id] = n
+	}
+	return counts, rows.Err()
+}
+
 // UpdateConversation modifies title and/or voice.
 func (r *ChatRepo) UpdateConversation(ctx context.Context, id int64, title, voice *string) (*model.ChatConversation, error) {
 	var c model.ChatConversation
@@ -138,9 +159,15 @@ func (r *ChatRepo) GetTurns(ctx context.Context, conversationID int64, limit int
 	return out, rows.Err()
 }
 
-// SaveTurn inserts a new chat_turns row and updates last_message_at.
+// SaveTurn inserts a new chat_turns row and updates last_message_at in a single transaction.
 func (r *ChatRepo) SaveTurn(ctx context.Context, conversationID int64, userInput, responseText, voice string, temperature float64) error {
-	_, err := r.pool.Exec(ctx,
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("SaveTurn begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	_, err = tx.Exec(ctx,
 		`INSERT INTO chat_turns (conversation_id, turn_number, user_input, response_text, voice, temperature)
 		 VALUES ($1,
 		   COALESCE((SELECT MAX(turn_number) FROM chat_turns WHERE conversation_id = $1), 0) + 1,
@@ -148,10 +175,13 @@ func (r *ChatRepo) SaveTurn(ctx context.Context, conversationID int64, userInput
 		conversationID, userInput, responseText, voice, temperature,
 	)
 	if err != nil {
-		return fmt.Errorf("SaveTurn: %w", err)
+		return fmt.Errorf("SaveTurn insert: %w", err)
 	}
-	_, err = r.pool.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		`UPDATE chat_conversations SET last_message_at = $1 WHERE id = $2`,
 		time.Now(), conversationID)
-	return err
+	if err != nil {
+		return fmt.Errorf("SaveTurn update: %w", err)
+	}
+	return tx.Commit(ctx)
 }

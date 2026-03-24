@@ -3,10 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	appai "github.com/daveontour/digitalmuseum/internal/ai"
 	"github.com/daveontour/digitalmuseum/internal/keystore"
@@ -140,10 +141,15 @@ func (h *ChatHandler) ListConversations(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	ids := make([]int64, len(convs))
+	for i, c := range convs {
+		ids[i] = c.ID
+	}
+	counts, _ := h.svc.TurnCountsBatch(r.Context(), ids)
+
 	result := make([]map[string]any, 0, len(convs))
 	for _, c := range convs {
-		count, _ := h.svc.TurnCount(r.Context(), c.ID)
-		m := conversationResponse(c, count)
+		m := conversationResponse(c, counts[c.ID])
 		result = append(result, m)
 	}
 	writeJSON(w, result)
@@ -402,9 +408,10 @@ func (h *ChatHandler) CompleteProfileStart(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	go func() {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
 		if err := h.svc.GenerateCompleteProfile(ctx, name, provider, getRAM, tier); err != nil {
-			log.Printf("[complete_profile] Error for '%s': %v", name, err)
+			slog.Error("complete_profile failed", "name", name, "err", err)
 		}
 	}()
 	writeJSON(w, map[string]any{

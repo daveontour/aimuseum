@@ -495,6 +495,10 @@ func (s *ChatService) TurnCount(ctx context.Context, conversationID int64) (int6
 	return s.chatRepo.TurnCount(ctx, conversationID)
 }
 
+func (s *ChatService) TurnCountsBatch(ctx context.Context, ids []int64) (map[int64]int64, error) {
+	return s.chatRepo.TurnCountsBatch(ctx, ids)
+}
+
 // GenerateCompleteProfile builds a multi-step relationship profile for a contact
 // from messages and emails, using the specified AI provider (gemini or claude) to summarize,
 // and saves it to complete_profiles. Mirrors the Python base_chat_service.get_complete_profile_by_name.

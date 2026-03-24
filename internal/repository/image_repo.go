@@ -432,17 +432,24 @@ func (r *ImageRepo) ListReferencedItems(ctx context.Context) ([]ReferencedItem, 
 	return items, rows.Err()
 }
 
-// UpdateBlobImageDataAndClearReferenced updates media_blobs.image_data and sets media_items.is_referenced=false.
+// UpdateBlobImageDataAndClearReferenced updates media_blobs.image_data and sets media_items.is_referenced=false
+// in a single transaction so both updates are atomic.
 func (r *ImageRepo) UpdateBlobImageDataAndClearReferenced(ctx context.Context, itemID, blobID int64, data []byte) error {
-	_, err := r.pool.Exec(ctx, `UPDATE media_blobs SET image_data = $2 WHERE id = $1`, blobID, data)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("UpdateBlobImageDataAndClearReferenced begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	_, err = tx.Exec(ctx, `UPDATE media_blobs SET image_data = $2 WHERE id = $1`, blobID, data)
 	if err != nil {
 		return fmt.Errorf("UpdateBlobImageData: %w", err)
 	}
-	_, err = r.pool.Exec(ctx, `UPDATE media_items SET is_referenced = FALSE, updated_at = NOW() WHERE id = $1`, itemID)
+	_, err = tx.Exec(ctx, `UPDATE media_items SET is_referenced = FALSE, updated_at = NOW() WHERE id = $1`, itemID)
 	if err != nil {
 		return fmt.Errorf("SetItemNotReferenced: %w", err)
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // ExportItem holds fields needed for image export.

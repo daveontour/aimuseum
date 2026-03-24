@@ -248,13 +248,13 @@ func (r *ContactRepo) GetRelationshipGraph(ctx context.Context, types, sources [
 	var validT []string
 	for _, t := range types {
 		if validRelTypes[t] {
-			validT = append(validT, "'"+t+"'")
+			validT = append(validT, t)
 		}
 	}
-	typeClause := "rel_type IN ('friend', 'acquaintance', 'unknown')"
-	if len(validT) > 0 {
-		typeClause = "rel_type IN (" + strings.Join(validT, ",") + ")"
+	if len(validT) == 0 {
+		validT = []string{"friend", "acquaintance", "unknown"}
 	}
+	typeClause := "rel_type = ANY($1::text[])"
 
 	// Validate sources
 	var srcConds []string
@@ -293,7 +293,7 @@ func (r *ContactRepo) GetRelationshipGraph(ctx context.Context, types, sources [
 		ORDER BY total DESC
 		LIMIT %d`, sumClause, typeClause, sourceClause, sumClause, maxNodes)
 
-	rows, err := r.pool.Query(ctx, q)
+	rows, err := r.pool.Query(ctx, q, validT)
 	if err != nil {
 		return nil, fmt.Errorf("GetRelationshipGraph: %w", err)
 	}

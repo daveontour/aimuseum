@@ -57,6 +57,16 @@ END$$`); err != nil {
 		slog.Warn("could not add encryption columns to reference_documents", "err", err)
 	}
 
+	for _, idxSQL := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_refdocs_available_for_task ON reference_documents (available_for_task)`,
+		`CREATE INDEX IF NOT EXISTS idx_refdocs_sensitive ON reference_documents (is_sensitive)`,
+		`CREATE INDEX IF NOT EXISTS idx_refdocs_private ON reference_documents (is_private)`,
+	} {
+		if _, err := conn.Exec(ctx, idxSQL); err != nil {
+			slog.Warn("could not create reference_documents index", "sql", idxSQL, "err", err)
+		}
+	}
+
 	// ── sensitive_keyring master private DEK column ───────────────────────────
 	if _, err := conn.Exec(ctx, `DO $$
 BEGIN
@@ -122,6 +132,7 @@ func schemaDDL() []string {
 			CONSTRAINT uq_email_uid_folder UNIQUE (uid, folder)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_email_uid_folder ON emails (uid, folder)`,
+		`CREATE INDEX IF NOT EXISTS idx_emails_date ON emails (date)`,
 
 		// ── attachments ─────────────────────────────────────────────────────────
 		`CREATE TABLE IF NOT EXISTS attachments (
@@ -134,6 +145,7 @@ func schemaDDL() []string {
 			image_thumbnail  BYTEA,
 			created_at       TIMESTAMP DEFAULT NOW()
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_attachments_email_id ON attachments (email_id)`,
 
 		// ── media_blobs ─────────────────────────────────────────────────────────
 		// Binary blob storage referenced by media_items.
@@ -185,6 +197,7 @@ func schemaDDL() []string {
 		`CREATE INDEX IF NOT EXISTS idx_media_items_source      ON media_items (source)`,
 		`CREATE INDEX IF NOT EXISTS idx_media_items_media_type  ON media_items (media_type)`,
 		`CREATE INDEX IF NOT EXISTS idx_media_items_year_month  ON media_items (year, month)`,
+		`CREATE INDEX IF NOT EXISTS idx_media_items_use_by_ai   ON media_items (use_by_ai)`,
 
 		// ── messages ────────────────────────────────────────────────────────────
 		`CREATE TABLE IF NOT EXISTS messages (

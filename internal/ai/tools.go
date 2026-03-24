@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -108,7 +109,7 @@ func getAvailableReferenceDocuments(ctx context.Context, pool *pgxpool.Pool) (ma
 func getMessagesByChatSession(ctx context.Context, pool *pgxpool.Pool, chatSession string) (map[string]any, error) {
 	rows, err := pool.Query(ctx,
 		`SELECT id, message_date, sender_name, sender_id, type, text, service, subject
-		 FROM messages WHERE chat_session ILIKE $1 ORDER BY message_date ASC`,
+		 FROM messages WHERE chat_session ILIKE $1 ORDER BY message_date ASC LIMIT 500`,
 		"%"+chatSession+"%")
 	if err != nil {
 		return map[string]any{"error": err.Error(), "chat_session": chatSession, "message_count": 0, "messages": []any{}}, nil
@@ -151,7 +152,7 @@ func getEmailsByContact(ctx context.Context, pool *pgxpool.Pool, name string) (m
 	pattern := "%" + name + "%"
 	rows, err := pool.Query(ctx,
 		`SELECT id, date, from_address, to_addresses, subject, plain_text, snippet, has_attachments
-		 FROM emails WHERE from_address ILIKE $1 OR to_addresses ILIKE $1 ORDER BY date ASC`,
+		 FROM emails WHERE from_address ILIKE $1 OR to_addresses ILIKE $1 ORDER BY date ASC LIMIT 500`,
 		pattern)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "contact_name": name, "email_count": 0, "emails": []any{}}, nil
@@ -252,13 +253,18 @@ func getUniqueTagsCount(ctx context.Context, pool *pgxpool.Pool) (map[string]any
 		defer rows.Close()
 		for rows.Next() {
 			var raw string
-			if err := rows.Scan(&raw); err == nil {
-				for _, t := range strings.Split(raw, ",") {
-					if s := strings.TrimSpace(t); s != "" {
-						mediaTags[s] = struct{}{}
-					}
+			if err := rows.Scan(&raw); err != nil {
+				slog.Warn("getUniqueTagsCount: media_items scan", "err", err)
+				continue
+			}
+			for _, t := range strings.Split(raw, ",") {
+				if s := strings.TrimSpace(t); s != "" {
+					mediaTags[s] = struct{}{}
 				}
 			}
+		}
+		if err := rows.Err(); err != nil {
+			slog.Warn("getUniqueTagsCount: media_items rows", "err", err)
 		}
 	}
 	artefactTags := map[string]struct{}{}
@@ -267,13 +273,18 @@ func getUniqueTagsCount(ctx context.Context, pool *pgxpool.Pool) (map[string]any
 		defer rows2.Close()
 		for rows2.Next() {
 			var raw string
-			if err := rows2.Scan(&raw); err == nil {
-				for _, t := range strings.Split(raw, ",") {
-					if s := strings.TrimSpace(t); s != "" {
-						artefactTags[s] = struct{}{}
-					}
+			if err := rows2.Scan(&raw); err != nil {
+				slog.Warn("getUniqueTagsCount: artefacts scan", "err", err)
+				continue
+			}
+			for _, t := range strings.Split(raw, ",") {
+				if s := strings.TrimSpace(t); s != "" {
+					artefactTags[s] = struct{}{}
 				}
 			}
+		}
+		if err := rows2.Err(); err != nil {
+			slog.Warn("getUniqueTagsCount: artefacts rows", "err", err)
 		}
 	}
 	combined := map[string]struct{}{}
@@ -359,7 +370,7 @@ func searchFacebookPosts(ctx context.Context, pool *pgxpool.Pool, description st
 
 func getAllFacebookPosts(ctx context.Context, pool *pgxpool.Pool) (map[string]any, error) {
 	rows, err := pool.Query(ctx,
-		`SELECT id, timestamp, title, post_text, external_url, post_type FROM facebook_posts ORDER BY timestamp DESC`)
+		`SELECT id, timestamp, title, post_text, external_url, post_type FROM facebook_posts ORDER BY timestamp DESC LIMIT 500`)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "posts": []any{}, "count": 0}, nil
 	}
@@ -400,9 +411,16 @@ func getUserInterests(ctx context.Context, pool *pgxpool.Pool) (map[string]any, 
 	var interests []string
 	for rows.Next() {
 		var name string
-		if err := rows.Scan(&name); err == nil && name != "" {
+		if err := rows.Scan(&name); err != nil {
+			slog.Warn("getUserInterests: scan", "err", err)
+			continue
+		}
+		if name != "" {
 			interests = append(interests, name)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("getUserInterests: rows", "err", err)
 	}
 	if interests == nil {
 		interests = []string{}
