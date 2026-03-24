@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	appcrypto "github.com/daveontour/digitalmuseum/internal/crypto"
+	appcrypto "github.com/daveontour/aimuseum/internal/crypto"
 )
 
 const (

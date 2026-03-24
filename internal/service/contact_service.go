@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/daveontour/digitalmuseum/internal/model"
-	"github.com/daveontour/digitalmuseum/internal/repository"
+	"github.com/daveontour/aimuseum/internal/model"
+	"github.com/daveontour/aimuseum/internal/repository"
 )
 
 // ContactService manages contacts and related tables.

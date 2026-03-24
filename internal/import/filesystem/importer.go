@@ -10,8 +10,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/daveontour/digitalmuseum/internal/import/utils"
-	"github.com/daveontour/digitalmuseum/internal/importstorage"
+	"github.com/daveontour/aimuseum/internal/import/utils"
+	"github.com/daveontour/aimuseum/internal/importstorage"
 )
 
 var imageExtensions = map[string]bool{

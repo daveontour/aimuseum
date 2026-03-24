@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"regexp"
 
-	appimporter "github.com/daveontour/digitalmuseum/internal/importer"
-	imapimport "github.com/daveontour/digitalmuseum/internal/import/imap"
+	appimporter "github.com/daveontour/aimuseum/internal/importer"
+	imapimport "github.com/daveontour/aimuseum/internal/import/imap"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

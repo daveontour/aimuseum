@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	appai "github.com/daveontour/digitalmuseum/internal/ai"
-	"github.com/daveontour/digitalmuseum/internal/repository"
+	appai "github.com/daveontour/aimuseum/internal/ai"
+	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

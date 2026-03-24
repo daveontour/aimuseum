@@ -15,8 +15,8 @@ import (
 
 	"golang.org/x/image/draw"
 
-	"github.com/daveontour/digitalmuseum/internal/model"
-	"github.com/daveontour/digitalmuseum/internal/repository"
+	"github.com/daveontour/aimuseum/internal/model"
+	"github.com/daveontour/aimuseum/internal/repository"
 )
 
 // ErrArtefactUnsupportedMedia is returned when an uploaded file is not an allowed image, PDF, or text/markdown document.

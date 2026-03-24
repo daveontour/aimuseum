@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/daveontour/digitalmuseum/internal/import/utils"
+	"github.com/daveontour/aimuseum/internal/import/utils"
 )
 
 // FindPhotoFile locates a photo file by URI

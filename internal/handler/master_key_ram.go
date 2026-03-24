@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	appcrypto "github.com/daveontour/digitalmuseum/internal/crypto"
-	"github.com/daveontour/digitalmuseum/internal/keystore"
+	appcrypto "github.com/daveontour/aimuseum/internal/crypto"
+	"github.com/daveontour/aimuseum/internal/keystore"
 )
 
 // resolveMasterPassword returns primary if non-empty; otherwise the session-stored

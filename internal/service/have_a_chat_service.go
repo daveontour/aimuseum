@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	appai "github.com/daveontour/digitalmuseum/internal/ai"
-	"github.com/daveontour/digitalmuseum/internal/model"
+	appai "github.com/daveontour/aimuseum/internal/ai"
+	"github.com/daveontour/aimuseum/internal/model"
 )
 
 // GenerateHaveAChatTurn generates one turn of an autonomous Claude↔Gemini conversation.

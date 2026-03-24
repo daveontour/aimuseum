@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/daveontour/digitalmuseum/internal/repository"
+	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

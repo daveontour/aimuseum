@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/daveontour/digitalmuseum/internal/config"
+	"github.com/daveontour/aimuseum/internal/config"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

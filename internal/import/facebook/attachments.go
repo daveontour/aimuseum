@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/daveontour/digitalmuseum/internal/import/utils"
+	"github.com/daveontour/aimuseum/internal/import/utils"
 )
 
 var errFound = errors.New("found")

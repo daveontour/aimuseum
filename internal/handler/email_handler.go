@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/daveontour/digitalmuseum/internal/model"
-	"github.com/daveontour/digitalmuseum/internal/service"
+	"github.com/daveontour/aimuseum/internal/model"
+	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 

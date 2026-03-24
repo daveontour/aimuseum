@@ -6,6 +6,8 @@ alwaysApply: false
 
 # Go backend
 
+**Module path:** `github.com/daveontour/aimuseum` (imports must use this prefix).
+
 ## Layers (typical new API)
 
 1. `internal/handler/<domain>_handler.go` — HTTP

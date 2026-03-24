@@ -6,8 +6,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/daveontour/digitalmuseum/internal/keystore"
-	"github.com/daveontour/digitalmuseum/internal/service"
+	"github.com/daveontour/aimuseum/internal/keystore"
+	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 

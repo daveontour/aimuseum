@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	appcrypto "github.com/daveontour/digitalmuseum/internal/crypto"
-	"github.com/daveontour/digitalmuseum/internal/model"
-	"github.com/daveontour/digitalmuseum/internal/repository"
+	appcrypto "github.com/daveontour/aimuseum/internal/crypto"
+	"github.com/daveontour/aimuseum/internal/model"
+	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

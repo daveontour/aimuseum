@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/daveontour/digitalmuseum/internal/model"
+	"github.com/daveontour/aimuseum/internal/model"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

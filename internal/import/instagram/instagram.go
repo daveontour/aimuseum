@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/daveontour/digitalmuseum/internal/importstorage"
+	"github.com/daveontour/aimuseum/internal/importstorage"
 )
 
 const instagramService = "Instagram"

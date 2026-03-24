@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/daveontour/digitalmuseum/internal/import/facebook"
-	"github.com/daveontour/digitalmuseum/internal/import/utils"
-	"github.com/daveontour/digitalmuseum/internal/importstorage"
+	"github.com/daveontour/aimuseum/internal/import/facebook"
+	"github.com/daveontour/aimuseum/internal/import/utils"
+	"github.com/daveontour/aimuseum/internal/importstorage"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

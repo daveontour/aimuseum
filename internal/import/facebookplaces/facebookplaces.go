@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/daveontour/digitalmuseum/internal/importstorage"
+	"github.com/daveontour/aimuseum/internal/importstorage"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

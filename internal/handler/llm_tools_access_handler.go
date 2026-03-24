@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"strings"
 
-	appai "github.com/daveontour/digitalmuseum/internal/ai"
-	appcrypto "github.com/daveontour/digitalmuseum/internal/crypto"
-	"github.com/daveontour/digitalmuseum/internal/keystore"
-	"github.com/daveontour/digitalmuseum/internal/service"
+	appai "github.com/daveontour/aimuseum/internal/ai"
+	appcrypto "github.com/daveontour/aimuseum/internal/crypto"
+	"github.com/daveontour/aimuseum/internal/keystore"
+	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 

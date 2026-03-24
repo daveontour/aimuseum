@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/daveontour/digitalmuseum/internal/keystore"
+	"github.com/daveontour/aimuseum/internal/keystore"
 )
 
 // LLMToolsAccessStoreKey is the private_store key for LLM tool visibility policy.

@@ -24,22 +24,22 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/daveontour/digitalmuseum/internal/config"
-	"github.com/daveontour/digitalmuseum/internal/database"
-	contactsimport "github.com/daveontour/digitalmuseum/internal/import/contacts"
-	facebookimport "github.com/daveontour/digitalmuseum/internal/import/facebook"
-	facebookalbumsimport "github.com/daveontour/digitalmuseum/internal/import/facebookalbums"
-	facebookallimport "github.com/daveontour/digitalmuseum/internal/import/facebookall"
-	facebookplacesimport "github.com/daveontour/digitalmuseum/internal/import/facebookplaces"
-	facebookpostsimport "github.com/daveontour/digitalmuseum/internal/import/facebookposts"
-	filesystemimport "github.com/daveontour/digitalmuseum/internal/import/filesystem"
-	imapimport "github.com/daveontour/digitalmuseum/internal/import/imap"
-	imessageimport "github.com/daveontour/digitalmuseum/internal/import/imessage"
-	instagramimport "github.com/daveontour/digitalmuseum/internal/import/instagram"
-	thumbnailsimport "github.com/daveontour/digitalmuseum/internal/import/thumbnails"
-	whatsappimport "github.com/daveontour/digitalmuseum/internal/import/whatsapp"
-	"github.com/daveontour/digitalmuseum/internal/importstorage"
-	"github.com/daveontour/digitalmuseum/internal/repository"
+	"github.com/daveontour/aimuseum/internal/config"
+	"github.com/daveontour/aimuseum/internal/database"
+	contactsimport "github.com/daveontour/aimuseum/internal/import/contacts"
+	facebookimport "github.com/daveontour/aimuseum/internal/import/facebook"
+	facebookalbumsimport "github.com/daveontour/aimuseum/internal/import/facebookalbums"
+	facebookallimport "github.com/daveontour/aimuseum/internal/import/facebookall"
+	facebookplacesimport "github.com/daveontour/aimuseum/internal/import/facebookplaces"
+	facebookpostsimport "github.com/daveontour/aimuseum/internal/import/facebookposts"
+	filesystemimport "github.com/daveontour/aimuseum/internal/import/filesystem"
+	imapimport "github.com/daveontour/aimuseum/internal/import/imap"
+	imessageimport "github.com/daveontour/aimuseum/internal/import/imessage"
+	instagramimport "github.com/daveontour/aimuseum/internal/import/instagram"
+	thumbnailsimport "github.com/daveontour/aimuseum/internal/import/thumbnails"
+	whatsappimport "github.com/daveontour/aimuseum/internal/import/whatsapp"
+	"github.com/daveontour/aimuseum/internal/importstorage"
+	"github.com/daveontour/aimuseum/internal/repository"
 	"mime"
 	"path/filepath"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -229,7 +229,7 @@ Flags:
   -jobs            List all supported job types and their parameters
   -h, -help        Show this help message
 `)
-	fmt.Println(jobHelp)
+	fmt.Print(jobHelp)
 }
 
 func run() error {
@@ -243,7 +243,7 @@ func run() error {
 	flag.Parse()
 
 	if *showJobs {
-		fmt.Println(jobHelp)
+		fmt.Print(jobHelp)
 		return nil
 	}
 

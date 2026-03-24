@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/daveontour/digitalmuseum/internal/model"
+	"github.com/daveontour/aimuseum/internal/model"
 )
 
 // TestIsPhoneNumber mirrors the Python is_phone_number() test cases.

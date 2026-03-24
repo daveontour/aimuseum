@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/daveontour/digitalmuseum/internal/model"
-	"github.com/daveontour/digitalmuseum/internal/repository"
+	"github.com/daveontour/aimuseum/internal/model"
+	"github.com/daveontour/aimuseum/internal/repository"
 )
 
 // SubjectConfigService handles GET /api/subject-configuration.

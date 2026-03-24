@@ -1,4 +1,4 @@
-module github.com/daveontour/digitalmuseum
+module github.com/daveontour/aimuseum
 
 go 1.25.0
 

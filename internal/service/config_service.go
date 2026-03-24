@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 
-	"github.com/daveontour/digitalmuseum/internal/model"
-	"github.com/daveontour/digitalmuseum/internal/repository"
+	"github.com/daveontour/aimuseum/internal/model"
+	"github.com/daveontour/aimuseum/internal/repository"
 )
 
 // ConfigService manages app_configuration rows.

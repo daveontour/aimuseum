@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	appai "github.com/daveontour/digitalmuseum/internal/ai"
-	"github.com/daveontour/digitalmuseum/internal/keystore"
-	"github.com/daveontour/digitalmuseum/internal/model"
-	"github.com/daveontour/digitalmuseum/internal/repository"
-	"github.com/daveontour/digitalmuseum/internal/service"
+	appai "github.com/daveontour/aimuseum/internal/ai"
+	"github.com/daveontour/aimuseum/internal/keystore"
+	"github.com/daveontour/aimuseum/internal/model"
+	"github.com/daveontour/aimuseum/internal/repository"
+	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 

@@ -1,6 +1,6 @@
 .PHONY: build build-exe build-launcher build-runner test generate lint run run-runner clean tidy
 
-MODULE := github.com/daveontour/digitalmuseum
+MODULE := github.com/daveontour/aimuseum
 BINARY := digitalmuseum
 CMD     := ./cmd/server
 RUNNER  := ./cmd/runner

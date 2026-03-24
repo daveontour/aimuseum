@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/daveontour/digitalmuseum/internal/api/router"
-	"github.com/daveontour/digitalmuseum/internal/config"
-	"github.com/daveontour/digitalmuseum/internal/database"
+	"github.com/daveontour/aimuseum/internal/api/router"
+	"github.com/daveontour/aimuseum/internal/config"
+	"github.com/daveontour/aimuseum/internal/database"
 )
 
 func main() {

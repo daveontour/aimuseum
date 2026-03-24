@@ -11,8 +11,8 @@ import (
 	"sort"
 	"time"
 
-	appgmail "github.com/daveontour/digitalmuseum/internal/gmail"
-	appimporter "github.com/daveontour/digitalmuseum/internal/importer"
+	appgmail "github.com/daveontour/aimuseum/internal/gmail"
+	appimporter "github.com/daveontour/aimuseum/internal/importer"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"

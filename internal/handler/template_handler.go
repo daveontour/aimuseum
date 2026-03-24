@@ -9,9 +9,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/daveontour/digitalmuseum/internal/config"
-	"github.com/daveontour/digitalmuseum/internal/keystore"
-	"github.com/daveontour/digitalmuseum/internal/repository"
+	"github.com/daveontour/aimuseum/internal/config"
+	"github.com/daveontour/aimuseum/internal/keystore"
+	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/go-chi/chi/v5"
 )
 

@@ -9,10 +9,10 @@ import (
 	"os"
 	"strings"
 
-	appai "github.com/daveontour/digitalmuseum/internal/ai"
-	"github.com/daveontour/digitalmuseum/internal/keystore"
-	"github.com/daveontour/digitalmuseum/internal/model"
-	"github.com/daveontour/digitalmuseum/internal/repository"
+	appai "github.com/daveontour/aimuseum/internal/ai"
+	"github.com/daveontour/aimuseum/internal/keystore"
+	"github.com/daveontour/aimuseum/internal/model"
+	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

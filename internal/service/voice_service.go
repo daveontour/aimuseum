@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/daveontour/digitalmuseum/internal/model"
-	"github.com/daveontour/digitalmuseum/internal/repository"
+	"github.com/daveontour/aimuseum/internal/model"
+	"github.com/daveontour/aimuseum/internal/repository"
 )
 
 // VoiceService manages built-in and custom voices.

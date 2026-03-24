@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	appcrypto "github.com/daveontour/digitalmuseum/internal/crypto"
+	appcrypto "github.com/daveontour/aimuseum/internal/crypto"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
