@@ -144,7 +144,144 @@ Modals.EmailGallery = (() => {
         let isLoading = false;
         let hasMoreData = true;
         let searchTimeout = null;
-        let viewMode = 'list'; // 'list' or 'grid'
+
+        function _htmlEsc(s) {
+            if (s == null || s === undefined) return '';
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function formatShortListDate(dateString) {
+            if (!dateString) return '';
+            try {
+                const d = new Date(dateString);
+                if (isNaN(d.getTime())) return '';
+                const day = d.getDate();
+                const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
+                return `${day} ${mon}`;
+            } catch {
+                return '';
+            }
+        }
+
+        function formatDetailReceived(dateString) {
+            if (!dateString) return '';
+            try {
+                const d = new Date(dateString);
+                if (isNaN(d.getTime())) return '';
+                return d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+            } catch {
+                return '';
+            }
+        }
+
+        function monthKeyFromRaw(raw) {
+            if (!raw) return '';
+            const d = new Date(raw);
+            if (isNaN(d.getTime())) return '';
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        }
+
+        function formatMonthYearHeading(raw) {
+            if (!raw) return '';
+            const d = new Date(raw);
+            if (isNaN(d.getTime())) return '';
+            const names = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            return `${names[d.getMonth()]} ${d.getFullYear()}`;
+        }
+
+        function parseSenderParts(senderStr) {
+            const s = (senderStr || '').trim();
+            if (!s) return { displayName: '?', email: '', domain: '' };
+            const m = s.match(/^(.*?)\s*<([^>]+)>$/);
+            if (m) {
+                const displayName = m[1].trim().replace(/^"|"$/g, '') || m[2];
+                const emailAddr = m[2].trim();
+                const at = emailAddr.lastIndexOf('@');
+                const domain = at >= 0 ? emailAddr.slice(at + 1) : '';
+                return { displayName, email: emailAddr, domain };
+            }
+            if (s.includes('@')) {
+                const at = s.lastIndexOf('@');
+                const domain = at >= 0 ? s.slice(at + 1) : '';
+                const local = at >= 0 ? s.slice(0, at) : s;
+                return { displayName: local, email: s, domain };
+            }
+            return { displayName: s, email: '', domain: '' };
+        }
+
+        function initialsFromSender(senderStr) {
+            const { displayName } = parseSenderParts(senderStr);
+            const parts = displayName.split(/\s+/).filter(Boolean);
+            if (parts.length >= 2) {
+                const a = (parts[0][0] || '') + (parts[parts.length - 1][0] || '');
+                return a.toUpperCase().slice(0, 2);
+            }
+            return (displayName || '?').slice(0, 2).toUpperCase();
+        }
+
+        function mapSearchRowToEmail(email) {
+            const rawDate = email.date || null;
+            return {
+                id: email.id,
+                subject: email.subject || 'No Subject',
+                sender: email.from_address || 'Unknown Sender',
+                recipient: email.to_addresses || '',
+                date: rawDate ? formatDateAustralian(rawDate) : 'No Date',
+                dateShort: rawDate ? formatShortListDate(rawDate) : '',
+                rawDate,
+                folder: email.folder || 'Unknown Folder',
+                body: email.snippet || 'No content',
+                preview: email.snippet || 'No preview',
+                attachments: (email.attachment_ids || []).map(id => `/attachments/${id}`),
+                emailId: email.id
+            };
+        }
+
+        function _sortEmailDataInPlace() {
+            const v = (DOM.emailGallerySort && DOM.emailGallerySort.value) || 'date-desc';
+            const getT = (e) => {
+                if (!e.rawDate) return 0;
+                const t = new Date(e.rawDate).getTime();
+                return isNaN(t) ? 0 : t;
+            };
+            if (v === 'date-desc') {
+                emailData.sort((a, b) => getT(b) - getT(a));
+            } else if (v === 'date-asc') {
+                emailData.sort((a, b) => getT(a) - getT(b));
+            } else if (v === 'sender-asc') {
+                emailData.sort((a, b) => (a.sender || '').localeCompare(b.sender || '', undefined, { sensitivity: 'base' }));
+            } else if (v === 'subject-asc') {
+                emailData.sort((a, b) => (a.subject || '').localeCompare(b.subject || '', undefined, { sensitivity: 'base' }));
+            }
+        }
+
+        function _maybeAppendMonthHeader(container, email, actualIndex, isTableBody) {
+            const prev = actualIndex > 0 ? emailData[actualIndex - 1] : null;
+            const mk = monthKeyFromRaw(email.rawDate);
+            const prevMk = prev ? monthKeyFromRaw(prev.rawDate) : null;
+            if (mk === prevMk) return;
+            const label = formatMonthYearHeading(email.rawDate);
+            if (!label) return;
+            if (isTableBody) {
+                const tr = document.createElement('tr');
+                tr.className = 'email-gallery-month-row';
+                const td = document.createElement('td');
+                td.colSpan = 4;
+                td.className = 'email-gallery-month-cell';
+                td.textContent = label;
+                tr.appendChild(td);
+                container.appendChild(tr);
+            } else {
+                const div = document.createElement('div');
+                div.className = 'email-gallery-month-divider';
+                div.textContent = label;
+                container.appendChild(div);
+            }
+        }
 
         function formatDateAustralian(dateString) {
           
@@ -323,38 +460,44 @@ Modals.EmailGallery = (() => {
             // Add scroll event listener for lazy loading
             DOM.emailGalleryList.addEventListener('scroll', _handleEmailListScroll);
 
+            if (DOM.emailGallerySort) {
+                DOM.emailGallerySort.addEventListener('change', () => {
+                    const id = currentEmailId;
+                    _sortEmailDataInPlace();
+                    _renderEmailList();
+                    if (id != null) {
+                        const idx = emailData.findIndex(e => (e.emailId || e.id) === id);
+                        if (idx >= 0) {
+                            _selectEmail(idx);
+                        }
+                    }
+                });
+            }
+
+            if (DOM.emailGalleryList) {
+                DOM.emailGalleryList.addEventListener('click', (e) => {
+                    const star = e.target.closest('.email-list-star');
+                    if (star) {
+                        e.stopPropagation();
+                        star.classList.toggle('email-list-star-on');
+                        const icon = star.querySelector('i');
+                        if (icon) {
+                            icon.classList.toggle('far');
+                            icon.classList.toggle('fas');
+                        }
+                    }
+                });
+            }
+
             // Add keyboard navigation
             document.addEventListener('keydown', _handleKeydown);
-            
-            // View toggle handler
-            if (DOM.emailGalleryViewToggle) {
-                DOM.emailGalleryViewToggle.addEventListener('click', _toggleViewMode);
-            }
             
             // Initialize resizable panes
             _initResizablePanes();
             
-            // Initialize view mode
             if (DOM.emailGalleryList) {
                 DOM.emailGalleryList.classList.add('email-gallery-list-view');
             }
-        }
-        
-        function _toggleViewMode() {
-            viewMode = viewMode === 'list' ? 'grid' : 'list';
-            const listContainer = DOM.emailGalleryList;
-            if (listContainer) {
-                listContainer.classList.toggle('email-gallery-grid-view', viewMode === 'grid');
-                listContainer.classList.toggle('email-gallery-list-view', viewMode === 'list');
-            }
-            if (DOM.emailGalleryViewToggle) {
-                const icon = DOM.emailGalleryViewToggle.querySelector('i');
-                if (icon) {
-                    icon.className = viewMode === 'grid' ? 'fas fa-list' : 'fas fa-th';
-                }
-            }
-            // Re-render the list
-            _renderEmailList();
         }
         
         function _initResizablePanes() {
@@ -458,18 +601,8 @@ Modals.EmailGallery = (() => {
                     .then(r => parseEmailSearchFetchResponse(r))
                     .then(data => {
                         const rows = coerceEmailSearchResponse(data);
-                        emailData = rows.map(email => ({
-                            id: email.id,
-                            subject: email.subject || 'No Subject',
-                            sender: email.from_address || 'Unknown Sender',
-                            recipient: email.to_addresses || 'Unknown Recipient',
-                            date: email.date ? formatDateAustralian(email.date) : 'No Date',
-                            folder: email.folder || 'Unknown Folder',
-                            body: email.snippet || 'No content',
-                            preview: email.snippet || 'No preview',
-                            attachments: (email.attachment_ids || []).map(id => `/attachments/${id}`),
-                            emailId: email.id // Store email ID for fetching full content
-                        }));
+                        emailData = rows.map(mapSearchRowToEmail);
+                        _sortEmailDataInPlace();
                         _renderEmailList();
                         _showInstructions();
                         resolve(emailData);
@@ -622,18 +755,8 @@ Modals.EmailGallery = (() => {
             .then(r => parseEmailSearchFetchResponse(r))
             .then(data => {
                 const rows = coerceEmailSearchResponse(data);
-                emailData = rows.map(email => ({
-                    id: email.id,
-                    subject: email.subject || 'No Subject',
-                    sender: email.from_address || 'Unknown Sender',
-                    recipient: email.to_addresses || 'Unknown Recipient',
-                    date: email.date ? formatDateAustralian(email.date) : 'No Date',
-                    folder: email.folder || 'Unknown Folder',
-                    body: email.snippet || 'No content',
-                    preview: email.snippet || 'No preview',
-                    attachments: (email.attachment_ids || []).map(id => `/attachments/${id}`),
-                    emailId: email.id // Store email ID for fetching full content
-                }));
+                emailData = rows.map(mapSearchRowToEmail);
+                _sortEmailDataInPlace();
                 selectedEmailIndex = -1;
                 _renderEmailList();
                 _showInstructions();
@@ -741,26 +864,6 @@ Modals.EmailGallery = (() => {
                 return;
             }
 
-            // Create table structure for grid/compact view
-            if (viewMode === 'grid') {
-                const table = document.createElement('table');
-                table.className = 'email-gallery-table';
-                const thead = document.createElement('thead');
-                thead.innerHTML = `
-                    <tr>
-                        <th class="email-table-col-subject">Subject</th>
-                        <th class="email-table-col-sender">From</th>
-                        <th class="email-table-col-date">Date</th>
-                        <th class="email-table-col-attachments"></th>
-                    </tr>
-                `;
-                table.appendChild(thead);
-                const tbody = document.createElement('tbody');
-                tbody.id = 'email-gallery-table-body';
-                table.appendChild(tbody);
-                DOM.emailGalleryList.appendChild(table);
-            }
-
             _loadMoreEmails();
         }
 
@@ -780,91 +883,43 @@ Modals.EmailGallery = (() => {
                 return;
             }
             
-            // Get the correct container for appending items
-            let container;
-            if (viewMode === 'grid') {
-                container = document.getElementById('email-gallery-table-body');
-                if (!container) {
-                    // Table not created yet, create it
-                    const table = document.createElement('table');
-                    table.className = 'email-gallery-table';
-                    const thead = document.createElement('thead');
-                    thead.innerHTML = `
-                        <tr>
-                            <th class="email-table-col-subject">Subject</th>
-                            <th class="email-table-col-sender">From</th>
-                            <th class="email-table-col-date">Date</th>
-                            <th class="email-table-col-attachments"></th>
-                        </tr>
-                    `;
-                    table.appendChild(thead);
-                    const tbody = document.createElement('tbody');
-                    tbody.id = 'email-gallery-table-body';
-                    table.appendChild(tbody);
-                    DOM.emailGalleryList.appendChild(table);
-                    container = tbody;
-                }
-            } else {
-                container = DOM.emailGalleryList;
-            }
+            const container = DOM.emailGalleryList;
 
             emailsToRender.forEach((email, localIndex) => {
              
                 const actualIndex = startIndex + localIndex;
+                const parts = parseSenderParts(email.sender);
+                const att = email.attachments && email.attachments.length > 0;
 
-                if (viewMode === 'grid') {
-                    // Compact table view - single line
-                    if (!container) return;
-                    
-                    const row = document.createElement('tr');
-                    row.className = 'email-table-row';
-                    row.dataset.index = actualIndex;
-                    
-                    // Add has-attachments class if email has attachments
-                    if (email.attachments && email.attachments.length > 0) {
-                        row.classList.add('has-attachments');
-                    }
+                if (!container) return;
 
-                    row.innerHTML = `
-                        <td class="email-table-col-subject">
-                            <div class="email-table-subject">${email.subject || 'No Subject'}</div>
-                        </td>
-                        <td class="email-table-col-sender">
-                            <div class="email-table-sender">${email.sender || 'Unknown Sender'}</div>
-                        </td>
-                        <td class="email-table-col-date">
-                            <div class="email-table-date">${email.date || 'No Date'}</div>
-                        </td>
-                        <td class="email-table-col-attachments">
-                            ${email.attachments && email.attachments.length > 0 ? '<span class="email-attachment-indicator">📎</span>' : ''}
-                        </td>
-                    `;
+                _maybeAppendMonthHeader(container, email, actualIndex, false);
 
-                    row.addEventListener('click', () => _selectEmail(actualIndex));
-                    container.appendChild(row);
-                } else {
-                    // List view - cards
-                    if (!container) return;
-                    
-                    const emailItem = document.createElement('div');
-                    emailItem.className = 'email-list-item';
-                    emailItem.dataset.index = actualIndex;
+                const emailItem = document.createElement('div');
+                emailItem.className = 'email-list-item';
+                emailItem.dataset.index = actualIndex;
 
-                    // Add has-attachments class if email has attachments
-                    if (email.attachments && email.attachments.length > 0) {
-                        emailItem.classList.add('has-attachments');
-                    }
-
-                    emailItem.innerHTML = `
-                        <div class="email-subject">${email.subject || 'No Subject'}</div>
-                        <div class="email-sender">From: ${email.sender || 'Unknown Sender'}</div>
-                        <div class="email-date">${email.date || 'No Date'}</div>
-                        <div class="email-preview">${email.preview || 'No Preview'}</div>
-                    `;
-
-                    emailItem.addEventListener('click', () => _selectEmail(actualIndex));
-                    container.appendChild(emailItem);
+                if (att) {
+                    emailItem.classList.add('has-attachments');
                 }
+
+                emailItem.innerHTML = `
+                    <div class="email-list-item-inner">
+                        <button type="button" class="email-list-star" aria-label="Star"><i class="far fa-star"></i></button>
+                        <div class="email-list-main-col">
+                            <div class="email-list-topline">
+                                <span class="email-list-sender-name">${_htmlEsc(parts.displayName)}</span>
+                                <span class="email-list-date-short">${_htmlEsc(email.dateShort || '')}</span>
+                            </div>
+                            <div class="email-list-subject">${_htmlEsc(email.subject)}</div>
+                            <div class="email-list-preview">${_htmlEsc(email.preview)}</div>
+                        </div>
+                        <span class="email-list-attach-glyph" style="${att ? '' : 'visibility:hidden;'}">📎</span>
+                    </div>
+                `;
+
+                emailItem.addEventListener('click', () => _selectEmail(actualIndex));
+                container.appendChild(emailItem);
             });
 
             currentPage++;
@@ -908,7 +963,7 @@ Modals.EmailGallery = (() => {
             selectedEmailIndex = index;
             
             // Update visual selection using dataset.index to match actual emailData index
-            document.querySelectorAll('.email-list-item, .email-table-row').forEach((item) => {
+            document.querySelectorAll('.email-list-item').forEach((item) => {
                 const itemIndex = parseInt(item.dataset.index, 10);
                 item.classList.toggle('selected', itemIndex === index);
             });
@@ -932,10 +987,10 @@ Modals.EmailGallery = (() => {
             
             // Show buttons
             if (DOM.emailAskAIBtn) {
-                DOM.emailAskAIBtn.style.display = 'flex';
+                DOM.emailAskAIBtn.style.display = 'inline-flex';
             }
             if (DOM.emailDeleteBtn) {
-                DOM.emailDeleteBtn.style.display = 'flex';
+                DOM.emailDeleteBtn.style.display = 'inline-flex';
             }
             
             // Update metadata
@@ -945,19 +1000,34 @@ Modals.EmailGallery = (() => {
             if (DOM.emailGalleryMetadataFrom) {
                 DOM.emailGalleryMetadataFrom.textContent = email.sender || 'Unknown Sender';
             }
-            if (DOM.emailGalleryMetadataDate) {
-                DOM.emailGalleryMetadataDate.textContent = email.date || 'No Date';
+            if (DOM.emailGalleryMetadataTo) {
+                DOM.emailGalleryMetadataTo.textContent = email.recipient && email.recipient.trim() ? email.recipient : '—';
             }
-            if (DOM.emailGalleryMetadataFolder) {
-                DOM.emailGalleryMetadataFolder.textContent = email.folder || 'Unknown Folder';
+            if (DOM.emailGalleryMetadataDate) {
+                DOM.emailGalleryMetadataDate.textContent = email.rawDate ? formatDetailReceived(email.rawDate) : (email.date || '');
+            }
+            if (DOM.emailGalleryFolderCrumb) {
+                DOM.emailGalleryFolderCrumb.textContent = email.folder || 'Inbox';
+            }
+            if (DOM.emailGalleryDetailAvatarSm) {
+                DOM.emailGalleryDetailAvatarSm.textContent = initialsFromSender(email.sender);
             }
             
             // Show loading state
             if (DOM.emailGalleryIframe) {
                 DOM.emailGalleryIframe.style.display = 'none';
             }
+
+            const hasAttachments = email.attachments && email.attachments.length > 0;
+            if (DOM.emailGalleryAttachmentsSection) {
+                DOM.emailGalleryAttachmentsSection.style.display = hasAttachments ? '' : 'none';
+            }
             if (DOM.emailGalleryAttachmentsGrid) {
-                DOM.emailGalleryAttachmentsGrid.innerHTML = '<div class="email-attachment-loading">Loading attachments...</div>';
+                if (hasAttachments) {
+                    DOM.emailGalleryAttachmentsGrid.innerHTML = '<div class="email-attachment-loading">Loading attachments...</div>';
+                } else {
+                    DOM.emailGalleryAttachmentsGrid.innerHTML = '';
+                }
             }
             
             // Load email HTML into iframe
@@ -1008,13 +1078,9 @@ ${textContent}
                 }
             }
             
-            // Fetch and display attachments
-            if (email.emailId && email.attachments && email.attachments.length > 0) {
+            // Fetch and display attachments (panel only visible when email has attachments)
+            if (email.emailId && hasAttachments) {
                 await _loadAttachments(email.emailId, email.attachments);
-            } else {
-                if (DOM.emailGalleryAttachmentsGrid) {
-                    DOM.emailGalleryAttachmentsGrid.innerHTML = '<div class="email-attachment-empty">No attachments</div>';
-                }
             }
         }
 
@@ -1050,6 +1116,11 @@ ${textContent}
                 const attachmentElement = _createAttachmentElement(info, attachmentIds[index]);
                 DOM.emailGalleryAttachmentsGrid.appendChild(attachmentElement);
             });
+
+            if (DOM.emailGalleryAttachmentsSection && DOM.emailGalleryAttachmentsGrid) {
+                const hasItems = DOM.emailGalleryAttachmentsGrid.children.length > 0;
+                DOM.emailGalleryAttachmentsSection.style.display = hasItems ? '' : 'none';
+            }
         }
         
         function _createAttachmentElement(attachmentInfo, attachmentId) {
@@ -1163,6 +1234,9 @@ ${textContent}
             if (DOM.emailGalleryAttachmentsGrid) {
                 DOM.emailGalleryAttachmentsGrid.innerHTML = '';
             }
+            if (DOM.emailGalleryAttachmentsSection) {
+                DOM.emailGalleryAttachmentsSection.style.display = 'none';
+            }
             if (DOM.emailGalleryMetadataSubject) {
                 DOM.emailGalleryMetadataSubject.textContent = '';
             }
@@ -1172,8 +1246,14 @@ ${textContent}
             if (DOM.emailGalleryMetadataDate) {
                 DOM.emailGalleryMetadataDate.textContent = '';
             }
-            if (DOM.emailGalleryMetadataFolder) {
-                DOM.emailGalleryMetadataFolder.textContent = '';
+            if (DOM.emailGalleryFolderCrumb) {
+                DOM.emailGalleryFolderCrumb.textContent = '';
+            }
+            if (DOM.emailGalleryMetadataTo) {
+                DOM.emailGalleryMetadataTo.textContent = '';
+            }
+            if (DOM.emailGalleryDetailAvatarSm) {
+                DOM.emailGalleryDetailAvatarSm.textContent = '';
             }
             
             // Hide buttons
@@ -1226,7 +1306,7 @@ ${textContent}
                 _clearEmailContent();
 
                 // Remove active state from all items
-                const items = document.querySelectorAll('.email-list-item, .email-table-row');
+                const items = document.querySelectorAll('.email-list-item');
                 items.forEach(item => item.classList.remove('selected'));
 
                 // Reload email list
@@ -1279,7 +1359,7 @@ ${textContent}
         }
 
         function _scrollToSelectedEmail() {
-            const selectedItem = document.querySelector('.email-list-item.selected, .email-table-row.selected');
+            const selectedItem = document.querySelector('.email-list-item.selected');
             if (selectedItem) {
                 selectedItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
@@ -1334,18 +1414,8 @@ ${textContent}
                 const searchResponse = await fetch('/emails/search?' + params.toString());
                 const data = await parseEmailSearchFetchResponse(searchResponse);
                 const rows = coerceEmailSearchResponse(data);
-                emailData = rows.map(email => ({
-                    id: email.id,
-                    subject: email.subject || 'No Subject',
-                    sender: email.from_address || 'Unknown Sender',
-                    recipient: email.to_addresses || 'Unknown Recipient',
-                    date: email.date ? formatDateAustralian(email.date) : 'No Date',
-                    folder: email.folder || 'Unknown Folder',
-                    body: email.snippet || 'No content',
-                    preview: email.snippet || 'No preview',
-                    attachments: (email.attachment_ids || []).map(id => `/attachments/${id}`),
-                    emailId: email.id // Store email ID for fetching full content
-                }));
+                emailData = rows.map(mapSearchRowToEmail);
+                _sortEmailDataInPlace();
                 
                 _renderEmailList();
                 _showInstructions();

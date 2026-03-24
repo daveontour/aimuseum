@@ -1741,7 +1741,7 @@
                                 <div class="email-gallery-filter-row-full">
                                     <input type="text" id="email-gallery-to-from" placeholder="To or From..." class="email-gallery-input">
                                 </div> 
-                                <div class="email-gallery-filter-row">
+                                <div class="email-gallery-filter-row email-gallery-filter-year-month-row">
                                     <select id="email-gallery-year-filter" class="email-gallery-select"></select>                                         
                                     <select id="email-gallery-month-filter" class="email-gallery-select"></select>
                                     <label class="email-gallery-checkbox-label">
@@ -1750,19 +1750,29 @@
                                     </label>
                                 </div>
                                 <div class="email-gallery-button-row">
-                                    <button id="email-gallery-search-btn" class="modal-btn modal-btn-primary">
-                                        <i class="fas fa-search"></i>Search
-                                    </button>
-                                    <button id="email-gallery-clear-btn" class="modal-btn modal-btn-secondary">
-                                        <i class="fas fa-times"></i>Clear
-                                    </button>
-                                    <button id="email-gallery-view-toggle" class="modal-btn modal-btn-secondary" title="Toggle view">
-                                        <i class="fas fa-th"></i>
-                                    </button>
+                                    <div class="email-gallery-actions-start">
+                                        <button id="email-gallery-search-btn" class="modal-btn modal-btn-primary">
+                                            <i class="fas fa-search"></i>Search
+                                        </button>
+                                        <button id="email-gallery-clear-btn" class="modal-btn modal-btn-secondary">
+                                            <i class="fas fa-times"></i>Clear
+                                        </button>
+                                    </div>
+                                    <div class="email-gallery-sort-inline">
+                                        <label class="email-gallery-sort-label" for="email-gallery-sort">Sort</label>
+                                        <select id="email-gallery-sort" class="email-gallery-select email-gallery-sort-select" aria-label="Sort emails">
+                                            <option value="date-desc">Newest first</option>
+                                            <option value="date-asc">Oldest first</option>
+                                            <option value="sender-asc">Sender A–Z</option>
+                                            <option value="subject-asc">Subject A–Z</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                        <div class="email-gallery-list" id="email-gallery-list"></div>
+                        <div class="email-gallery-list-outer">
+                            <div class="email-gallery-list" id="email-gallery-list"></div>
+                        </div>
                     </div>
                     <!-- Resizable Divider -->
                     <div class="email-gallery-divider" id="email-gallery-divider"></div>
@@ -1772,40 +1782,30 @@
                             Select an email from the list on the left to view its content
                         </div>
                         <div id="email-gallery-email-content" class="email-gallery-email-content" style="display: none;">
-                            <div class="email-gallery-metadata-section" style="padding-top: 50px;">
-                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
-                                    <div style="flex: 1;">
-                                        <div class="email-gallery-metadata-row">
-                                            <span class="email-gallery-metadata-label">Subject:</span>
-                                            <span class="email-gallery-metadata-value" id="email-gallery-metadata-subject"></span>
-                                        </div>
-                                        <div class="email-gallery-metadata-row">
-                                            <span class="email-gallery-metadata-label">From:</span>
-                                            <span class="email-gallery-metadata-value" id="email-gallery-metadata-from"></span>
-                                        </div>
-                                        <div class="email-gallery-metadata-row">
-                                            <span class="email-gallery-metadata-label">Date:</span>
-                                            <span class="email-gallery-metadata-value" id="email-gallery-metadata-date"></span>
-                                        </div>
-                                        <div class="email-gallery-metadata-row">
-                                            <span class="email-gallery-metadata-label">Folder:</span>
-                                            <span class="email-gallery-metadata-value" id="email-gallery-metadata-folder"></span>
-                                        </div>
+                            <div class="email-gallery-detail-meta-block">
+                                <div class="email-gallery-detail-meta-inner">
+                                    <div class="email-gallery-detail-avatar email-gallery-detail-avatar-sm" id="email-gallery-detail-avatar-sm" aria-hidden="true">?</div>
+                                    <div class="email-gallery-detail-meta-fields">
+                                        <div class="email-gallery-detail-meta-line"><span class="email-gallery-meta-k">From</span> <span id="email-gallery-metadata-from"></span></div>
+                                        <div class="email-gallery-detail-meta-line"><span class="email-gallery-meta-k">To</span> <span id="email-gallery-metadata-to"></span></div>
+                                        <div class="email-gallery-detail-meta-line"><span class="email-gallery-meta-k">Folder</span> <span id="email-gallery-folder-crumb"></span></div>
                                     </div>
-                                    <div style="display: flex; gap: 8px; align-items: center;">
-                                        <button id="email-ask-ai-btn" style="display: none; background-color: #9B59B6; color: white; border: none; cursor: pointer; font-size: 0.9em; padding: 8px 16px; border-radius: 8px; transition: background-color 0.2s; font-weight: 500;" title="Ask the AI" onmouseover="this.style.backgroundColor='#7D3C98'" onmouseout="this.style.backgroundColor='#9B59B6'">
-                                            <i class="fas fa-robot" style="margin-right: 6px;"></i>Ask the AI
+                                    <div class="email-gallery-detail-meta-aside">
+                                        <span id="email-gallery-metadata-date" class="email-gallery-detail-date-full"></span>
+                                    </div>
+                                    <div class="email-gallery-detail-meta-actions">
+                                        <button type="button" id="email-ask-ai-btn" class="email-detail-primary-btn email-detail-primary-btn-compact" style="display: none;" title="Ask the AI">
+                                            <i class="fas fa-robot"></i> Ask the AI
                                         </button>
-                                        <button id="email-delete-btn" style="display: none; background: none; border: none; color: #54656f; cursor: pointer; font-size: 1.2em; padding: 8px; border-radius: 50%; transition: background-color 0.2s;" title="Delete email" onmouseover="this.style.backgroundColor='#e4e6eb'" onmouseout="this.style.backgroundColor='transparent'">
-                                            <i class="fas fa-trash-alt"></i>
-                                        </button>
+                                        <button type="button" id="email-delete-btn" class="email-detail-tool-btn email-detail-tool-danger email-detail-tool-btn-meta" style="display: none;" title="Delete email"><i class="fas fa-trash-alt"></i></button>
                                     </div>
                                 </div>
+                                <h2 class="email-gallery-detail-subject" id="email-gallery-metadata-subject"></h2>
                             </div>
                             <div class="email-gallery-iframe-container">
                                 <iframe id="email-gallery-iframe" class="email-gallery-iframe"></iframe>
                             </div>
-                            <div class="email-gallery-attachments-section">
+                            <div class="email-gallery-attachments-section" id="email-gallery-attachments-section" style="display: none;">
                                 <h3 class="email-gallery-attachments-title">Attachments</h3>
                                 <div class="email-gallery-attachments-grid" id="email-gallery-attachments-grid"></div>
                             </div>
