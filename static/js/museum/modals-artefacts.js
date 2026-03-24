@@ -335,8 +335,8 @@ Modals.Artefacts = (() => {
                 lab.textContent = item.title || 'File';
                 doc.appendChild(icon);
                 doc.appendChild(lab);
-                doc.addEventListener('click', () => {
-                    window.alert('Preview is not available for this file type.');
+                doc.addEventListener('click', async () => {
+                    await AppDialogs.showAppAlert('Preview is not available for this file type.');
                 });
                 wrap.appendChild(doc);
             }
@@ -396,7 +396,7 @@ Modals.Artefacts = (() => {
     async function _handleSave() {
         const name = _getField('artefact-detail-name').trim();
         if (!name) {
-            alert('Please enter an artefact name.');
+            await AppDialogs.showAppAlert('Please enter an artefact name.');
             return;
         }
         const payload = {
@@ -441,7 +441,7 @@ Modals.Artefacts = (() => {
             _loadArtefacts();
         } catch (err) {
             console.error('Error saving artefact:', err);
-            alert(`Error saving artefact: ${err.message}`);
+            await AppDialogs.showAppAlert('Error', `Error saving artefact: ${err.message}`);
         }
     }
 
@@ -458,7 +458,7 @@ Modals.Artefacts = (() => {
                     _loadArtefacts();
                 } catch (err) {
                     console.error('Error deleting artefact:', err);
-                    alert(`Error deleting artefact: ${err.message}`);
+                    await AppDialogs.showAppAlert('Error', `Error deleting artefact: ${err.message}`);
                 }
             }
         );
@@ -488,7 +488,7 @@ Modals.Artefacts = (() => {
             _loadArtefacts();
         } catch (err) {
             console.error('Error uploading file:', err);
-            alert(`Error uploading file: ${err.message}`);
+            await AppDialogs.showAppAlert('Error', `Error uploading file: ${err.message}`);
         }
     }
 
@@ -510,7 +510,7 @@ Modals.Artefacts = (() => {
             _loadArtefacts();
         } catch (err) {
             console.error('Error linking photo:', err);
-            alert(`Error linking photo: ${err.message}`);
+            await AppDialogs.showAppAlert('Error', `Error linking photo: ${err.message}`);
         }
     }
 
@@ -530,7 +530,7 @@ Modals.Artefacts = (() => {
             _loadArtefacts();
         } catch (err) {
             console.error('Error removing photo:', err);
-            alert(`Error removing photo: ${err.message}`);
+            await AppDialogs.showAppAlert('Error', `Error removing photo: ${err.message}`);
         }
     }
 
@@ -585,14 +585,14 @@ Modals.Artefacts = (() => {
             const resp = await fetch('/artefacts/import', { method: 'POST', body: formData });
             const result = await resp.json();
             if (!resp.ok) {
-                alert(`Import failed: ${result.detail || 'Unknown error'}`);
+                await AppDialogs.showAppAlert('Import failed', `${result.detail || 'Unknown error'}`);
             } else {
-                alert(result.message);
+                await AppDialogs.showAppAlert('Import', result.message);
                 _loadArtefacts();
             }
         } catch (err) {
             console.error('Import error:', err);
-            alert(`Import error: ${err.message}`);
+            await AppDialogs.showAppAlert('Import error', `${err.message}`);
         } finally {
             if (importBtn) {
                 importBtn.disabled = false;

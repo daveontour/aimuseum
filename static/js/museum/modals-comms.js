@@ -1293,8 +1293,11 @@ Modals.SMSMessages = (() => {
         async function deleteConversation() {
             if (!currentSession) return;
 
-            // Show confirmation dialog
-            const confirmed = confirm(`Are you sure you want to delete the conversation "${currentSession}"?\n\nThis action cannot be undone.`);
+            const confirmed = await AppDialogs.showAppConfirm(
+                'Delete conversation',
+                `Are you sure you want to delete the conversation "${currentSession}"?\n\nThis action cannot be undone.`,
+                { danger: true }
+            );
             if (!confirmed) {
                 return;
             }
@@ -1339,10 +1342,10 @@ Modals.SMSMessages = (() => {
                 // Reload chat sessions list
                 await loadChatSessions();
                 
-                alert(`Successfully deleted ${result.deleted_count} message(s) from the conversation.`);
+                await AppDialogs.showAppAlert('Success', `Successfully deleted ${result.deleted_count} message(s) from the conversation.`);
             } catch (error) {
                 console.error('Error deleting conversation:', error);
-                alert(`Error deleting conversation: ${error.message}`);
+                await AppDialogs.showAppAlert('Error', `Error deleting conversation: ${error.message}`);
             }
         }
 
@@ -1504,7 +1507,7 @@ Modals.SMSMessages = (() => {
             }
 
             if (askAISubmitBtn) {
-                askAISubmitBtn.addEventListener('click', () => {
+                askAISubmitBtn.addEventListener('click', async () => {
                     const selectedOption = document.querySelector('input[name="sms-ask-ai-option"]:checked')?.value;
                     const otherText = askAIOtherInput?.value || '';
 
@@ -1516,7 +1519,7 @@ Modals.SMSMessages = (() => {
                     // Handle "Summarise the Conversation" option
                     if (selectedOption === 'summarise') {
                         if (!currentSession) {
-                            alert('No conversation selected');
+                            await AppDialogs.showAppAlert('No conversation selected');
                             return;
                         }
 
@@ -1526,14 +1529,14 @@ Modals.SMSMessages = (() => {
                             Modals.ConversationSummary.open(currentSession);
                         } catch (error) {
                             console.error('Error opening conversation summary:', error);
-                            alert('Failed to start conversation summarization. Please try again.');
+                            await AppDialogs.showAppAlert('Failed to start conversation summarization. Please try again.');
                         }
                     } else if (selectedOption === 'imaginary') {
                         // TODO: Implement imaginary conversation functionality
-                        alert('Imaginary conversation feature coming soon!');
+                        await AppDialogs.showAppAlert('Imaginary conversation feature coming soon!');
                     } else if (selectedOption === 'other') {
                         // TODO: Implement other AI functionality
-                        alert('Other AI features coming soon!');
+                        await AppDialogs.showAppAlert('Other AI features coming soon!');
                     }
                 });
             }
@@ -1672,7 +1675,7 @@ Modals.SMSMessages = (() => {
                 
                 if (!chatSession) {
                     console.error('Message metadata does not contain chat_session');
-                    alert('Unable to open conversation: Message has no chat session');
+                    await AppDialogs.showAppAlert('Unable to open conversation: Message has no chat session');
                     return;
                 }
                 
@@ -1705,11 +1708,11 @@ Modals.SMSMessages = (() => {
                     console.warn(`Conversation with chat_session "${chatSession}" not found`);
                     // Still render sessions even if the specific one isn't found
                     renderChatSessions();
-                    alert(`Conversation "${chatSession}" not found in the list`);
+                    await AppDialogs.showAppAlert(`Conversation "${chatSession}" not found in the list`);
                 }
             } catch (error) {
                 console.error('Error opening conversation:', error);
-                alert('Failed to open conversation. Please try again.');
+                await AppDialogs.showAppAlert('Failed to open conversation. Please try again.');
                 // Still render sessions on error
                 if (chatSessions.length === 0) {
                     await loadChatSessions();

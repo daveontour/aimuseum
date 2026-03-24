@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image Grid Viewer</title>
     <link rel="stylesheet" href="/static/css/images_grid.css">
+    <link rel="stylesheet" href="/static/css/app-dialogs.css">
 </head>
 <body>
     <div class="container">
@@ -91,7 +92,28 @@
             <div id="error" class="error" style="display: none;"></div>
         </div>
     </div>
+
+    <div id="confirmation-modal" class="modal confirmation-modal app-dialog-modal" style="display: none;">
+        <div class="modal-content confirmation-modal-content" onclick="event.stopPropagation()">
+            <div class="confirmation-modal-header">
+                <h2 id="confirmation-modal-title"></h2>
+                <button type="button" class="modal-close-btn" id="close-confirmation-modal">&times;</button>
+            </div>
+            <div class="confirmation-modal-body">
+                <p id="confirmation-modal-text" class="confirmation-modal-text"></p>
+                <div id="confirmation-modal-prompt-wrap" class="confirmation-modal-prompt-wrap" style="display: none;">
+                    <label id="confirmation-modal-prompt-label" class="confirmation-modal-prompt-label" for="confirmation-modal-prompt-input"></label>
+                    <input type="text" id="confirmation-modal-prompt-input" class="confirmation-modal-prompt-input" autocomplete="off" />
+                </div>
+            </div>
+            <div class="confirmation-modal-buttons">
+                <button type="button" id="confirmation-modal-confirm" class="modal-btn modal-btn-primary">OK</button>
+                <button type="button" id="confirmation-modal-cancel" class="modal-btn modal-btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
     
+    <script src="/static/js/museum/app-dialogs.js"></script>
     <script src="/static/js/images_grid.js"></script>
 </body>
 </html>

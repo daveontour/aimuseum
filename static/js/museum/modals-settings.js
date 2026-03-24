@@ -249,7 +249,12 @@ Modals.ReferenceDocuments = (() => {
         }
 
         async function deleteDocument(documentId) {
-            if (!confirm('Are you sure you want to delete this document?')) {
+            const ok = await AppDialogs.showAppConfirm(
+                'Delete document',
+                'Are you sure you want to delete this document?',
+                { danger: true }
+            );
+            if (!ok) {
                 return;
             }
             
@@ -267,7 +272,7 @@ Modals.ReferenceDocuments = (() => {
                 Modals.ReferenceDocumentsNotification.reset();
             } catch (error) {
                 console.error("Failed to delete document:", error);
-                alert('Failed to delete document: ' + error.message);
+                await AppDialogs.showAppAlert('Error', 'Failed to delete document: ' + error.message);
             }
         }
 
@@ -329,7 +334,7 @@ Modals.ReferenceDocuments = (() => {
                     const formData = new FormData();
                     const fileInput = document.getElementById('reference-documents-upload-file');
                     if (!fileInput.files[0]) {
-                        alert('Please select a file');
+                        await AppDialogs.showAppAlert('Please select a file');
                         return;
                     }
                     
@@ -360,7 +365,7 @@ Modals.ReferenceDocuments = (() => {
                         Modals.ReferenceDocumentsNotification.reset();
                     } catch (error) {
                         console.error("Failed to upload document:", error);
-                        alert('Failed to upload document: ' + error.message);
+                        await AppDialogs.showAppAlert('Error', 'Failed to upload document: ' + error.message);
                     }
                 });
             }
@@ -412,7 +417,7 @@ Modals.ReferenceDocuments = (() => {
                         Modals.ReferenceDocumentsNotification.reset();
                     } catch (error) {
                         console.error("Failed to update document:", error);
-                        alert('Failed to update document: ' + error.message);
+                        await AppDialogs.showAppAlert('Error', 'Failed to update document: ' + error.message);
                     }
                 });
             }
@@ -784,23 +789,34 @@ Modals.ConversationManager = (() => {
         }
 
         async function editConversationTitle(conversationId, currentTitle) {
-            const newTitle = prompt('Enter new conversation title:', currentTitle);
-            if (newTitle && newTitle.trim() && newTitle !== currentTitle) {
-                try {
-                    await updateConversationTitle(conversationId, newTitle.trim());
-                    showConversationList(); // Refresh list
-                    if (currentConversationId === conversationId) {
-                        currentConversationTitle = newTitle.trim();
-                        updateConversationIndicator();
-                    }
-                } catch (error) {
-                    alert(`Error updating title: ${error.message}`);
+            const newTitle = await AppDialogs.showAppPrompt(
+                'Rename conversation',
+                'Enter a new title for this conversation.',
+                currentTitle != null ? String(currentTitle) : '',
+                { promptLabel: 'Title' }
+            );
+            if (newTitle === null) return;
+            const trimmed = newTitle.trim();
+            if (!trimmed || trimmed === currentTitle) return;
+            try {
+                await updateConversationTitle(conversationId, trimmed);
+                showConversationList(); // Refresh list
+                if (currentConversationId === conversationId) {
+                    currentConversationTitle = trimmed;
+                    updateConversationIndicator();
                 }
+            } catch (error) {
+                await AppDialogs.showAppAlert('Error', `Error updating title: ${error.message}`);
             }
         }
 
         async function deleteConversationWithConfirm(conversationId) {
-            if (!confirm('Are you sure you want to delete this conversation? This action cannot be undone.')) {
+            const ok = await AppDialogs.showAppConfirm(
+                'Delete conversation',
+                'Are you sure you want to delete this conversation? This action cannot be undone.',
+                { danger: true }
+            );
+            if (!ok) {
                 return;
             }
 
@@ -815,7 +831,7 @@ Modals.ConversationManager = (() => {
                 }
                 showConversationList(); // Refresh list
             } catch (error) {
-                alert(`Error deleting conversation: ${error.message}`);
+                await AppDialogs.showAppAlert('Error', `Error deleting conversation: ${error.message}`);
             }
         }
 
@@ -857,13 +873,13 @@ Modals.ConversationManager = (() => {
                 UI.scrollToBottom();
             } catch (error) {
                 console.error('Error resuming conversation:', error);
-                alert(`Error resuming conversation: ${error.message}`);
+                await AppDialogs.showAppAlert('Error', `Error resuming conversation: ${error.message}`);
             }
         }
 
         async function createNewConversation() {
             if (!DOM.newConversationTitleInput || !DOM.newConversationVoiceSelect) {
-                alert('New conversation form elements not found');
+                await AppDialogs.showAppAlert('New conversation form elements not found');
                 return;
             }
 
@@ -871,7 +887,7 @@ Modals.ConversationManager = (() => {
             const voice = DOM.newConversationVoiceSelect.value;
 
             if (!title) {
-                alert('Please enter a conversation title');
+                await AppDialogs.showAppAlert('Please enter a conversation title');
                 return;
             }
 
@@ -900,7 +916,7 @@ Modals.ConversationManager = (() => {
                 // Refresh conversation list
                 showConversationList();
             } catch (error) {
-                alert(`Error creating conversation: ${error.message}`);
+                await AppDialogs.showAppAlert('Error', `Error creating conversation: ${error.message}`);
             }
         }
 
@@ -1066,6 +1082,9 @@ Modals.SubjectConfiguration = (() => {
         let currentSubjectName = null;
         let currentGender = null;
         let configurationLoaded = false;
+        /** Persisted chat + core instructions (no UI tab; re-sent unchanged on Subject Configuration save). */
+        let loadedSystemInstructions = '';
+        let loadedCoreSystemInstructions = null;
 
         async function loadConfiguration() {
             try {
@@ -1087,33 +1106,6 @@ Modals.SubjectConfiguration = (() => {
                 console.error('Error loading subject configuration:', error);
                 configurationLoaded = false;
                 return null;
-            }
-        }
-
-        function switchTab(tabName) {
-            // Hide all tab contents
-            const tabContents = document.querySelectorAll('.subject-config-tab-content');
-            tabContents.forEach(content => {
-                content.style.display = 'none';
-            });
-
-            // Remove active class from all tabs
-            const tabs = document.querySelectorAll('.subject-config-tab');
-            tabs.forEach(tab => {
-                tab.classList.remove('active');
-            });
-
-            // Show selected tab content (use flex for system-instructions tab so textarea fills space)
-            const selectedContent = document.getElementById(`${tabName}-tab-content`);
-            if (selectedContent) {
-                const parent = selectedContent.closest('#system-instructions-tab');
-                selectedContent.style.display = parent ? 'flex' : 'block';
-            }
-
-            // Add active class to selected tab
-            const selectedTab = document.querySelector(`.subject-config-tab[data-tab="${tabName}"]`);
-            if (selectedTab) {
-                selectedTab.classList.add('active');
             }
         }
 
@@ -1252,12 +1244,9 @@ Modals.SubjectConfiguration = (() => {
             if (DOM.instagramHandleInput) DOM.instagramHandleInput.value = config.instagram_handle || '';
             if (DOM.writingStyleDisplay) _renderWritingStyleMarkdown(config.writing_style_ai || '');
             if (DOM.psychologicalProfileDisplay) _renderPsychologicalProfileMarkdown(config.psychological_profile_ai || '');
-            if (DOM.systemInstructionsTextarea) DOM.systemInstructionsTextarea.value = config.system_instructions || '';
-            if (DOM.coreSystemInstructionsTextarea) {
-                const coreVal = config.core_system_instructions || '';
-                DOM.coreSystemInstructionsTextarea.value = coreVal;
-                loadedCoreSystemInstructions = coreVal;
-            }
+            loadedSystemInstructions = config.system_instructions || '';
+            const coreVal = config.core_system_instructions || '';
+            loadedCoreSystemInstructions = coreVal;
         }
 
         async function loadAndPopulateForm() {
@@ -1274,7 +1263,6 @@ Modals.SubjectConfiguration = (() => {
                 populateFormFromConfig({});
                 await loadDefaultInstructions();
             }
-            switchTab('system-instructions');
         }
 
         async function checkAndShow() {
@@ -1290,62 +1278,46 @@ Modals.SubjectConfiguration = (() => {
         }
 
         async function loadDefaultInstructions() {
-            // Try to load from API first (in case initialization already happened)
             try {
                 const config = await loadConfiguration();
-                    if (config) {
-                        if (DOM.systemInstructionsTextarea) {
-                            DOM.systemInstructionsTextarea.value = config.system_instructions || '';
-                        }
-                        if (DOM.coreSystemInstructionsTextarea) {
-                            const coreVal = config.core_system_instructions || '';
-                            DOM.coreSystemInstructionsTextarea.value = coreVal;
-                            loadedCoreSystemInstructions = coreVal;
-                        }
-                        if (DOM.writingStyleDisplay) {
-                            _renderWritingStyleMarkdown(config.writing_style_ai || '');
-                        }
-                        if (DOM.psychologicalProfileDisplay) {
-                            _renderPsychologicalProfileMarkdown(config.psychological_profile_ai || '');
-                        }
-                        return;
+                if (config) {
+                    loadedSystemInstructions = config.system_instructions || '';
+                    const coreVal = config.core_system_instructions || '';
+                    loadedCoreSystemInstructions = coreVal;
+                    if (DOM.writingStyleDisplay) {
+                        _renderWritingStyleMarkdown(config.writing_style_ai || '');
                     }
+                    if (DOM.psychologicalProfileDisplay) {
+                        _renderPsychologicalProfileMarkdown(config.psychological_profile_ai || '');
+                    }
+                    return;
+                }
             } catch (err) {
                 console.debug('Could not load configuration from API:', err);
             }
 
-            // Fallback to loading from files
-            if (DOM.systemInstructionsTextarea && !DOM.systemInstructionsTextarea.value) {
+            if (!(loadedSystemInstructions || '').trim()) {
                 try {
                     const response = await fetch('/static/data/system_instructions_chat.txt');
                     if (response.ok) {
-                        const text = await response.text();
-                        if (DOM.systemInstructionsTextarea) {
-                            DOM.systemInstructionsTextarea.value = text;
-                        }
+                        loadedSystemInstructions = await response.text();
                     }
                 } catch (err) {
                     console.debug('Could not load default system instructions:', err);
                 }
             }
 
-            if (DOM.coreSystemInstructionsTextarea && !DOM.coreSystemInstructionsTextarea.value) {
+            if (loadedCoreSystemInstructions == null || loadedCoreSystemInstructions === '') {
                 try {
                     const response = await fetch('/static/data/system_instructions_core.txt');
                     if (response.ok) {
-                        const text = await response.text();
-                        if (DOM.coreSystemInstructionsTextarea) {
-                            DOM.coreSystemInstructionsTextarea.value = text;
-                            loadedCoreSystemInstructions = text;
-                        }
+                        loadedCoreSystemInstructions = await response.text();
                     }
                 } catch (err) {
                     console.debug('Could not load default core system instructions:', err);
                 }
             }
         }
-
-        let loadedCoreSystemInstructions = null;
 
         async function handleSave() {
             const subjectName = DOM.subjectNameInput ? DOM.subjectNameInput.value.trim() : '';
@@ -1356,16 +1328,16 @@ Modals.SubjectConfiguration = (() => {
             const phoneNumbers = DOM.phoneNumbersInput ? DOM.phoneNumbersInput.value.trim() : '';
             const whatsappHandle = DOM.whatsappHandleInput ? DOM.whatsappHandleInput.value.trim() : '';
             const instagramHandle = DOM.instagramHandleInput ? DOM.instagramHandleInput.value.trim() : '';
-            const systemInstructions = DOM.systemInstructionsTextarea ? DOM.systemInstructionsTextarea.value.trim() : '';
-            const coreSystemInstructions = DOM.coreSystemInstructionsTextarea ? DOM.coreSystemInstructionsTextarea.value : '';
+            const systemInstructions = (loadedSystemInstructions || '').trim();
+            const coreSystemInstructions = loadedCoreSystemInstructions != null ? loadedCoreSystemInstructions : '';
 
             if (!subjectName) {
-                alert('Please enter a subject name');
+                await AppDialogs.showAppAlert('Please enter a subject name');
                 return;
             }
 
             if (!systemInstructions) {
-                alert('Please enter system instructions');
+                await AppDialogs.showAppAlert('Please enter system instructions');
                 return;
             }
 
@@ -1373,16 +1345,20 @@ Modals.SubjectConfiguration = (() => {
                 coreSystemInstructions !== loadedCoreSystemInstructions;
 
             if (coreInstructionsChanged) {
-                const firstConfirm = confirm(
+                const firstConfirm = await AppDialogs.showAppConfirm(
+                    'Core system instructions',
                     'WARNING: You are about to change the Core System Instructions.\n\n' +
                     'Incorrect changes can destroy chat functionality. The system may stop working correctly.\n\n' +
-                    'Are you sure you want to proceed?'
+                    'Are you sure you want to proceed?',
+                    { danger: true }
                 );
                 if (!firstConfirm) return;
 
-                const secondConfirm = confirm(
+                const secondConfirm = await AppDialogs.showAppConfirm(
+                    'Final confirmation',
                     'Final confirmation: This will overwrite the Core System Instructions.\n\n' +
-                    'Are you absolutely sure you want to save these changes?'
+                    'Are you absolutely sure you want to save these changes?',
+                    { danger: true }
                 );
                 if (!secondConfirm) return;
             }
@@ -1390,44 +1366,23 @@ Modals.SubjectConfiguration = (() => {
             try {
                 await saveConfiguration(subjectName, systemInstructions, coreSystemInstructions, gender, familyName, otherNames, emailAddresses, phoneNumbers, whatsappHandle, instagramHandle);
 
-                alert('Subject configuration saved successfully!');
+                await AppDialogs.showAppAlert('Success', 'Subject configuration saved successfully!');
 
                 window.location.reload();
             } catch (error) {
-                alert(`Error saving configuration: ${error.message}`);
+                await AppDialogs.showAppAlert('Error', `Error saving configuration: ${error.message}`);
             }
         }
 
         function init() {
             // Set up event listeners
             if (DOM.saveSubjectConfigBtn) {
-                DOM.saveSubjectConfigBtn.addEventListener('click', handleSave);
+                DOM.saveSubjectConfigBtn.addEventListener('click', () => { void handleSave(); });
             }
 
             if (DOM.cancelSubjectConfigBtn) {
                 DOM.cancelSubjectConfigBtn.addEventListener('click', () => {
                     loadAndPopulateForm();
-                });
-            }
-
-            if (DOM.saveSystemInstructionsBtn) {
-                DOM.saveSystemInstructionsBtn.addEventListener('click', handleSave);
-            }
-            if (DOM.cancelSystemInstructionsBtn) {
-                DOM.cancelSystemInstructionsBtn.addEventListener('click', () => {
-                    loadAndPopulateForm();
-                });
-            }
-
-            // Tab switching logic
-            if (DOM.subjectConfigTabs && DOM.subjectConfigTabs.length > 0) {
-                DOM.subjectConfigTabs.forEach(tab => {
-                    tab.addEventListener('click', () => {
-                        const tabName = tab.getAttribute('data-tab');
-                        if (tabName) {
-                            switchTab(tabName);
-                        }
-                    });
                 });
             }
 
@@ -1753,8 +1708,14 @@ Modals.ManageKeys = (() => {
     }
 
     async function _deleteVisitorKeyHintRow(id) {
-        if (!window.confirm('Remove this visitor key seat entirely? The hint and key will be deleted. This cannot be undone.')) return;
-        if (!window.confirm('Final confirmation: delete this visitor key?')) return;
+        const ok1 = await AppDialogs.showAppConfirm(
+            'Remove visitor key',
+            'Remove this visitor key seat entirely? The hint and key will be deleted. This cannot be undone.',
+            { danger: true }
+        );
+        if (!ok1) return;
+        const ok2 = await AppDialogs.showAppConfirm('Final confirmation', 'Final confirmation: delete this visitor key?', { danger: true });
+        if (!ok2) return;
         try {
             const resp = await fetch(`/reference-documents/visitor-key-hints/${id}`, {
                 method: 'DELETE',
@@ -1930,10 +1891,20 @@ Modals.ManageKeys = (() => {
     }
 
     async function _deleteAllVisitorDocKeys() {
-        if (!window.confirm('Delete ALL visitor document keys?\n\nThe owner master key will stay. Visitor keys and their unlock hints will be removed. This cannot be undone.')) {
+        const ok1 = await AppDialogs.showAppConfirm(
+            'Delete all visitor keys',
+            'Delete ALL visitor document keys?\n\nThe owner master key will stay. Visitor keys and their unlock hints will be removed. This cannot be undone.',
+            { danger: true }
+        );
+        if (!ok1) {
             return;
         }
-        if (!window.confirm('Final confirmation: remove every visitor keyring seat now?')) {
+        const ok2 = await AppDialogs.showAppConfirm(
+            'Final confirmation',
+            'Final confirmation: remove every visitor keyring seat now?',
+            { danger: true }
+        );
+        if (!ok2) {
             return;
         }
         try {
@@ -2604,13 +2575,14 @@ Modals.EmailMatches = (() => {
 
     async function deleteMatch(id) {
         const msg = 'Are you sure you want to delete this email match?';
-        if (!confirm(msg)) return;
+        const ok = await AppDialogs.showAppConfirm('Delete email match', msg, { danger: true });
+        if (!ok) return;
         try {
             const res = await fetch(`/email-matches/${id}`, { method: 'DELETE' });
             if (!res.ok) throw new Error(res.statusText);
             loadEmailMatches();
         } catch (err) {
-            alert('Failed to delete: ' + err.message);
+            await AppDialogs.showAppAlert('Failed to delete: ' + err.message);
         }
     }
 
@@ -2798,13 +2770,18 @@ Modals.Interests = (() => {
     }
 
     async function deleteInterest(id) {
-        if (!confirm('Are you sure you want to delete this interest?')) return;
+        const ok = await AppDialogs.showAppConfirm(
+            'Delete interest',
+            'Are you sure you want to delete this interest?',
+            { danger: true }
+        );
+        if (!ok) return;
         try {
             const res = await fetch(`/api/interests/${id}`, { method: 'DELETE' });
             if (!res.ok) throw new Error(res.statusText);
             loadInterests();
         } catch (err) {
-            alert('Failed to delete: ' + err.message);
+            await AppDialogs.showAppAlert('Failed to delete: ' + err.message);
         }
     }
 
@@ -3050,13 +3027,18 @@ Modals.EmailClassifications = (() => {
     }
 
     async function deleteClassification(id) {
-        if (!confirm('Are you sure you want to delete this classification?')) return;
+        const ok = await AppDialogs.showAppConfirm(
+            'Delete classification',
+            'Are you sure you want to delete this classification?',
+            { danger: true }
+        );
+        if (!ok) return;
         try {
             const res = await fetch(`/email-classifications/${id}`, { method: 'DELETE' });
             if (!res.ok) throw new Error(res.statusText);
             loadEmailClassifications();
         } catch (err) {
-            alert('Failed to delete: ' + err.message);
+            await AppDialogs.showAppAlert('Failed to delete: ' + err.message);
         }
     }
 
@@ -3332,13 +3314,14 @@ Modals.EmailExclusions = (() => {
 
     async function deleteExclusion(id) {
         const msg = 'Are you sure you want to delete this email exclusion?';
-        if (!confirm(msg)) return;
+        const ok = await AppDialogs.showAppConfirm('Delete exclusion', msg, { danger: true });
+        if (!ok) return;
         try {
             const res = await fetch(`/email-exclusions/${id}`, { method: 'DELETE' });
             if (!res.ok) throw new Error(res.statusText);
             loadEmailExclusions();
         } catch (err) {
-            alert('Failed to delete: ' + err.message);
+            await AppDialogs.showAppAlert('Failed to delete: ' + err.message);
         }
     }
 
@@ -3541,7 +3524,13 @@ Modals.PreviousResponses = (() => {
         if (closeBtn) closeBtn.addEventListener('click', close);
         if (backBtn) backBtn.addEventListener('click', () => { showListView(); });
         if (deleteBtn) deleteBtn.addEventListener('click', async () => {
-            if (!currentId || !confirm('Delete this saved response?')) return;
+            if (!currentId) return;
+            const okDel = await AppDialogs.showAppConfirm(
+                'Delete saved response',
+                'Delete this saved response?',
+                { danger: true }
+            );
+            if (!okDel) return;
             try {
                 const res = await fetch(`/api/saved-responses/${currentId}`, { method: 'DELETE' });
                 if (!res.ok) throw new Error(await res.text());
@@ -3678,7 +3667,12 @@ Modals.AppConfig = (() => {
     }
 
     async function deleteKey(key) {
-        if (!confirm(`Delete '${key}' from database? (Will revert to .env value.)`)) return;
+        const ok = await AppDialogs.showAppConfirm(
+            'Delete configuration key',
+            `Delete '${key}' from database? (Will revert to .env value.)`,
+            { danger: true }
+        );
+        if (!ok) return;
         try {
             setStatus('Deleting…');
             const res = await fetch(`/api/configuration/${encodeURIComponent(key)}`, { method: 'DELETE' });
@@ -3787,7 +3781,7 @@ Modals.CustomVoices = (() => {
             if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
             if (modal) modal.style.display = 'flex';
         } catch (err) {
-            alert('Failed to load voice: ' + err.message);
+            await AppDialogs.showAppAlert('Failed to load voice: ' + err.message);
         }
     }
 
@@ -3855,7 +3849,12 @@ Modals.CustomVoices = (() => {
     }
 
     async function deleteVoice(id) {
-        if (!confirm('Delete this custom voice? This cannot be undone.')) return;
+        const ok = await AppDialogs.showAppConfirm(
+            'Delete custom voice',
+            'Delete this custom voice? This cannot be undone.',
+            { danger: true }
+        );
+        if (!ok) return;
         try {
             const res = await fetch(`/api/voices/${id}`, { method: 'DELETE' });
             if (!res.ok) throw new Error(res.statusText);
@@ -3864,7 +3863,7 @@ Modals.CustomVoices = (() => {
                 VoiceSelector.loadVoices();
             }
         } catch (err) {
-            alert('Failed to delete: ' + err.message);
+            await AppDialogs.showAppAlert('Failed to delete: ' + err.message);
         }
     }
 

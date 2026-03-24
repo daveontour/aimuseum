@@ -6,6 +6,10 @@ let currentSortDirection = 'asc';
 const API_BASE = window.location.origin;
 const selectedImages = new Set();
 
+if (typeof AppDialogs !== 'undefined' && AppDialogs.init) {
+    AppDialogs.init();
+}
+
 async function loadImages(page) {
     try {
         document.getElementById('loading').style.display = 'block';
@@ -179,7 +183,12 @@ function updateDeleteButton() {
 async function deleteSelected() {
     if (selectedImages.size === 0) return;
     
-    if (!confirm(`Are you sure you want to delete ${selectedImages.size} image(s)?`)) {
+    const ok = await AppDialogs.showAppConfirm(
+        'Delete images',
+        `Are you sure you want to delete ${selectedImages.size} image(s)?`,
+        { danger: true }
+    );
+    if (!ok) {
         return;
     }
     
@@ -212,7 +221,7 @@ async function deleteSelected() {
     await loadImages(currentPage);
     
     if (failCount > 0) {
-        alert(`Deleted ${successCount} image(s). ${failCount} failed.`);
+        await AppDialogs.showAppAlert('Delete result', `Deleted ${successCount} image(s). ${failCount} failed.`);
     }
 }
 

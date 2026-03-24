@@ -330,15 +330,12 @@
                 </div>
                 <div class="config-modal-body">
                     <div class="config-tabs-sidebar">
-                        <label class="config-tab-label" style="margin-left: 10px; font-weight: bold;margin-top: 10px;;color:cadetblue">App & Subject Settings</label>
+                        <label class="config-tab-label" style="margin-left: 10px; font-weight: bold; margin-top: 10px; color: cadetblue;">App & Subject Settings</label>
                         <button type="button" class="config-tab-button active" data-tab="settings">
                             <i class="fas fa-cog"></i> Settings
                         </button>
                         <button type="button" class="config-tab-button config-sidebar-requires-master" data-tab="subject-configuration">
                             <i class="fas fa-user"></i> Subject Configuration
-                        </button>
-                        <button type="button" class="config-tab-button config-sidebar-requires-master" data-tab="system-instructions">
-                            <i class="fas fa-file-alt"></i> System Instructions
                         </button>
                         <button type="button" class="config-tab-button config-sidebar-requires-master" data-tab="custom-voices">
                             <i class="fas fa-microphone-alt"></i> Custom Voices
@@ -346,14 +343,14 @@
                         <button type="button" class="config-tab-button config-sidebar-requires-master" data-tab="manage-contacts">
                             <i class="fas fa-address-book"></i> Manage Contacts
                         </button>
-                        <label class="config-tab-label config-sidebar-requires-master" style="margin-left: 10px; font-weight: bold;margin-top: 10px;color:cadetblue">Personal Data</label>
+                        <label class="config-tab-label config-sidebar-requires-master" style="margin-left: 10px; font-weight: bold; margin-top: 10px; color: cadetblue;">Personal Data</label>
                         <button type="button" class="config-tab-button config-sidebar-requires-master" data-tab="manage-imported-data">
                             <i class="fas fa-database"></i> Manage Imported Data
                         </button>
                         <button type="button" class="config-tab-button config-sidebar-requires-master" data-tab="interests">
                             <i class="fas fa-star"></i> Interests
                         </button>
-                        <label class="config-tab-label config-sidebar-requires-master" style="margin-left: 10px; font-weight: bold;margin-top: 10px;;color:cadetblue">Manage Secure Data Access</label>
+                        <label class="config-tab-label config-sidebar-requires-master" style="margin-left: 10px; font-weight: bold; margin-top: 10px; color: cadetblue;">Manage Secure Data Access</label>
                         <button type="button" class="config-tab-button config-sidebar-requires-master" data-tab="manage-keys">
                             <i class="fas fa-key"></i> Manage Keys
                         </button>
@@ -363,7 +360,7 @@
                     </div>
                     <div class="config-content">
                 <div class="config-tab-content active" id="settings-tab">
-                    <div style="display: flex; gap: 2em; flex-wrap: wrap;background-color: #f8f9fa">
+                    <div style="display: flex; gap: 2em; flex-wrap: wrap; background-color: #f8f9fa;">
                     <section class="config-section">
                         <h3>Chat Settings</h3>
                         <div class="setting-group">
@@ -592,67 +589,44 @@
                     </section>
                 </div>
 
-                <!-- Custom Voice Edit Modal -->
+                <!-- Custom Voice Edit Modal (header/body match confirmation-modal pattern) -->
                 <div id="custom-voice-edit-modal" class="modal" style="display: none; position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,0.5); align-items: center; justify-content: center;">
-                    <div class="modal-content" style="background: #fff; border-radius: 10px; padding: 2em; width: 540px; max-width: 95vw; max-height: 90vh; overflow-y: auto; position: relative;">
-                        <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.2em;">
-                            <h2 id="custom-voice-edit-modal-title" style="margin: 0; font-size: 1.2em;">New Custom Voice</h2>
-                            <button id="close-custom-voice-edit-modal" class="modal-close-btn" style="font-size: 1.4em; background: none; border: none; cursor: pointer;">&times;</button>
+                    <div class="modal-content confirmation-modal-content" onclick="event.stopPropagation()">
+                        <div class="confirmation-modal-header">
+                            <h2 id="custom-voice-edit-modal-title">New Custom Voice</h2>
+                            <button type="button" id="close-custom-voice-edit-modal" class="modal-close-btn" aria-label="Close">&times;</button>
                         </div>
-                        <input type="hidden" id="custom-voice-edit-id" value="">
-                        <div style="margin-bottom: 1em;">
-                            <label style="display: block; font-weight: bold; margin-bottom: 0.3em;">Name</label>
-                            <input type="text" id="custom-voice-edit-name" placeholder="e.g. Grumpy Professor" class="form-control">
-                        </div>
-                        <div style="margin-bottom: 1em;">
-                            <label style="display: block; font-weight: bold; margin-bottom: 0.3em;">Description <span style="font-weight: normal; color: #888;">(optional)</span></label>
-                            <input type="text" id="custom-voice-edit-description" placeholder="Short description shown in the dropdown" class="form-control">
-                        </div>
-                        <div style="margin-bottom: 1em;">
-                            <label style="display: block; font-weight: bold; margin-bottom: 0.3em;">Instructions</label>
-                            <textarea id="custom-voice-edit-instructions" rows="6" placeholder="Describe the persona in detail. e.g. Your name is Professor X and you are a grumpy academic who speaks in Latin phrases." class="form-control" style="font-family: monospace; resize: vertical;"></textarea>
-                            <small style="color: #666;">You can use {SUBJECT_NAME} as a placeholder for the subject name.</small>
-                        </div>
-                        <div style="margin-bottom: 1.5em;">
-                            <label style="display: block; font-weight: bold; margin-bottom: 0.3em;">Creativity: <span id="custom-voice-edit-creativity-display">0.5</span></label>
-                            <input type="range" id="custom-voice-edit-creativity" min="0" max="2" step="0.1" value="0.5" style="width: 100%;" oninput="document.getElementById('custom-voice-edit-creativity-display').textContent = this.value">
-                            <div style="display: flex; justify-content: space-between; font-size: 0.8em; color: #888;">
-                                <span>0 (factual)</span><span>1</span><span>2 (creative)</span>
+                        <div class="confirmation-modal-body custom-voice-edit-modal-body">
+                            <input type="hidden" id="custom-voice-edit-id" value="">
+                            <div style="margin-bottom: 1em;">
+                                <label style="display: block; font-weight: bold; margin-bottom: 0.3em;">Name</label>
+                                <input type="text" id="custom-voice-edit-name" placeholder="e.g. Grumpy Professor" class="form-control">
                             </div>
+                            <div style="margin-bottom: 1em;">
+                                <label style="display: block; font-weight: bold; margin-bottom: 0.3em;">Description <span style="font-weight: normal; color: #888;">(optional)</span></label>
+                                <input type="text" id="custom-voice-edit-description" placeholder="Short description shown in the dropdown" class="form-control">
+                            </div>
+                            <div style="margin-bottom: 1em;">
+                                <label style="display: block; font-weight: bold; margin-bottom: 0.3em;">Instructions</label>
+                                <textarea id="custom-voice-edit-instructions" rows="6" placeholder="Describe the persona in detail. e.g. Your name is Professor X and you are a grumpy academic who speaks in Latin phrases." class="form-control" style="font-family: monospace; resize: vertical;"></textarea>
+                                <small style="color: #666;">You can use {SUBJECT_NAME} as a placeholder for the subject name.</small>
+                            </div>
+                            <div style="margin-bottom: 0;">
+                                <label style="display: block; font-weight: bold; margin-bottom: 0.3em;">Creativity: <span id="custom-voice-edit-creativity-display">0.5</span></label>
+                                <input type="range" id="custom-voice-edit-creativity" min="0" max="2" step="0.1" value="0.5" style="width: 100%;" oninput="document.getElementById('custom-voice-edit-creativity-display').textContent = this.value">
+                                <div style="display: flex; justify-content: space-between; font-size: 0.8em; color: #888;">
+                                    <span>0 (factual)</span><span>1</span><span>2 (creative)</span>
+                                </div>
+                            </div>
+                            <div id="custom-voice-edit-error" style="display: none; padding: 0.6em; background: #fdecea; border-radius: 6px; color: #c0392b; margin-top: 1em;"></div>
                         </div>
-                        <div id="custom-voice-edit-error" style="display: none; padding: 0.6em; background: #fdecea; border-radius: 6px; color: #c0392b; margin-bottom: 1em;"></div>
-                        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                        <div class="confirmation-modal-buttons">
                             <button type="button" id="custom-voice-edit-cancel-btn" class="modal-btn modal-btn-secondary">Cancel</button>
                             <button type="button" id="custom-voice-edit-save-btn" class="modal-btn modal-btn-primary">Save</button>
                         </div>
                     </div>
                 </div>
 
-                <div class="config-tab-content" id="system-instructions-tab">
-                    <section class="config-section">
-                        <div class="subject-config-tabs" style="display: flex; border-bottom: 2px solid #bfc9da; margin-bottom: 0.5em;">
-                            <button type="button" class="subject-config-tab active" data-tab="system-instructions" style="flex: 1; padding: 0.7em 1em; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-size: 1em; color: #666; transition: all 0.2s;">System Instructions</button>
-                            <button type="button" class="subject-config-tab" data-tab="core-instructions" style="flex: 1; padding: 0.7em 1em; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-size: 1em; color: #666; transition: all 0.2s;">Core System Instructions</button>
-                        </div>
-                        <div id="system-instructions-tab-content" class="subject-config-tab-content">
-                            <textarea id="system-instructions-textarea" placeholder="Enter system instructions..." class="form-control" style="font-family: monospace; resize: vertical;" required></textarea>
-                            <small style="color: #666; display: block; margin-top: 0.5em;">You can use {SUBJECT_NAME} as a placeholder for the subject name.</small>
-                            <small style="color: #666; display: block; margin-top: 0.5em;">{he}, {his} and {him} are placeholders for the subject's gender, which will be substituted in.</small><br/>
-
-                        </div>
-                        <div id="core-instructions-tab-content" class="subject-config-tab-content">
-                            <div style="padding: 0.5em 0.7em; margin-bottom: 0.5em; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; color: #856404;">
-                                <strong>Warning:</strong> Editing Core System Instructions can break chat functionality. Only modify if you understand the impact. Changes require double confirmation to save.
-                            </div>
-                            <textarea id="core-system-instructions-textarea" class="form-control" style="font-family: monospace; resize: vertical;"></textarea>
-                            <small style="color: #666; display: block; margin-top: 0.5em;">Core instructions define fundamental chat behaviour. Originally loaded from system_instructions_core.txt.</small>
-                        </div>
-                        <div style="display: flex; justify-content: flex-end; gap: 0.7em; margin-top: 1em;">
-                            <button type="button" id="cancel-system-instructions-btn" class="modal-btn modal-btn-secondary">Cancel</button>
-                            <button type="button" id="save-system-instructions-btn" class="modal-btn modal-btn-primary">Save</button>
-                        </div>
-                    </section>
-                </div>
                 <div class="config-tab-content" id="manage-keys-tab">
                     <section class="config-section">
                         <h1>Visitor Keys</h1>
@@ -1164,7 +1138,7 @@
                                     <br/>
                                     Use the "Important" column to mark emails as important.</p>
                                 </div>
-                                <div class="email-editor-search-pane">
+                                <div class="email-editor-search-pane email-gallery-search-section">
                                         <div class="email-metadata-filters">
                                             <div class="email-gallery-search-row">
                                                 <input type="text" id="email-editor-search" placeholder="Search emails..." class="email-gallery-input">
@@ -1176,7 +1150,7 @@
                                             <div class="email-gallery-filter-row-full">
                                                 <input type="text" id="email-editor-to-from" placeholder="To or From..." class="email-gallery-input">
                                             </div>
-                                            <div class="email-gallery-filter-row email-editor-filter-year-month-row">
+                                            <div class="email-gallery-filter-row email-gallery-filter-year-month-row">
                                                 <select id="email-editor-year-filter" class="email-gallery-select"></select>
                                                 <select id="email-editor-month-filter" class="email-gallery-select"></select>
                                                 <label class="email-gallery-checkbox-label">
@@ -1841,8 +1815,8 @@
                 <div class="new-image-gallery-modal-body">
                     <!-- Master Pane -->
                     <div class="new-image-gallery-master-pane">
-                        <div class="new-image-gallery-search-section">
-                            <div class="new-image-metadata-filters">
+                        <div class="new-image-gallery-search-section email-gallery-search-section">
+                            <div class="new-image-metadata-filters email-metadata-filters">
                                 <!-- <div id="new-image-gallery-bulk-edit-section" style="display: none; padding: 1em; background-color: #e8f4f8; border-radius: 4px; margin-top: 1em;">
                                     <div style="margin-bottom: 0.5em; font-weight: 600; color: #233366;">
                                         <span id="new-image-gallery-selected-count">0</span> image(s) selected
@@ -1857,19 +1831,19 @@
                                         </button>
                                     </div>
                                 </div> -->
-                                <div class="new-image-gallery-search-row">
-                                    <input type="text" id="new-image-gallery-title" placeholder="Title..." class="new-image-gallery-input">
+                                <div class="new-image-gallery-search-row email-gallery-search-row">
+                                    <input type="text" id="new-image-gallery-title" placeholder="Title..." class="new-image-gallery-input email-gallery-input">
                                 </div>
-                                <div class="new-image-gallery-search-row">
-                                    <input type="text" id="new-image-gallery-description" placeholder="Description..." class="new-image-gallery-input">
+                                <div class="new-image-gallery-search-row email-gallery-search-row">
+                                    <input type="text" id="new-image-gallery-description" placeholder="Description..." class="new-image-gallery-input email-gallery-input">
                                 </div>
-                                <div class="new-image-gallery-search-row">
-                                    <input type="text" id="new-image-gallery-tags" placeholder="Tags..." class="new-image-gallery-input" list="new-image-gallery-tags-list">
+                                <div class="new-image-gallery-search-row email-gallery-search-row">
+                                    <input type="text" id="new-image-gallery-tags" placeholder="Tags..." class="new-image-gallery-input email-gallery-input" list="new-image-gallery-tags-list">
                                     <datalist id="new-image-gallery-tags-list"></datalist>
                                 </div>
-                                <div class="new-image-gallery-filter-row">
-                                    <input type="text" id="new-image-gallery-author" placeholder="Author..." class="new-image-gallery-input">
-                                    <select id="new-image-gallery-source" class="new-image-gallery-select" aria-label="Source">
+                                <div class="new-image-gallery-filter-row email-gallery-filter-row">
+                                    <input type="text" id="new-image-gallery-author" placeholder="Author..." class="new-image-gallery-input email-gallery-input">
+                                    <select id="new-image-gallery-source" class="new-image-gallery-select email-gallery-select" aria-label="Source">
                                         <option value="" selected>All sources</option>
                                         <option value="filesystem">Filesystem</option>
                                         <option value="instagram">Instagram</option>
@@ -1883,15 +1857,15 @@
                                         <option value="facebook_album">Facebook Album</option>
                                     </select>
                                 </div>
-                                <div class="new-image-gallery-filter-row">
-                                    <select id="new-image-gallery-year-filter" class="new-image-gallery-select"></select>                                         
-                                    <select id="new-image-gallery-month-filter" class="new-image-gallery-select"></select>
+                                <div class="new-image-gallery-filter-row email-gallery-filter-row email-gallery-filter-year-month-row">
+                                    <select id="new-image-gallery-year-filter" class="new-image-gallery-select email-gallery-select"></select>                                         
+                                    <select id="new-image-gallery-month-filter" class="new-image-gallery-select email-gallery-select"></select>
                                 </div>
-                                <div class="new-image-gallery-filter-row">
-                                    <input type="number" id="new-image-gallery-rating" placeholder="Rating (1-5)" min="1" max="5" class="new-image-gallery-input">
-                                    <input type="number" id="new-image-gallery-rating-min" placeholder="Min Rating" min="1" max="5" class="new-image-gallery-input">
-                                    <input type="number" id="new-image-gallery-rating-max" placeholder="Max Rating" min="1" max="5" class="new-image-gallery-input">
-                                    <label class="new-image-gallery-checkbox-label">
+                                <div class="new-image-gallery-filter-row email-gallery-filter-row">
+                                    <input type="number" id="new-image-gallery-rating" placeholder="Rating (1-5)" min="1" max="5" class="new-image-gallery-input email-gallery-input">
+                                    <input type="number" id="new-image-gallery-rating-min" placeholder="Min Rating" min="1" max="5" class="new-image-gallery-input email-gallery-input">
+                                    <input type="number" id="new-image-gallery-rating-max" placeholder="Max Rating" min="1" max="5" class="new-image-gallery-input email-gallery-input">
+                                    <label class="new-image-gallery-checkbox-label email-gallery-checkbox-label">
                                         <input type="checkbox" id="new-image-gallery-has-gps">
                                         Has GPS
                                     </label>
@@ -1902,7 +1876,7 @@
                                         Has GPS
                                     </label>
                                 </div> -->
-                                <div class="new-image-gallery-button-row">
+                                <div class="new-image-gallery-button-row email-gallery-button-row">
                                     <button id="new-image-gallery-search-btn" class="modal-btn modal-btn-primary">
                                         <i class="fas fa-search"></i>Search
                                     </button>
@@ -1912,7 +1886,7 @@
                                 </div>
                             </div>
                             <div class="new-image-gallery-right-hand-box">
-                                <div id="new-image-gallery-bulk-edit-section" style="padding: 1em; background-color: #e8f4f8; border-radius: 4px;">
+                                <div id="new-image-gallery-bulk-edit-section">
                                     <div style="margin-bottom: 1em;">
                                         <label class="new-image-gallery-select-mode-toggle" style="display: flex; align-items: center; gap: 0.5em; cursor: pointer;">
                                             <input type="checkbox" id="new-image-gallery-select-mode" style="cursor: pointer;">
@@ -1923,16 +1897,16 @@
                                         <span id="new-image-gallery-selected-count">0</span> image(s) selected
                                     </div>
                                     <div style="display: flex; gap: 0.5em; align-items: center;">
-                                        <input type="text" id="new-image-gallery-bulk-tags" placeholder="Enter tags to apply..." class="new-image-gallery-input" style="flex: 1;">
+                                        <input type="text" id="new-image-gallery-bulk-tags" placeholder="Enter tags to apply..." class="new-image-gallery-input email-gallery-input" style="flex: 1;">
                                     </div>
-                                    <div style="display: flex; gap: 0.5em; align-items: end;flex-direction: row; margin-top: 1em;">
-                                        <button id="new-image-gallery-apply-tags-btn" class="modal-btn modal-btn-primary" disabled style="width: 200px;">
+                                    <div class="new-image-gallery-bulk-actions">
+                                        <button id="new-image-gallery-apply-tags-btn" class="modal-btn modal-btn-primary" disabled>
                                             <i class="fas fa-tags"></i> Apply Tags
                                         </button>
-                                        <button id="new-image-gallery-delete-selected-btn" class="modal-btn modal-btn-danger" disabled style="width: 200px;">
+                                        <button id="new-image-gallery-delete-selected-btn" class="modal-btn modal-btn-danger" disabled>
                                             <i class="fas fa-trash-alt"></i> Delete Selected
                                         </button>
-                                        <button id="new-image-gallery-clear-selection-btn" class="modal-btn modal-btn-secondary" style="width: 200px;">
+                                        <button id="new-image-gallery-clear-selection-btn" class="modal-btn modal-btn-secondary">
                                             <i class="fas fa-times"></i> Clear Selection
                                         </button>
                                     </div>
@@ -2628,13 +2602,17 @@
 
         <!-- Confirmation Modal -->
         <div id="confirmation-modal" class="modal confirmation-modal">
-            <div class="modal-content confirmation-modal-content">
+            <div class="modal-content confirmation-modal-content" onclick="event.stopPropagation()">
                 <div class="confirmation-modal-header">
                     <h2 id="confirmation-modal-title"></h2>
                     <button class="modal-close-btn" id="close-confirmation-modal">&times;</button>
                 </div>
                 <div class="confirmation-modal-body">
-                    <p id="confirmation-modal-text"></p>
+                    <p id="confirmation-modal-text" class="confirmation-modal-text"></p>
+                    <div id="confirmation-modal-prompt-wrap" class="confirmation-modal-prompt-wrap" style="display: none;">
+                        <label id="confirmation-modal-prompt-label" class="confirmation-modal-prompt-label" for="confirmation-modal-prompt-input"></label>
+                        <input type="text" id="confirmation-modal-prompt-input" class="confirmation-modal-prompt-input" autocomplete="off" />
+                    </div>
                 </div>
                 <div class="confirmation-modal-buttons">
                     <button type="button" id="confirmation-modal-confirm" class="modal-btn modal-btn-primary">Confirm</button>
@@ -2854,6 +2832,7 @@
     </div>
 
     <script src="/static/js/museum/foundation.js" defer></script>
+    <script src="/static/js/museum/app-dialogs.js" defer></script>
     <script src="/static/js/museum/chat.js" defer></script>
     <script src="/static/js/museum/modals-core.js" defer></script>
     <script src="/static/js/museum/modals-media.js" defer></script>

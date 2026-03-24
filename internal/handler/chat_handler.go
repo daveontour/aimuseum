@@ -399,7 +399,6 @@ func (h *ChatHandler) CompleteProfileStart(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	provider := strings.TrimSpace(strings.ToLower(req.Provider))
-	tier := appai.UnlockTierFromSession(h.sessionStore, r)
 	var getRAM appai.RAMMasterGetter
 	if h.sessionStore != nil {
 		if p, ok := h.sessionStore.Get(r); ok {
@@ -410,7 +409,7 @@ func (h *ChatHandler) CompleteProfileStart(w http.ResponseWriter, r *http.Reques
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		if err := h.svc.GenerateCompleteProfile(ctx, name, provider, getRAM, tier); err != nil {
+		if err := h.svc.GenerateCompleteProfile(ctx, name, provider, getRAM); err != nil {
 			slog.Error("complete_profile failed", "name", name, "err", err)
 		}
 	}()

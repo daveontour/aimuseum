@@ -1250,7 +1250,7 @@ Modals.NewImageGallery = (() => {
             
             const tags = DOM.newImageGalleryBulkTags ? DOM.newImageGalleryBulkTags.value.trim() : '';
             if (!tags) {
-                alert('Please enter tags to apply');
+                await AppDialogs.showAppAlert('Please enter tags to apply');
                 return;
             }
             
@@ -1293,10 +1293,10 @@ Modals.NewImageGallery = (() => {
                 }
                 _updateSelectionUI();
                 
-                alert(`Successfully applied tags to ${result.updated_count} image(s)`);
+                await AppDialogs.showAppAlert('Success', `Successfully applied tags to ${result.updated_count} image(s)`);
             } catch (error) {
                 console.error('Error applying tags:', error);
-                alert(`Error applying tags: ${error.message}`);
+                await AppDialogs.showAppAlert('Error', `Error applying tags: ${error.message}`);
             }
         }
         
@@ -1306,8 +1306,12 @@ Modals.NewImageGallery = (() => {
             const imageIds = Array.from(selectedImageIds);
             const count = imageIds.length;
             
-            // Confirm deletion
-            if (!confirm(`Are you sure you want to delete ${count} image(s)? This action cannot be undone.`)) {
+            const okDel = await AppDialogs.showAppConfirm(
+                'Delete images',
+                `Are you sure you want to delete ${count} image(s)? This action cannot be undone.`,
+                { danger: true }
+            );
+            if (!okDel) {
                 return;
             }
             
@@ -1346,10 +1350,10 @@ Modals.NewImageGallery = (() => {
                     DOM.newImageGalleryDetailModal.style.display = 'none';
                 }
                 
-                alert(`Successfully deleted ${result.deleted_count} image(s)`);
+                await AppDialogs.showAppAlert('Success', `Successfully deleted ${result.deleted_count} image(s)`);
             } catch (error) {
                 console.error('Error deleting images:', error);
-                alert(`Error deleting images: ${error.message}`);
+                await AppDialogs.showAppAlert('Error', `Error deleting images: ${error.message}`);
             }
         }
 
@@ -1570,10 +1574,10 @@ Modals.ImageDetailModal = (() => {
                     onSaveCallback(currentImageInModal, updateData);
                 }
                 
-                alert('Image metadata updated successfully');
+                await AppDialogs.showAppAlert('Success', 'Image metadata updated successfully');
             } catch (error) {
                 console.error('Error updating image:', error);
-                alert(`Error updating image: ${error.message}`);
+                await AppDialogs.showAppAlert('Error', `Error updating image: ${error.message}`);
             }
         }
 
@@ -1583,8 +1587,12 @@ Modals.ImageDetailModal = (() => {
             const imageId = currentImageInModal.id;
             const imageTitle = currentImageInModal.title || 'Image';
             
-            // Confirm deletion
-            if (!confirm(`Are you sure you want to delete "${imageTitle}"? This action cannot be undone.`)) {
+            const okDelOne = await AppDialogs.showAppConfirm(
+                'Delete image',
+                `Are you sure you want to delete "${imageTitle}"? This action cannot be undone.`,
+                { danger: true }
+            );
+            if (!okDelOne) {
                 return;
             }
             
@@ -1609,10 +1617,10 @@ Modals.ImageDetailModal = (() => {
                     onDeleteCallback(deletedImage);
                 }
                 
-                alert(`Successfully deleted image: ${imageTitle}`);
+                await AppDialogs.showAppAlert('Success', `Successfully deleted image: ${imageTitle}`);
             } catch (error) {
                 console.error('Error deleting image:', error);
-                alert(`Error deleting image: ${error.message}`);
+                await AppDialogs.showAppAlert('Error', `Error deleting image: ${error.message}`);
             }
         }
 
@@ -1709,7 +1717,7 @@ Modals.ImageDetailModal = (() => {
                 openSourceButton.className = 'modal-btn modal-btn-secondary';
                 openSourceButton.style.cssText = 'padding: 0.3em 0.8em; font-size: 0.85em;';
                 openSourceButton.textContent = 'Open Source ('+sourceFullName+')';
-                openSourceButton.onclick = function(e) {
+                openSourceButton.onclick = async function(e) {
 
 
                     e.preventDefault();
@@ -1726,11 +1734,11 @@ Modals.ImageDetailModal = (() => {
                                 Modals.EmailGallery.openAndSelectEmail(emailId);
                             } else {
                                 console.error('Invalid email ID in source_reference:', image.source_reference);
-                                alert('Unable to open email: Invalid email ID');
+                                await AppDialogs.showAppAlert('Unable to open email: Invalid email ID');
                             }
                         } else {
                             console.error('No source_reference found for email attachment');
-                            alert('Unable to open email: No email reference found');
+                            await AppDialogs.showAppAlert('Unable to open email: No email reference found');
                         }
                     } else if (sourceValue.toLowerCase() === 'message_attachment' || sourceValue.toLowerCase() === 'imessage' || sourceValue.toLowerCase() === 'sms' || sourceValue.toLowerCase() === 'whatsapp' || sourceValue.toLowerCase() === 'facebook') {
                         //Open the SMS Messages modal and select the conversation
@@ -1886,40 +1894,25 @@ Modals.ImageDetailModal = (() => {
 
 
 Modals.ConfirmationModal = (() => {
-
-        let onConfirm = () => {
-            DOM.confirmationModal.style.display = 'none';
-        }
-
         function init() {
-
-            DOM.confirmationModalCancelBtn.addEventListener('click', () => DOM.confirmationModal.style.display = 'none');
-            DOM.confirmationModalCloseBtn.addEventListener('click', () => DOM.confirmationModal.style.display = 'none');
-            DOM.confirmationModalConfirmBtn.addEventListener('click',() => _handleConfirm());
-
-        }
-        function open(title, text, onConfirmFn) {
-            DOM.confirmationModal.style.display = 'flex';
-            DOM.confirmationModalTitle.textContent = title;
-            DOM.confirmationModalText.textContent = text;
-
-            onConfirm = onConfirmFn;
-
-        }
-
-        function _handleConfirm() {
-            _closeConfirmationModal();
-            if (typeof onConfirm === 'function') {
-                onConfirm();
+            if (typeof AppDialogs !== 'undefined' && AppDialogs.init) {
+                AppDialogs.init();
             }
         }
 
-
-        const _closeConfirmationModal = () => {
-            DOM.confirmationModal.style.display = 'none';
+        function open(title, text, onConfirmFn) {
+            if (typeof AppDialogs !== 'undefined' && AppDialogs.openLegacy) {
+                AppDialogs.openLegacy(title, text, onConfirmFn);
+            }
         }
 
-        return { init,open };
+        function close() {
+            if (typeof AppDialogs !== 'undefined' && AppDialogs.close) {
+                AppDialogs.close();
+            }
+        }
+
+        return { init, open, close };
 })();
 
 

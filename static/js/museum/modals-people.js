@@ -214,14 +214,21 @@ Modals.Contacts = (() => {
                 await loadContacts(pageToLoad);
             } catch (err) {
                 console.error('Error deleting contact:', err);
-                alert(`Error: ${err.message}`);
+                await AppDialogs.showAppAlert('Error', `${err.message}`);
             }
         }
 
         async function handleDeleteSelected() {
             const ids = Array.from(selectedIds);
             if (ids.length === 0) return;
-            if (ids.length > 1 && !confirm(`Delete ${ids.length} contacts? This cannot be undone.`)) return;
+            if (ids.length > 1) {
+                const ok = await AppDialogs.showAppConfirm(
+                    'Delete contacts',
+                    `Delete ${ids.length} contacts? This cannot be undone.`,
+                    { danger: true }
+                );
+                if (!ok) return;
+            }
             try {
                 const response = await fetch('/contacts/bulk-delete', {
                     method: 'POST',
@@ -238,7 +245,7 @@ Modals.Contacts = (() => {
                 await loadContacts(pageToLoad);
             } catch (err) {
                 console.error('Error deleting contacts:', err);
-                alert(`Error: ${err.message}`);
+                await AppDialogs.showAppAlert('Error', `${err.message}`);
             }
         }
         function escapeHtml(text) {
@@ -304,10 +311,13 @@ Modals.Contacts = (() => {
                     throw new Error(err.detail || `HTTP ${resp.status}`);
                 }
                 const data = await resp.json();
-                alert(data.message || 'Complete profile generation started. This runs in the background and may take several minutes.');
+                await AppDialogs.showAppAlert(
+                    'Profile',
+                    data.message || 'Complete profile generation started. This runs in the background and may take several minutes.'
+                );
             } catch (err) {
                 console.error('Run complete profile error:', err);
-                alert('Error: ' + err.message);
+                await AppDialogs.showAppAlert('Error', err.message);
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-sync-alt"></i>';
@@ -372,7 +382,7 @@ Modals.Contacts = (() => {
                 if (!resp.ok) {
                     if (resp.status === 404 && silentOn404) return false;
                     if (resp.status === 404) {
-                        alert('No complete profile found for this contact. Generate one first.');
+                        await AppDialogs.showAppAlert('No complete profile found for this contact. Generate one first.');
                         return false;
                     }
                     throw new Error('Failed to load profile');
@@ -401,7 +411,7 @@ Modals.Contacts = (() => {
                 return true;
             } catch (err) {
                 console.error('View complete profile error:', err);
-                if (!silentOn404) alert('Error: ' + err.message);
+                if (!silentOn404) await AppDialogs.showAppAlert('Error', err.message);
                 return false;
             }
         }
@@ -435,11 +445,14 @@ Modals.Contacts = (() => {
                 }
                 const data = await response.json();
                 if (data.status === 'started') {
-                    alert('Contacts extract started. Open Import Messages Controls tab for progress.');
+                    await AppDialogs.showAppAlert(
+                        'Contacts extract',
+                        'Contacts extract started. Open Import Messages Controls tab for progress.'
+                    );
                 }
             } catch (err) {
                 console.error('Error extracting contacts:', err);
-                alert(`Error: ${err.message}`);
+                await AppDialogs.showAppAlert('Error', `${err.message}`);
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = origHtml;
@@ -653,11 +666,11 @@ Modals.Profiles = (() => {
                     throw new Error(err.detail || `HTTP ${resp.status}`);
                 }
                 const data = await resp.json();
-                alert(data.message || 'Profile generation started. This runs in the background.');
+                await AppDialogs.showAppAlert('Profile', data.message || 'Profile generation started. This runs in the background.');
                 await loadProfileNames();
             } catch (err) {
                 console.error('Create profile error:', err);
-                alert('Error: ' + err.message);
+                await AppDialogs.showAppAlert('Error', err.message);
             } finally {
                 updateCreateBtnState();
                 if (btn) btn.innerHTML = '<i class="fas fa-sync-alt"></i> Create Profile';
@@ -665,7 +678,12 @@ Modals.Profiles = (() => {
         }
 
         async function handleDeleteProfile(name) {
-            if (!confirm(`Delete the complete profile for "${name}"? This cannot be undone.`)) return;
+            const ok = await AppDialogs.showAppConfirm(
+                'Delete profile',
+                `Delete the complete profile for "${name}"? This cannot be undone.`,
+                { danger: true }
+            );
+            if (!ok) return;
             try {
                 const resp = await fetch('/chat/complete-profile?name=' + encodeURIComponent(name), { method: 'DELETE' });
                 if (!resp.ok) {
@@ -675,7 +693,7 @@ Modals.Profiles = (() => {
                 await loadProfileNames();
             } catch (err) {
                 console.error('Delete profile error:', err);
-                alert('Error: ' + err.message);
+                await AppDialogs.showAppAlert('Error', err.message);
             }
         }
 
@@ -936,7 +954,7 @@ Modals.Relationships = (() => {
                                 if (typeof UI !== 'undefined' && UI.displayError) {
                                     UI.displayError('Failed to save: ' + (err.message || 'Unknown error'));
                                 } else {
-                                    alert('Failed to save: ' + (err.message || 'Unknown error'));
+                                    await AppDialogs.showAppAlert('Failed to save: ' + (err.message || 'Unknown error'));
                                 }
                                 const prevRadio = radioContainer.querySelector(`input[value="${lastSavedType}"]`);
                                 if (prevRadio) prevRadio.checked = true;
@@ -974,7 +992,7 @@ Modals.Relationships = (() => {
             } catch (err) {
                 console.error('Relationships fetch failed:', err);
                 if (typeof UI !== 'undefined' && UI.displayError) UI.displayError('Could not load relationship data: ' + (err.message || 'Unknown error'));
-                else alert('Could not load relationship data. Please try again.');
+                else await AppDialogs.showAppAlert('Could not load relationship data. Please try again.');
                 return;
             }
             const elements = [...data.nodes.map(n => ({data: n})), ...data.links.map(l => ({data: l}))];

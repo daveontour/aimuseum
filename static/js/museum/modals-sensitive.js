@@ -31,7 +31,7 @@ Modals.SensitiveData = (() => {
             }
         } catch (err) {
             console.error('[SensitiveData] key-count error:', err);
-            alert('Unable to check trusted keys. Please try again.');
+            await AppDialogs.showAppAlert('Unable to check trusted keys. Please try again.');
             return;
         }
         const modal = document.getElementById('sensitive-data-modal');
@@ -134,7 +134,7 @@ Modals.SensitiveData = (() => {
             if (modal) modal.style.display = 'flex';
         } catch (err) {
             console.error('[SensitiveData] hints error:', err);
-            alert('Failed to load hints: ' + err.message);
+            await AppDialogs.showAppAlert('Failed to load hints: ' + err.message);
         }
     }
 
@@ -243,7 +243,7 @@ Modals.SensitiveData = (() => {
 
     async function _openDetail(record) {
         if (!_password) {
-            alert('Enter a password and click Unlock to view record details.');
+            await AppDialogs.showAppAlert('Enter a password and click Unlock to view record details.');
             return;
         }
         _currentId = record.id;
@@ -277,14 +277,14 @@ Modals.SensitiveData = (() => {
             _switchTab('preview');
         } catch (err) {
             console.error('[SensitiveData] fetch record error:', err);
-            alert('Failed to load record: ' + err.message);
+            await AppDialogs.showAppAlert('Failed to load record: ' + err.message);
             _closeDetailModal();
         }
     }
 
-    function _openNew() {
+    async function _openNew() {
         if (!_password) {
-            alert('Enter a password and click Unlock to create a new record.');
+            await AppDialogs.showAppAlert('Enter a password and click Unlock to create a new record.');
             return;
         }
         _currentId = null;
@@ -333,7 +333,7 @@ Modals.SensitiveData = (() => {
         }
 
         if (!description) {
-            alert('Description is required.');
+            await AppDialogs.showAppAlert('Description is required.');
             return;
         }
 
@@ -362,7 +362,7 @@ Modals.SensitiveData = (() => {
             }
 
             if (resp.status === 403) {
-                alert('A password is required to save records. Enter a password and click Unlock first.');
+                await AppDialogs.showAppAlert('A password is required to save records. Enter a password and click Unlock first.');
                 return;
             }
             if (!resp.ok) {
@@ -375,13 +375,18 @@ Modals.SensitiveData = (() => {
             _loadRecords(_password);
         } catch (err) {
             console.error('[SensitiveData] save error:', err);
-            alert('Error saving record: ' + err.message);
+            await AppDialogs.showAppAlert('Error saving record: ' + err.message);
         }
     }
 
     async function _deleteRecord() {
         if (!_currentId) return;
-        if (!confirm('Delete this record? This cannot be undone.')) return;
+        const ok = await AppDialogs.showAppConfirm(
+            'Delete record',
+            'Delete this record? This cannot be undone.',
+            { danger: true }
+        );
+        if (!ok) return;
 
         try {
             const url = `/sensitive-data/${_currentId}` +
@@ -389,7 +394,7 @@ Modals.SensitiveData = (() => {
             const resp = await fetch(url, { method: 'DELETE' });
 
             if (resp.status === 403) {
-                alert('A password is required to delete records. Enter a password and click Unlock first.');
+                await AppDialogs.showAppAlert('A password is required to delete records. Enter a password and click Unlock first.');
                 return;
             }
             if (!resp.ok) {
@@ -402,7 +407,7 @@ Modals.SensitiveData = (() => {
             _loadRecords(_password);
         } catch (err) {
             console.error('[SensitiveData] delete error:', err);
-            alert('Error deleting record: ' + err.message);
+            await AppDialogs.showAppAlert('Error deleting record: ' + err.message);
         }
     }
 

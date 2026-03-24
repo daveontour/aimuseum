@@ -1468,6 +1468,29 @@ body {
     flex-shrink: 0;
 }
 
+/* Short viewports: compress sidebar tile buttons (~40% shorter than default min-height/padding/gap) */
+@media (max-height: 859px) {
+    .more-options-btn {
+        min-height: calc(64px * 0.6);
+        padding: calc(14px * 0.6) 12px;
+        gap: calc(6px * 0.6);
+    }
+    .more-options-btn i {
+        font-size: 1.05em;
+    }
+    .more-options-buttons {
+        gap: calc(10px * 0.6);
+    }
+    .sidebar-left .sidebar-bottom-tile,
+    .sidebar-right .sidebar-bottom-tile {
+        gap: calc(10px * 0.6);
+    }
+    .config-tabs-sidebar .config-tab-button {
+        padding-block: calc(12px * 0.6);
+        padding-inline: 16px;
+    }
+}
+
 /* Legacy radio group styles - keeping for backward compatibility */
 .radio-group {
     display: flex;
@@ -2613,9 +2636,9 @@ body {
     z-index: 3000 !important;
 }
 
-/* Confirmation modal must always appear on top of all other modals */
+/* AppDialogs (#confirmation-modal): above high-z modals e.g. Email Manager (4100), visitor hints (4300) */
 #confirmation-modal {
-    z-index: 3500 !important;
+    z-index: 5000 !important;
 }
 
 .confirmation-modal-content {
@@ -2661,6 +2684,54 @@ body {
     justify-content: flex-end;
     gap: 0.75em;
     padding: 0 1.5rem 1.5rem;
+}
+
+.confirmation-modal-text {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.45;
+    color: #333;
+}
+
+.confirmation-modal-prompt-wrap {
+    margin-top: 1rem;
+}
+
+.confirmation-modal-prompt-label {
+    display: block;
+    margin-bottom: 0.4rem;
+    font-weight: 500;
+    font-size: 0.9rem;
+    color: #444;
+}
+
+.confirmation-modal-prompt-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.5rem 0.65rem;
+    border-radius: 6px;
+    border: 1px solid #bfc9da;
+    font-size: 0.95rem;
+}
+
+.confirmation-modal-prompt-input:focus {
+    outline: none;
+    border-color: var(--color-blue, #1a73e8);
+    box-shadow: 0 0 0 1px var(--color-blue, #1a73e8);
+}
+
+/* Custom Voice edit: confirmation-modal layout; header flush to card edges; scroll body only */
+#custom-voice-edit-modal .confirmation-modal-content {
+    width: 540px !important;
+    max-width: 95vw !important;
+    max-height: 90vh;
+    overflow: hidden;
+}
+#custom-voice-edit-modal .custom-voice-edit-modal-body {
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 /* Data Import entry points when session has no unlocked key */
@@ -2840,69 +2911,6 @@ body {
     background-color: #ffc107;
 }
 
-/* Subject Configuration Modal Tabs */
-.subject-config-tabs {
-    display: flex;
-    border-bottom: 2px solid #bfc9da;
-    margin-bottom: 0.5em;
-}
-
-.subject-config-tab {
-    flex: 1;
-    padding: 0.7em 1em;
-    background: none;
-    border: none;
-    border-bottom: 3px solid transparent;
-    cursor: pointer;
-    font-size: 1em;
-    color: var(--color-text-muted);
-    transition: all 0.2s;
-}
-
-.subject-config-tab:hover {
-    color: var(--color-navy);
-    background-color: #f5f5f5;
-}
-
-.subject-config-tab.active {
-    color: var(--color-navy);
-    border-bottom-color: #4a90e2;
-    font-weight: bold;
-}
-
-.subject-config-tab-content {
-    display: none;
-}
-
-.subject-config-tab-content:first-of-type {
-    display: block;
-}
-
-/* System Instructions tab: textarea fills available vertical space */
-#system-instructions-tab .subject-config-tab-content:first-of-type {
-    display: flex;
-}
-#system-instructions-tab .config-section {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
-}
-#system-instructions-tab .subject-config-tab-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
-}
-#system-instructions-tab #system-instructions-textarea,
-#system-instructions-tab #core-system-instructions-textarea {
-    flex: 1;
-    min-height: 120px;
-    resize: vertical;
-}
-
 /* Manage Contacts inner tabs (horizontal) */
 .manage-contacts-tabs {
     display: flex;
@@ -2940,13 +2948,6 @@ body {
 }
 #manage-contacts-tab .manage-contacts-tab-content.active {
     display: flex;
-}
-
-/* Read-only textarea styling */
-#core-system-instructions-textarea {
-    background-color: #f5f5f5 !important;
-    cursor: not-allowed !important;
-    color: var(--color-text-muted) !important;
 }
 
 /* Writing Style AI markdown display */
@@ -4174,12 +4175,20 @@ body {
 .email-gallery-button-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     flex-wrap: wrap;
     gap: 0.5rem;
     margin-top: 0.15rem;
     padding-top: 0.35rem;
     border-top: 1px solid #e8eaed;
+}
+
+.email-gallery-button-row:has(.email-gallery-sort-inline) {
+    justify-content: space-between;
+}
+
+.email-gallery-button-row:not(:has(.email-gallery-sort-inline)) {
+    justify-content: flex-start;
+    gap: 0.4rem;
 }
 
 .email-gallery-actions-start {
@@ -4382,7 +4391,7 @@ body {
     flex-shrink: 0;
     padding: 10px 20px;
     background-color: white;
-    border-bottom: 1px solid #e9ecef;
+    border-bottom: 1px solid #e8eaed;
     min-width: 0;
 }
 
@@ -4440,10 +4449,11 @@ body {
     max-width: min(936px, 100%);
     width: 100%;
     box-sizing: border-box;
-    padding: 1.25em;
-    background-color: aliceblue;
-    border-radius: 8px;
-    border: 1px solid #e9ecef;
+}
+
+/* Full-width separator is on .email-editor-header-row; avoid double rule under pane only */
+#email-editor-modal .email-editor-search-pane.email-gallery-search-section {
+    border-bottom: none;
 }
 
 /* Email Manager: filters and controls stay within the pane when the modal is narrow */
@@ -4469,7 +4479,6 @@ body {
 #email-editor-modal .email-editor-search-pane .email-gallery-button-row {
     flex-wrap: wrap;
     min-width: 0;
-    gap: 0.4em;
 }
 
 #email-editor-modal .email-editor-search-pane .email-gallery-button-row .modal-btn {
@@ -4481,18 +4490,6 @@ body {
     flex: 0 0 auto;
     min-width: auto;
     margin-left: auto;
-}
-
-/* Year/month + attachments: two columns then checkbox full-width (avoids 3rd grid cell overflow) */
-#email-editor-modal .email-editor-filter-year-month-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 0.3em;
-    align-items: center;
-}
-
-#email-editor-modal .email-editor-filter-year-month-row .email-gallery-checkbox-label {
-    grid-column: 1 / -1;
 }
 
 @media (max-width: 720px) {
@@ -5078,6 +5075,7 @@ body {
     flex-direction: row;
     flex: 1;
     min-height: 0;
+    min-width: 0;
     position: relative;
 }
 
@@ -5137,6 +5135,7 @@ body {
 /* Master Pane */
 .new-image-gallery-master-pane {
     width: 100%;
+    min-width: 0;
     height: 100%;
     display: flex;
     flex-direction: column;
@@ -5144,32 +5143,52 @@ body {
     overflow: hidden;
 }
 
+/* Layout only; padding/background/border from .email-gallery-search-section */
 .new-image-gallery-search-section {
-    flex-shrink: 0;
-    padding: 1em;
-    background-color: aliceblue;
-    border-bottom: 1px solid #e9ecef;
     width: 100%;
     max-width: 100%;
+    min-width: 0;
     box-sizing: border-box;
     display: flex;
     flex-direction: row;
-    gap: 1.0em;
+    gap: 0.75rem;
+    align-items: flex-start;
 }
 
 .new-image-metadata-filters {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4em;
-    width: 50%;
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .new-image-gallery-right-hand-box {
-    width: 50%;
-    max-width: 50%;
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 0.4em;
+    gap: 0.5rem;
+    padding: 0.5rem 0.55rem;
+    background: #fafbfc;
+    border: 1px solid #e8eaed;
+    border-radius: 6px;
+    box-sizing: border-box;
+}
+
+/* Bulk actions: fixed-width buttons were forcing the column past the dialog edge */
+.new-image-gallery-bulk-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: stretch;
+    margin-top: 1rem;
+}
+
+.new-image-gallery-bulk-actions .modal-btn {
+    flex: 1 1 8.5rem;
+    min-width: 0;
+    max-width: 100%;
+    width: auto !important;
 }
 
 .new-image-gallery-title h2 {
@@ -5185,7 +5204,7 @@ body {
 .new-image-gallery-filter-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 0.3em;
+    gap: 0.45rem;
 }
 
 .new-image-gallery-filter-row:has(input[type="number"]) {
@@ -5217,12 +5236,6 @@ body {
     gap: 0.3em;
     color: var(--color-text);
     font-size: 0.9em;
-}
-
-.new-image-gallery-button-row {
-    display: flex;
-    align-items: center;
-    gap: 0.3em;
 }
 
 .new-image-gallery-thumbnail-grid {
@@ -5356,10 +5369,10 @@ body {
     cursor: pointer;
 }
 
-#new-image-gallery-bulk-edit-section {
+/* #new-image-gallery-bulk-edit-section {
     border: 1px solid #bfc9da;
     border-radius: 4px;
-}
+} */
 
 .new-image-gallery-thumbnail-item img {
     position: absolute;

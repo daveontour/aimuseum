@@ -350,7 +350,7 @@ Modals.EmailGallery = (() => {
             }
 
             if (emailAskAISubmitBtn) {
-                emailAskAISubmitBtn.addEventListener('click', () => {
+                emailAskAISubmitBtn.addEventListener('click', async () => {
                     // Functionality will be added later
                     const selectedOption = document.querySelector('input[name="email-ask-ai-option"]:checked')?.value;
                     const otherText = emailAskAIOtherInput?.value || '';
@@ -358,7 +358,7 @@ Modals.EmailGallery = (() => {
 
                     if (selectedOption === 'summarise') {
                         if (!emailData[selectedEmailIndex].sender) {
-                            alert('No conversation selected');
+                            await AppDialogs.showAppAlert('No conversation selected');
                             return;
                         }
 
@@ -368,7 +368,7 @@ Modals.EmailGallery = (() => {
                             Modals.ConversationSummary.openForEmailThread(emailData[selectedEmailIndex].sender);
                         } catch (error) {
                             console.error('Error opening conversation summary:', error);
-                            alert('Failed to start conversation summarization. Please try again.');
+                            await AppDialogs.showAppAlert('Failed to start conversation summarization. Please try again.');
                         }
                     }
 
@@ -1275,8 +1275,11 @@ ${textContent}
             const emailSubject = DOM.emailGalleryMetadataSubject?.textContent || 'this email';
             const emailIdToDelete = currentEmailId;
             
-            // Show confirmation dialog
-            const confirmed = confirm(`Are you sure you want to delete "${emailSubject}"?\n\nThis action cannot be undone.`);
+            const confirmed = await AppDialogs.showAppConfirm(
+                'Delete email',
+                `Are you sure you want to delete "${emailSubject}"?\n\nThis action cannot be undone.`,
+                { danger: true }
+            );
             if (!confirmed) {
                 return;
             }
@@ -1312,10 +1315,10 @@ ${textContent}
                 // Reload email list
                 await _handleSearch();
                 
-                alert(`Successfully deleted email: ${emailSubject}`);
+                await AppDialogs.showAppAlert('Success', `Successfully deleted email: ${emailSubject}`);
             } catch (error) {
                 console.error('Error deleting email:', error);
-                alert(`Error deleting email: ${error.message}`);
+                await AppDialogs.showAppAlert('Error', `Error deleting email: ${error.message}`);
             }
         }
 
@@ -1435,7 +1438,7 @@ ${textContent}
                 }
             } catch (error) {
                 console.error('Error loading email:', error);
-                alert('Failed to load email. Please try again.');
+                await AppDialogs.showAppAlert('Failed to load email. Please try again.');
                 _showInstructions();
             }
         }
@@ -1888,14 +1891,14 @@ Modals.EmailEditor = (() => {
                 }
                 _renderTable();
             })
-            .catch(error => {
+            .catch(async (error) => {
                 console.error('Error updating email:', error);
                 // Revert local change on error
                 if (email) {
                     email[fieldName] = !newValue;
                 }
                 _renderTable();
-                alert('Failed to update email. Please try again.');
+                await AppDialogs.showAppAlert('Failed to update email. Please try again.');
             })
             .finally(() => {
                 _setEmailEditorLoading(false);
@@ -1922,28 +1925,21 @@ Modals.EmailEditor = (() => {
             }
         }
 
-        function _handleBulkDelete() {
+        async function _handleBulkDelete() {
             if (selectedEmailIds.size === 0) {
                 return;
             }
 
             const emailIdsArray = Array.from(selectedEmailIds);
             const count = emailIdsArray.length;
-            
-            // Use the existing confirmation modal
-            if (window.Modals && window.Modals.Confirmation) {
-                window.Modals.Confirmation.show(
-                    'Delete Emails',
-                    `Are you sure you want to delete ${count} email(s)? This action cannot be undone.`,
-                    () => {
-                        _bulkDeleteEmails(emailIdsArray);
-                    }
-                );
-            } else {
-                // Fallback to browser confirm
-                if (confirm(`Are you sure you want to delete ${count} email(s)? This action cannot be undone.`)) {
-                    _bulkDeleteEmails(emailIdsArray);
-                }
+
+            const ok = await AppDialogs.showAppConfirm(
+                'Delete Emails',
+                `Are you sure you want to delete ${count} email(s)? This action cannot be undone.`,
+                { danger: true }
+            );
+            if (ok) {
+                _bulkDeleteEmails(emailIdsArray);
             }
         }
 
@@ -1962,7 +1958,7 @@ Modals.EmailEditor = (() => {
                 }
                 return response.json();
             })
-            .then(result => {
+            .then(async (result) => {
                 // Remove deleted emails from local data
                 emailIds.forEach(id => {
                     emailData = emailData.filter(e => e.id !== id);
@@ -1982,35 +1978,31 @@ Modals.EmailEditor = (() => {
                 _renderPagination();
                 
                 if (result.errors && result.errors.length > 0) {
-                    alert(`Deleted ${result.deleted_count} email(s). Some errors occurred:\n${result.errors.join('\n')}`);
+                    await AppDialogs.showAppAlert(
+                        'Partial success',
+                        `Deleted ${result.deleted_count} email(s). Some errors occurred:\n${result.errors.join('\n')}`
+                    );
                 } else {
-                    alert(`Successfully deleted ${result.deleted_count} email(s).`);
+                    await AppDialogs.showAppAlert('Success', `Successfully deleted ${result.deleted_count} email(s).`);
                 }
             })
-            .catch(error => {
+            .catch(async (error) => {
                 console.error('Error bulk deleting emails:', error);
-                alert('Failed to delete emails. Please try again.');
+                await AppDialogs.showAppAlert('Failed to delete emails. Please try again.');
             })
             .finally(() => {
                 _setEmailEditorLoading(false);
             });
         }
 
-        function _confirmDelete(emailId, emailSubject) {
-            // Use the existing confirmation modal
-            if (window.Modals && window.Modals.Confirmation) {
-                window.Modals.Confirmation.show(
-                    'Delete Email',
-                    `Are you sure you want to delete "${emailSubject}"? This action cannot be undone.`,
-                    () => {
-                        _deleteEmail(emailId);
-                    }
-                );
-            } else {
-                // Fallback to browser confirm
-                if (confirm(`Are you sure you want to delete "${emailSubject}"? This action cannot be undone.`)) {
-                    _deleteEmail(emailId);
-                }
+        async function _confirmDelete(emailId, emailSubject) {
+            const ok = await AppDialogs.showAppConfirm(
+                'Delete Email',
+                `Are you sure you want to delete "${emailSubject}"? This action cannot be undone.`,
+                { danger: true }
+            );
+            if (ok) {
+                _deleteEmail(emailId);
             }
         }
 
@@ -2040,9 +2032,9 @@ Modals.EmailEditor = (() => {
                 _renderTable();
                 _renderPagination();
             })
-            .catch(error => {
+            .catch(async (error) => {
                 console.error('Error deleting email:', error);
-                alert('Failed to delete email. Please try again.');
+                await AppDialogs.showAppAlert('Failed to delete email. Please try again.');
             })
             .finally(() => {
                 _setEmailEditorLoading(false);

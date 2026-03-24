@@ -250,8 +250,8 @@ const App = (() => {
                     }
                 }
             );
-        } else {
-            window.alert('Unlock with the owner master key before opening Data Import (visitor key is not sufficient).');
+        } else if (typeof AppDialogs !== 'undefined' && AppDialogs.showAppAlert) {
+            await AppDialogs.showAppAlert('Unlock with the owner master key before opening Data Import (visitor key is not sufficient).');
         }
         return false;
     }
@@ -730,12 +730,6 @@ const App = (() => {
                 if (targetTab === 'tools-access') {
                     if (Modals.LLMToolsAccess && Modals.LLMToolsAccess.load) void Modals.LLMToolsAccess.load();
                 }
-                // Load system instructions when System Instructions tab is opened
-                if (targetTab === 'system-instructions') {
-                    if (Modals.SubjectConfiguration && Modals.SubjectConfiguration.loadAndPopulateForm) {
-                        Modals.SubjectConfiguration.loadAndPopulateForm();
-                    }
-                }
             });
         });
 
@@ -1048,8 +1042,8 @@ const App = (() => {
         
         if (emptyMediaTablesBtn) {
             emptyMediaTablesBtn.addEventListener('click', async () => {
-                // Show confirmation dialog
-                const confirmed = confirm(
+                const confirmed = await AppDialogs.showAppConfirm(
+                    'Empty media tables',
                     'WARNING: This will permanently delete ALL data from:\n\n' +
                     '- attachments\n' +
                     '- media_blob\n' +
@@ -1057,23 +1051,24 @@ const App = (() => {
                     '- messages\n' +
                     '- message_attachments\n\n' +
                     'This action cannot be undone!\n\n' +
-                    'Are you absolutely sure you want to continue?'
+                    'Are you absolutely sure you want to continue?',
+                    { danger: true }
                 );
                 
                 if (!confirmed) {
                     return;
                 }
                 
-                //Double confirmation
-                const doubleConfirmed = confirm(
-                    'FINAL WARNING: This will DELETE ALL messages and media data.\n\n' 
+                const doubleConfirmed = await AppDialogs.showAppConfirm(
+                    'Final warning',
+                    'FINAL WARNING: This will DELETE ALL messages and media data.\n\n',
+                    { danger: true }
                 );
                 
                 if (!doubleConfirmed) {
                     return;
                 }
                 const userInput = "DELETE";
-               // const userInput = prompt('Type "DELETE" to confirm:');
                 if (userInput !== 'DELETE') {
                     if (emptyTablesStatus) {
                         emptyTablesStatus.style.display = 'block';
@@ -2408,7 +2403,7 @@ const App = (() => {
             masterImportConfirmPendingJobs = null;
         }
 
-        function confirmMasterImportExecute() {
+        async function confirmMasterImportExecute() {
             const jobs = masterImportConfirmPendingJobs;
             if (!jobs || !jobs.length) {
                 closeMasterImportConfirmModal();
@@ -2424,7 +2419,7 @@ const App = (() => {
                 });
             }
             if (confirmed.length === 0) {
-                window.alert('Select at least one job to run, or choose Back.');
+                await AppDialogs.showAppAlert('Select at least one job to run, or choose Back.');
                 return;
             }
             closeMasterImportConfirmModal();
@@ -2434,7 +2429,7 @@ const App = (() => {
         async function startMasterImportQueue(jobs) {
             if (!jobs || !jobs.length) return;
             if (importInProgress) {
-                window.alert('An import is already running. Wait for it to finish.');
+                await AppDialogs.showAppAlert('An import is already running. Wait for it to finish.');
                 return;
             }
             masterImportQueueRunning = true;
@@ -2468,15 +2463,15 @@ const App = (() => {
         async function executeMasterImportRun() {
             const { errors, jobs } = gatherMasterImportJobs();
             if (errors.length > 0) {
-                window.alert(errors.join('\n'));
+                await AppDialogs.showAppAlert('Import validation', errors.join('\n'));
                 return;
             }
             if (jobs.length === 0) {
-                window.alert('Select at least one import to run.');
+                await AppDialogs.showAppAlert('Select at least one import to run.');
                 return;
             }
             if (importInProgress) {
-                window.alert('An import is already running. Wait for it to finish.');
+                await AppDialogs.showAppAlert('An import is already running. Wait for it to finish.');
                 return;
             }
             showMasterImportConfirmDialog(jobs);
@@ -2952,9 +2947,12 @@ const App = (() => {
         const masterImportSelectAllBtn = document.getElementById('master-import-select-all-btn');
         const masterImportClearAllBtn = document.getElementById('master-import-clear-all-btn');
 
-        function closeMasterImportModal() {
+        async function closeMasterImportModal() {
             if (masterImportQueueRunning) {
-                window.alert('Wait for the master import queue to finish, or use Cancel in the Data Import dialog to stop the current job.');
+                await AppDialogs.showAppAlert(
+                    'Import running',
+                    'Wait for the master import queue to finish, or use Cancel in the Data Import dialog to stop the current job.'
+                );
                 return;
             }
             closeMasterImportConfirmModal();
@@ -2988,7 +2986,7 @@ const App = (() => {
             masterImportConfirmCancelBtn.addEventListener('click', closeMasterImportConfirmModal);
         }
         if (masterImportConfirmExecuteBtn) {
-            masterImportConfirmExecuteBtn.addEventListener('click', () => { confirmMasterImportExecute(); });
+            masterImportConfirmExecuteBtn.addEventListener('click', () => { void confirmMasterImportExecute(); });
         }
         if (masterImportConfirmModal) {
             masterImportConfirmModal.addEventListener('click', (e) => {

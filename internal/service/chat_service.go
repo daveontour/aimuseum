@@ -502,19 +502,19 @@ func (s *ChatService) TurnCountsBatch(ctx context.Context, ids []int64) (map[int
 // GenerateCompleteProfile builds a multi-step relationship profile for a contact
 // from messages and emails, using the specified AI provider (gemini or claude) to summarize,
 // and saves it to complete_profiles. Mirrors the Python base_chat_service.get_complete_profile_by_name.
-func (s *ChatService) GenerateCompleteProfile(ctx context.Context, name string, provider string, getRAM appai.RAMMasterGetter, tier appai.UnlockTier) error {
+func (s *ChatService) GenerateCompleteProfile(ctx context.Context, name string, provider string, getRAM appai.RAMMasterGetter) error {
 	if getRAM == nil {
 		getRAM = func() (string, bool) { return "", false }
 	}
-	pw, _ := getRAM()
-	policy := s.loadToolAccessPolicy(ctx, pw)
+	// Use the raw tool executor here, not WrapToolExecutorWithPolicy. The LLM Tools Access policy
+	// applies to in-chat tool calls; when policy is unset it denies every tool, which left profile
+	// generation with no messages/emails. Reading DB rows for an explicit profile job is not gated by that policy.
 	base := appai.NewToolExecutor(s.pool, "", s.tavilyKey, s.pepper, getRAM)
-	executor := appai.WrapToolExecutorWithPolicy(base, policy, tier)
-	msgsRaw, err := executor(ctx, "get_imessages_by_chat_session", map[string]any{"chat_session": name})
+	msgsRaw, err := base(ctx, "get_imessages_by_chat_session", map[string]any{"chat_session": name})
 	if err != nil {
 		return fmt.Errorf("get messages: %w", err)
 	}
-	emailsRaw, err := executor(ctx, "get_emails_by_contact", map[string]any{"name": name})
+	emailsRaw, err := base(ctx, "get_emails_by_contact", map[string]any{"name": name})
 	if err != nil {
 		return fmt.Errorf("get emails: %w", err)
 	}
@@ -588,6 +588,10 @@ func (s *ChatService) GenerateCompleteProfile(ctx context.Context, name string, 
 	}
 	if len(current) > 0 {
 		chunks = append(chunks, current)
+	}
+
+	if len(chunks) == 0 {
+		return fmt.Errorf("no messages or emails found for %q — use a name that matches chat_session in imported messages or appears in email from/to fields", name)
 	}
 
 	// Resolve provider: prefer requested, default gemini, fallback claude if gemini unavailable

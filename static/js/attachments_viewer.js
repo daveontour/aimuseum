@@ -3,6 +3,10 @@ let currentOffset = 0;
 let currentOrder = 'random';
 const API_BASE = window.location.origin;
 
+if (typeof AppDialogs !== 'undefined' && AppDialogs.init) {
+    AppDialogs.init();
+}
+
 async function loadAttachment(maxAttempts = 50) {
     try {
         document.getElementById('loading').style.display = 'block';
@@ -254,7 +258,12 @@ async function deleteAttachment() {
     
     const confirmDelete = document.getElementById('confirm-delete-checkbox').checked;
     if (confirmDelete) {
-        if (!confirm('Are you sure you want to delete this attachment?')) {
+        const ok = await AppDialogs.showAppConfirm(
+            'Delete attachment',
+            'Are you sure you want to delete this attachment?',
+            { danger: true }
+        );
+        if (!ok) {
             return;
         }
     }
