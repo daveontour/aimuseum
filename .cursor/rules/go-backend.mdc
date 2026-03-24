@@ -1,0 +1,24 @@
+---
+description: Go backend — handlers, services, repos, router, DB
+globs: "**/*.go"
+alwaysApply: false
+---
+
+# Go backend
+
+## Layers (typical new API)
+
+1. `internal/handler/<domain>_handler.go` — HTTP
+2. `internal/api/router/router.go` — register route
+3. `internal/service/<domain>_service.go` — business logic
+4. `internal/repository/<domain>_repo.go` — SQL via pgx
+
+## Database
+
+- Schema source: `sqlc/schema.sql`; migrations: `internal/database/migrations/` (`NNN_description.sql`).
+- After schema changes: `make generate` (sqlc) when the project uses it; keep repo code consistent with schema.
+
+## Style
+
+- Follow existing error handling and logging in neighboring handlers/services.
+- New endpoints belong in the router with the same middleware/style as siblings.

@@ -1,0 +1,27 @@
+---
+description: Vanilla JS — Modals modules, foundation.js, script order
+globs: "static/js/**/*.js"
+alwaysApply: false
+---
+
+# Frontend (vanilla JS)
+
+## Module pattern
+
+Use a revealing module (IIFE returning `{ init, … }`), consistent with `static/js/museum/*.js`.
+
+## DOM and wiring
+
+- **DOM cache / shared refs:** `static/js/museum/foundation.js` (`DOM` object).
+- **Initialization:** `app.js` / `Modals.initAll()` runs for scripts loaded in order. Scripts **after** `app.js` with `defer` must **self-init** at the bottom of the file (e.g. `MyModule.init();`) per `CLAUDE.md`.
+
+## New feature checklist
+
+1. Add `static/js/museum/<feature>.js`
+2. In `templates/index.template.html`: `<script … defer>` **after** `app.js`
+3. Self-init at end of new file if not wired from `Modals.initAll()`
+4. Styles in `static/css/museum_of.css`
+
+## UX
+
+- Display dates in **local** format unless an existing screen does otherwise.

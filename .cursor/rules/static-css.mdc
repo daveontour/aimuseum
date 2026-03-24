@@ -1,0 +1,11 @@
+---
+description: CSS — consolidated museum_of.css
+globs: "static/css/**/*.css"
+alwaysApply: false
+---
+
+# CSS
+
+- Primary stylesheet: **`static/css/museum_of.css`** (monolithic). Add new rules near related sections or existing component blocks.
+- Prefer scoped selectors (e.g. modal or feature prefixes) to avoid global collisions.
+- When styling disabled controls, reuse or extend existing `:disabled` patterns if present.

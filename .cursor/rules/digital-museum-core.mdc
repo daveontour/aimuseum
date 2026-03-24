@@ -1,0 +1,15 @@
+---
+description: Digital Museum — core context, security, and global constraints
+alwaysApply: true
+---
+
+# Digital Museum — core
+
+Personal AI archive: one deployment per subject. Go + Chi + PostgreSQL backend; vanilla JS SPA; Claude and Gemini with tool-calling. Not multi-tenant.
+
+- **Deeper reference:** root `CLAUDE.md` (layout, env vars, chat/voice, imports).
+- **Do not overwrite or commit `.env`** (secrets). Do not commit personal `runner.json` or stray binaries.
+- **Migrations:** add new files under `internal/database/migrations/` only; never edit applied migrations.
+- **Repositories:** hand-written pgx in `internal/repository/` — do not wire generated sqlc output as the primary access path (see CLAUDE.md).
+- **Frontend:** no Node/npm build; keep vanilla JS unless the project explicitly changes stack.
+- **Scope:** prefer minimal, task-focused diffs; match existing naming and patterns in touched files.

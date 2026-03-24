@@ -1,0 +1,13 @@
+---
+description: AI providers — tools and access
+globs: "internal/ai/**/*.go"
+alwaysApply: false
+---
+
+# AI tools and providers
+
+- **Tool definitions:** `internal/ai/provider.go` → `GetToolDefinitions()`
+- **Execution:** `internal/ai/tools.go` → `NewToolExecutor()` switch (add new cases there)
+- **Access tiers (Visitor / Master):** `internal/ai/tool_access.go` when tools need tier gating
+
+Keep JSON schemas for tools aligned with handler expectations and existing tool style.

@@ -1,0 +1,11 @@
+---
+description: HTML templates — monolithic SPA shell
+globs: "templates/**/*.html"
+alwaysApply: false
+---
+
+# Templates
+
+- **`templates/index.template.html`** is the main SPA shell (very large). Search before editing; avoid unrelated churn.
+- New UI: prefer reusing existing modal/button classes (`modal-btn`, `modal-btn-primary`, etc.) and patterns from nearby sections.
+- New deferred scripts: place after `app.js` and follow `CLAUDE.md` / frontend rule for init order.
