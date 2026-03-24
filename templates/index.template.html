@@ -445,7 +445,7 @@
                                 <li>messages</li>
                                 <li>message_attachments</li>
                             </ul>
-                            <button type="button" id="empty-media-tables-btn" class="modal-btn" style="background-color: #dc3545; color: white;">
+                            <button type="button" id="empty-media-tables-btn" class="modal-btn modal-btn-danger">
                                 <i class="fas fa-trash-alt"></i> Empty Media and Message Tables
                             </button>
                             <div id="empty-tables-status" style="margin-top: 10px; padding: 10px; border-radius: 4px; display: none;"></div>
@@ -457,19 +457,19 @@
                         <div style="display: grid; grid-template-columns: 1fr 1fr; row-gap: 1.5em; column-gap: 5px; margin-bottom: 1.5em;">
                             <div style="min-width: 0;">
                                 <label for="subject-name-input" style="display: block; color: #333; font-weight: bold; margin-bottom: 0.5em;">Subject Name:</label>
-                                <input id="subject-name-input" type="text" placeholder="Enter subject name..." style="width: 100%; box-sizing: border-box; border-radius: 6px; border: 1px solid #bfc9da; padding: 0.7em; font-size: 1em;" required />
+                                <input id="subject-name-input" type="text" placeholder="Enter subject name..." class="form-control" required />
                             </div>
                             <div style="min-width: 0;">
                                 <label for="family-name-input" style="display: block; color: #333; font-weight: bold; margin-bottom: 0.5em;">Family Name:</label>
-                                <input id="family-name-input" type="text" placeholder="Enter family name..." style="width: 100%; box-sizing: border-box; border-radius: 6px; border: 1px solid #bfc9da; padding: 0.7em; font-size: 1em;" />
+                                <input id="family-name-input" type="text" placeholder="Enter family name..." class="form-control" />
                             </div>
                             <div style="min-width: 0;">
                                 <label for="other-names-input" style="display: block; color: #333; font-weight: bold; margin-bottom: 0.5em;">Other Names (comma-separated):</label>
-                                <input id="other-names-input" type="text" placeholder="Enter other names, separated by commas..." style="width: 100%; box-sizing: border-box; border-radius: 6px; border: 1px solid #bfc9da; padding: 0.7em; font-size: 1em;" />
+                                <input id="other-names-input" type="text" placeholder="Enter other names, separated by commas..." class="form-control" />
                             </div>
                             <div style="min-width: 0;">
                                 <label for="subject-gender-select" style="display: block; color: #333; font-weight: bold; margin-bottom: 0.5em;">Gender:</label>
-                                <select id="subject-gender-select" style="width: 100%; box-sizing: border-box; border-radius: 6px; border: 1px solid #bfc9da; padding: 0.7em; font-size: 1em;">
+                                <select id="subject-gender-select" class="form-control">
                                     <option value="Male">Male</option>
                                     <option value="Female">Female</option>
                                 </select>
@@ -477,20 +477,20 @@
                         </div>
                         <div style="margin-bottom: 1.5em;">
                             <label for="email-addresses-input" style="display: block; color: #333; font-weight: bold; margin-bottom: 0.5em;">Email Addresses (comma-separated):</label>
-                            <input id="email-addresses-input" type="text" placeholder="Enter email addresses, separated by commas..." style="width: 100%; border-radius: 6px; border: 1px solid #bfc9da; padding: 0.7em; font-size: 1em;" />
+                            <input id="email-addresses-input" type="text" placeholder="Enter email addresses, separated by commas..." class="form-control" />
                         </div>
                         <div style="margin-bottom: 1.5em;">
                             <label for="phone-numbers-input" style="display: block; color: #333; font-weight: bold; margin-bottom: 0.5em;">Phone Numbers (comma-separated):</label>
-                            <input id="phone-numbers-input" type="text" placeholder="Enter phone numbers, separated by commas..." style="width: 100%; border-radius: 6px; border: 1px solid #bfc9da; padding: 0.7em; font-size: 1em;" />
+                            <input id="phone-numbers-input" type="text" placeholder="Enter phone numbers, separated by commas..." class="form-control" />
                         </div>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; row-gap: 1.5em; column-gap: 5px; margin-bottom: 1.5em;">
                             <div style="margin-bottom: 1.5em; min-width: 0;">
                                 <label for="whatsapp-handle-input" style="display: block; color: #333; font-weight: bold; margin-bottom: 0.5em;">WhatsApp Handle:</label>
-                                <input id="whatsapp-handle-input" type="text" placeholder="Enter WhatsApp handle..." style="width: 100%; box-sizing: border-box; border-radius: 6px; border: 1px solid #bfc9da; padding: 0.7em; font-size: 1em;" />
+                                <input id="whatsapp-handle-input" type="text" placeholder="Enter WhatsApp handle..." class="form-control" />
                             </div>
                             <div style="margin-bottom: 1.5em; min-width: 0;">
                                 <label for="instagram-handle-input" style="display: block; color: #333; font-weight: bold; margin-bottom: 0.5em;">Instagram Handle:</label>
-                                <input id="instagram-handle-input" type="text" placeholder="Enter Instagram handle..." style="width: 100%; box-sizing: border-box; border-radius: 6px; border: 1px solid #bfc9da; padding: 0.7em; font-size: 1em;" />
+                                <input id="instagram-handle-input" type="text" placeholder="Enter Instagram handle..." class="form-control" />
                             </div>
                         </div>
                         <div style="margin-bottom: 1.5em;">
@@ -502,7 +502,7 @@
                             <div id="writing-style-loading" style="display: none; color: #666; margin-bottom: 0.5em;">
                                 <i class="fas fa-spinner fa-spin"></i> Analyzing messages...
                             </div>
-                            <div id="writing-style-display" class="writing-style-markdown" style="max-height: 300px; overflow-y: auto; padding: 0.7em; border-radius: 6px; border: 1px solid #bfc9da; background-color: #f9f9f9; font-size: 0.95em;"></div>
+                            <div id="writing-style-display" class="writing-style-markdown"></div>
                         </div>
                         <div style="margin-bottom: 1.5em;">
                             <label style="display: block; color: #333; font-weight: bold; margin-bottom: 0.5em;">Psychological Profile (AI-generated):</label>
@@ -513,7 +513,7 @@
                             <div id="psychological-profile-loading" style="display: none; color: #666; margin-bottom: 0.5em;">
                                 <i class="fas fa-spinner fa-spin"></i> Analyzing messages...
                             </div>
-                            <div id="psychological-profile-display" class="writing-style-markdown" style="max-height: 300px; overflow-y: auto; padding: 0.7em; border-radius: 6px; border: 1px solid #bfc9da; background-color: #f9f9f9; font-size: 0.95em;"></div>
+                            <div id="psychological-profile-display" class="writing-style-markdown"></div>
                         </div>
                         <div style="display: flex; justify-content: flex-end; gap: 0.7em;">
                             <button type="button" id="cancel-subject-config-btn" class="modal-btn modal-btn-secondary">Cancel</button>
@@ -536,7 +536,7 @@
                                     <i class="fas fa-plus"></i> Add Interest
                                 </button>
                             </div>
-                            <div id="interests-loading" style="padding: 1em; text-align: center; color: #666; display: none;">
+                            <div id="interests-loading" class="loading-state">
                                 <i class="fas fa-spinner fa-spin"></i> Loading...
                             </div>
                             <div id="interests-table-container" style="overflow-x: auto; max-height: 50vh; overflow-y: auto;">
@@ -571,7 +571,7 @@
                                     <i class="fas fa-plus"></i> New Voice
                                 </button>
                             </div>
-                            <div id="custom-voices-loading" style="padding: 1em; text-align: center; color: #666; display: none;">
+                            <div id="custom-voices-loading" class="loading-state">
                                 <i class="fas fa-spinner fa-spin"></i> Loading...
                             </div>
                             <div id="custom-voices-table-container" style="overflow-x: auto; max-height: 45vh; overflow-y: auto;">
@@ -602,15 +602,15 @@
                         <input type="hidden" id="custom-voice-edit-id" value="">
                         <div style="margin-bottom: 1em;">
                             <label style="display: block; font-weight: bold; margin-bottom: 0.3em;">Name</label>
-                            <input type="text" id="custom-voice-edit-name" placeholder="e.g. Grumpy Professor" style="width: 100%; border: 1px solid #bfc9da; border-radius: 6px; padding: 0.6em; font-size: 1em; box-sizing: border-box;">
+                            <input type="text" id="custom-voice-edit-name" placeholder="e.g. Grumpy Professor" class="form-control">
                         </div>
                         <div style="margin-bottom: 1em;">
                             <label style="display: block; font-weight: bold; margin-bottom: 0.3em;">Description <span style="font-weight: normal; color: #888;">(optional)</span></label>
-                            <input type="text" id="custom-voice-edit-description" placeholder="Short description shown in the dropdown" style="width: 100%; border: 1px solid #bfc9da; border-radius: 6px; padding: 0.6em; font-size: 1em; box-sizing: border-box;">
+                            <input type="text" id="custom-voice-edit-description" placeholder="Short description shown in the dropdown" class="form-control">
                         </div>
                         <div style="margin-bottom: 1em;">
                             <label style="display: block; font-weight: bold; margin-bottom: 0.3em;">Instructions</label>
-                            <textarea id="custom-voice-edit-instructions" rows="6" placeholder="Describe the persona in detail. e.g. Your name is Professor X and you are a grumpy academic who speaks in Latin phrases." style="width: 100%; border: 1px solid #bfc9da; border-radius: 6px; padding: 0.6em; font-size: 1em; font-family: monospace; resize: vertical; box-sizing: border-box;"></textarea>
+                            <textarea id="custom-voice-edit-instructions" rows="6" placeholder="Describe the persona in detail. e.g. Your name is Professor X and you are a grumpy academic who speaks in Latin phrases." class="form-control" style="font-family: monospace; resize: vertical;"></textarea>
                             <small style="color: #666;">You can use {SUBJECT_NAME} as a placeholder for the subject name.</small>
                         </div>
                         <div style="margin-bottom: 1.5em;">
@@ -635,7 +635,7 @@
                             <button type="button" class="subject-config-tab" data-tab="core-instructions" style="flex: 1; padding: 0.7em 1em; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-size: 1em; color: #666; transition: all 0.2s;">Core System Instructions</button>
                         </div>
                         <div id="system-instructions-tab-content" class="subject-config-tab-content">
-                            <textarea id="system-instructions-textarea" placeholder="Enter system instructions..." style="width: 100%; border-radius: 6px; border: 1px solid #bfc9da; padding: 0.7em; font-size: 1em; font-family: monospace; resize: vertical;" required></textarea>
+                            <textarea id="system-instructions-textarea" placeholder="Enter system instructions..." class="form-control" style="font-family: monospace; resize: vertical;" required></textarea>
                             <small style="color: #666; display: block; margin-top: 0.5em;">You can use {SUBJECT_NAME} as a placeholder for the subject name.</small>
                             <small style="color: #666; display: block; margin-top: 0.5em;">{he}, {his} and {him} are placeholders for the subject's gender, which will be substituted in.</small><br/>
 
@@ -644,7 +644,7 @@
                             <div style="padding: 0.5em 0.7em; margin-bottom: 0.5em; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; color: #856404;">
                                 <strong>Warning:</strong> Editing Core System Instructions can break chat functionality. Only modify if you understand the impact. Changes require double confirmation to save.
                             </div>
-                            <textarea id="core-system-instructions-textarea" style="width: 100%; border-radius: 6px; border: 1px solid #bfc9da; padding: 0.7em; font-size: 1em; font-family: monospace; resize: vertical;"></textarea>
+                            <textarea id="core-system-instructions-textarea" class="form-control" style="font-family: monospace; resize: vertical;"></textarea>
                             <small style="color: #666; display: block; margin-top: 0.5em;">Core instructions define fundamental chat behaviour. Originally loaded from system_instructions_core.txt.</small>
                         </div>
                         <div style="display: flex; justify-content: flex-end; gap: 0.7em; margin-top: 1em;">
@@ -669,7 +669,7 @@
                                 <!-- <button type="button" id="remove-doc-key-btn" class="modal-btn modal-btn-secondary">
                                     <i class="fas fa-minus"></i> Remove Document Key
                                 </button> -->
-                                <button type="button" id="delete-all-visitor-keys-btn" class="modal-btn" style="background-color: #dc3545; color: white;">
+                                <button type="button" id="delete-all-visitor-keys-btn" class="modal-btn modal-btn-danger">
                                     <i class="fas fa-trash-alt"></i> Delete All
                                 </button>
                             </div>
@@ -761,7 +761,7 @@
                                         <i class="fas fa-plus"></i> Add Match
                                     </button>
                                 </div>
-                                <div id="email-matches-loading" style="padding: 1em; text-align: center; color: #666; display: none; flex-shrink: 0;">
+                                <div id="email-matches-loading" class="loading-state" style="flex-shrink: 0;">
                                     <i class="fas fa-spinner fa-spin"></i> Loading...
                                 </div>
                                 <div id="email-matches-table-container" style="overflow: auto; flex: 1; min-height: 0;">
@@ -800,7 +800,7 @@
                                         <i class="fas fa-plus"></i> Add Exclusion
                                     </button>
                                 </div>
-                                <div id="email-exclusions-loading" style="padding: 1em; text-align: center; color: #666; display: none; flex-shrink: 0;">
+                                <div id="email-exclusions-loading" class="loading-state" style="flex-shrink: 0;">
                                     <i class="fas fa-spinner fa-spin"></i> Loading...
                                 </div>
                                 <div id="email-exclusions-table-container" style="overflow: auto; flex: 1; min-height: 0;">
@@ -837,7 +837,7 @@
                                         <i class="fas fa-plus"></i> Add Classification
                                     </button>
                                 </div>
-                                <div id="email-classifications-loading" style="padding: 1em; text-align: center; color: #666; display: none; flex-shrink: 0;">
+                                <div id="email-classifications-loading" class="loading-state" style="flex-shrink: 0;">
                                     <i class="fas fa-spinner fa-spin"></i> Loading...
                                 </div>
                                 <div id="email-classifications-table-container" style="overflow: auto; flex: 1; min-height: 0;">
@@ -1150,7 +1150,7 @@
                         <div class="container">
                             <div class="email-editor-header-row">
                                 <div class="header">
-                                    <p><h4>Search and edit email metadata (50 per page)</h4></p>
+                                    <h4>Search and edit email metadata (50 per page)</h4>
                                 
                                     <p>Use the search and filter options to find the email you want to edit.
                                     <br/>
@@ -1501,8 +1501,8 @@
                 <div class="modal-body">
                     <div id="conversation-summary-progress" style="display: none; margin-bottom: 1rem; padding: 1rem; background-color: #f8f9fa; border-radius: 4px;">
                         <div style="display: flex; align-items: center; gap: 10px;">
-                            <div class="spinner" style="border: 3px solid #f3f3f3; border-top: 3px solid #007AFF; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite;"></div>
-                            <span id="conversation-summary-progress-text" style="color: #666;">Generating summary...</span>
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <span id="conversation-summary-progress-text">Generating summary...</span>
                         </div>
                     </div>
                     <div id="conversation-summary-content" style="max-height: 60vh; overflow-y: auto; padding: 1rem; background-color: #f8f9fa; border-radius: 4px; line-height: 1.6; color: #333;">
@@ -2101,12 +2101,12 @@
                 <div class="modal-body">
                 <div style="margin-bottom: 1.5rem;">
                     <label for="new-conversation-title-input" style="display: block; color: #333; font-weight: bold; margin-bottom: 0.5em;">Conversation Title:</label>
-                    <input type="text" id="new-conversation-title-input" placeholder="Enter conversation title..." style="width: 100%; border-radius: 6px; border: 1px solid #bfc9da; padding: 0.7em; font-size: 1em;" />
+                    <input type="text" id="new-conversation-title-input" placeholder="Enter conversation title..." class="form-control" />
                 </div>
                 <div style="margin-bottom: 1.5rem;">
                     <label for="new-conversation-voice-select" style="display: block; color: #333; font-weight: bold; margin-bottom: 0.5em;">Voice:</label>
                     <!-- Options populated dynamically from /api/voices by VoiceSelector.loadVoices() -->
-                    <select id="new-conversation-voice-select" style="width: 100%; border-radius: 6px; border: 1px solid #bfc9da; padding: 0.7em; font-size: 1em;">
+                    <select id="new-conversation-voice-select" class="form-control">
                         <option value="expert" selected>Expert</option>
                     </select>
                 </div>
@@ -2725,7 +2725,7 @@
                 </div>
                 <div class="confirmation-modal-body">
                     <label for="save-response-title-input" style="display: block; margin-bottom: 8px; font-weight: 500;">Title</label>
-                    <input type="text" id="save-response-title-input" class="modal-input" placeholder="Enter a title for this saved response" style="width: 100%; padding: 8px 12px; border-radius: 4px; border: 1px solid #bfc9da; font-size: 14px; box-sizing: border-box;">
+                    <input type="text" id="save-response-title-input" class="modal-input form-control" placeholder="Enter a title for this saved response">
                 </div>
                 <div class="confirmation-modal-buttons">
                     <button type="button" id="save-response-title-save" class="modal-btn modal-btn-primary">Save</button>
@@ -2997,7 +2997,7 @@
                     </label>
                     <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
                         <button id="create-new-master-key-cancel" class="modal-btn modal-btn-secondary">Cancel</button>
-                        <button id="create-new-master-key-continue" class="modal-btn" style="background-color: #dc3545; color: white;" disabled>I Understand, Continue</button>
+                        <button id="create-new-master-key-continue" class="modal-btn modal-btn-danger" disabled>I Understand, Continue</button>
                     </div>
                 </div>
                 <!-- Step 2: Password entry -->
@@ -3024,7 +3024,7 @@
                     <div id="create-new-master-key-error" style="color: #dc3545; margin-bottom: 0.5rem; display: none;"></div>
                     <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
                         <button id="create-new-master-key-back" class="modal-btn modal-btn-secondary">Back</button>
-                        <button id="create-new-master-key-submit" class="modal-btn" style="background-color: #dc3545; color: white;"><i class="fas fa-key"></i> Create New Master Key</button>
+                        <button id="create-new-master-key-submit" class="modal-btn modal-btn-danger"><i class="fas fa-key"></i> Create New Master Key</button>
                     </div>
                 </div>
             </div>
@@ -3081,7 +3081,7 @@
                 <div id="delete-trusted-key-error" style="color: #dc3545; margin-bottom: 0.5rem; display: none;"></div>
                 <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
                     <button id="delete-trusted-key-cancel" class="modal-btn modal-btn-secondary">Cancel</button>
-                    <button id="delete-trusted-key-submit" class="modal-btn" style="background-color: #dc3545; color: white;"><i class="fas fa-minus"></i> Delete</button>
+                    <button id="delete-trusted-key-submit" class="modal-btn modal-btn-danger"><i class="fas fa-minus"></i> Delete</button>
                 </div>
             </div>
         </div>
@@ -3137,7 +3137,7 @@
                 <div id="remove-doc-key-error" style="color: #dc3545; margin-bottom: 0.5rem; display: none;"></div>
                 <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
                     <button id="remove-doc-key-cancel" class="modal-btn modal-btn-secondary">Cancel</button>
-                    <button id="remove-doc-key-submit" class="modal-btn" style="background-color: #dc3545; color: white;"><i class="fas fa-minus"></i> Remove Key</button>
+                    <button id="remove-doc-key-submit" class="modal-btn modal-btn-danger"><i class="fas fa-minus"></i> Remove Key</button>
                 </div>
             </div>
         </div>
