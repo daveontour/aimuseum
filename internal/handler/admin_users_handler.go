@@ -65,7 +65,6 @@ func (h *AdminUsersHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/admin/logout", h.Logout)
 	r.Get("/admin/users", h.ListUsers)
 	r.Post("/admin/users", h.CreateUser)
-	r.Put("/admin/users/{id}/password", h.ChangeUserPassword)
 	r.Delete("/admin/users/{id}", h.DeleteUser)
 	r.Get("/admin/users/{id}/dashboard", h.GetUserDashboard)
 }
@@ -157,39 +156,6 @@ func (h *AdminUsersHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, out)
-}
-
-// PUT /admin/users/{id}/password — { "password": "..." }
-func (h *AdminUsersHandler) ChangeUserPassword(w http.ResponseWriter, r *http.Request) {
-	if !h.requireAdmin(w, r) {
-		return
-	}
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid user id")
-		return
-	}
-	var req struct {
-		Password string `json:"password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if len(req.Password) < 12 {
-		writeError(w, http.StatusUnprocessableEntity, "password must be at least 12 characters")
-		return
-	}
-	hash, err := appcrypto.HashPassword(req.Password)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to hash password")
-		return
-	}
-	if err := h.userRepo.UpdatePasswordHash(r.Context(), id, hash); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update password")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // DELETE /admin/users/{id}
@@ -498,27 +464,6 @@ tr:hover td{background:rgba(255,255,255,0.02)}
   </div>
 </div>
 
-<!-- Change password modal -->
-<div class="modal-overlay" id="pw-modal">
-  <div class="modal">
-    <h3>Change Password</h3>
-    <p style="color:#8fa4c8;font-size:0.88rem;margin-bottom:16px" id="pw-modal-label"></p>
-    <div id="pw-error" class="error"></div>
-    <div class="form-group">
-      <label>New Password (min 12 characters)</label>
-      <input id="pw-new" type="password" placeholder="New password" autocomplete="new-password">
-    </div>
-    <div class="form-group">
-      <label>Confirm Password</label>
-      <input id="pw-confirm" type="password" placeholder="Confirm password" autocomplete="new-password">
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" id="pw-cancel">Cancel</button>
-      <button class="btn btn-primary" id="pw-save">Save</button>
-    </div>
-  </div>
-</div>
-
 <!-- Delete confirm modal -->
 <div class="modal-overlay" id="del-modal">
   <div class="modal">
@@ -548,7 +493,6 @@ tr:hover td{background:rgba(255,255,255,0.02)}
 
 <script>
 (function() {
-  let pendingPwUserId = null;
   let pendingDelUserId = null;
 
   async function apiFetch(path, opts) {
@@ -641,8 +585,6 @@ tr:hover td{background:rgba(255,255,255,0.02)}
         '<td><div class="actions">' +
           '<button class="btn btn-info" onclick="openStatsModal(' + u.id + ',\'' + escAttr(u.email) + '\')">' +
             '<i class="fas fa-chart-bar" style="margin-right:4px"></i>Stats</button>' +
-          '<button class="btn btn-warning" onclick="openPwModal(' + u.id + ',\'' + escAttr(u.email) + '\')">' +
-            '<i class="fas fa-key" style="margin-right:4px"></i>Password</button>' +
           '<button class="btn btn-danger" onclick="openDelModal(' + u.id + ',\'' + escAttr(u.email) + '\')">' +
             '<i class="fas fa-trash" style="margin-right:4px"></i>Delete</button>' +
         '</div></td>' +
@@ -795,46 +737,6 @@ tr:hover td{background:rgba(255,255,255,0.02)}
 
     return html;
   }
-
-  // ── Change password modal ──────────────────────────────────────────────────
-  window.openPwModal = function(id, email) {
-    pendingPwUserId = id;
-    document.getElementById('pw-modal-label').textContent = 'User: ' + email;
-    document.getElementById('pw-new').value = '';
-    document.getElementById('pw-confirm').value = '';
-    document.getElementById('pw-error').style.display = 'none';
-    document.getElementById('pw-modal').classList.add('open');
-    document.getElementById('pw-new').focus();
-  };
-
-  document.getElementById('pw-cancel').addEventListener('click', function() {
-    document.getElementById('pw-modal').classList.remove('open');
-  });
-
-  document.getElementById('pw-save').addEventListener('click', async function() {
-    const btn = this;
-    const errEl = document.getElementById('pw-error');
-    const pw = document.getElementById('pw-new').value;
-    const confirm = document.getElementById('pw-confirm').value;
-    errEl.style.display = 'none';
-    if (pw !== confirm) { errEl.textContent = 'Passwords do not match.'; errEl.style.display = 'block'; return; }
-    if (pw.length < 12) { errEl.textContent = 'Password must be at least 12 characters.'; errEl.style.display = 'block'; return; }
-    btn.disabled = true; btn.textContent = 'Saving\u2026';
-    try {
-      const res = await apiFetch('/admin/users/' + pendingPwUserId + '/password', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: pw })
-      });
-      if (res.ok) { document.getElementById('pw-modal').classList.remove('open'); }
-      else {
-        const d = await res.json().catch(() => ({}));
-        errEl.textContent = d.error || 'Failed to change password.';
-        errEl.style.display = 'block';
-      }
-    } catch (e) { errEl.textContent = 'Network error.'; errEl.style.display = 'block'; }
-    finally { btn.disabled = false; btn.textContent = 'Save'; }
-  });
 
   // ── Delete modal ───────────────────────────────────────────────────────────
   window.openDelModal = function(id, email) {
