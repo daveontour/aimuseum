@@ -7,18 +7,20 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 
 // MessageHandler handles all /imessages/* read endpoints.
 type MessageHandler struct {
-	svc *service.MessageService
+	svc          *service.MessageService
+	sessionStore *keystore.SessionMasterStore
 }
 
 // NewMessageHandler creates a MessageHandler.
-func NewMessageHandler(svc *service.MessageService) *MessageHandler {
-	return &MessageHandler{svc: svc}
+func NewMessageHandler(svc *service.MessageService, sessionStore *keystore.SessionMasterStore) *MessageHandler {
+	return &MessageHandler{svc: svc, sessionStore: sessionStore}
 }
 
 // RegisterRoutes mounts all message routes onto r.
@@ -138,6 +140,9 @@ func (h *MessageHandler) GetAttachment(w http.ResponseWriter, r *http.Request) {
 
 // DeleteConversation handles DELETE /imessages/conversation/{chat_session}
 func (h *MessageHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	raw := chi.URLParam(r, "chat_session")
 	decoded, err := url.PathUnescape(raw)
 	if err != nil {

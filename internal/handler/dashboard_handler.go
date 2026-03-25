@@ -5,19 +5,21 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 
 // DashboardHandler handles GET /api/dashboard and GET /api/subject-configuration.
 type DashboardHandler struct {
-	dashSvc    *service.DashboardService
-	subjectSvc *service.SubjectConfigService
+	dashSvc      *service.DashboardService
+	subjectSvc   *service.SubjectConfigService
+	sessionStore *keystore.SessionMasterStore
 }
 
 // NewDashboardHandler creates a DashboardHandler.
-func NewDashboardHandler(dashSvc *service.DashboardService, subjectSvc *service.SubjectConfigService) *DashboardHandler {
-	return &DashboardHandler{dashSvc: dashSvc, subjectSvc: subjectSvc}
+func NewDashboardHandler(dashSvc *service.DashboardService, subjectSvc *service.SubjectConfigService, sessionStore *keystore.SessionMasterStore) *DashboardHandler {
+	return &DashboardHandler{dashSvc: dashSvc, subjectSvc: subjectSvc, sessionStore: sessionStore}
 }
 
 // RegisterRoutes mounts the dashboard and subject-configuration routes.
@@ -39,6 +41,9 @@ func (h *DashboardHandler) GetDashboard(w http.ResponseWriter, r *http.Request) 
 
 // UpsertSubjectConfiguration handles POST /api/subject-configuration.
 func (h *DashboardHandler) UpsertSubjectConfiguration(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var body struct {
 		SubjectName            string  `json:"subject_name"`
 		SystemInstructions     string  `json:"system_instructions"`

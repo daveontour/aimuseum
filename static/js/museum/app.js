@@ -1800,6 +1800,7 @@ const App = (() => {
         }
 
         const importConfigs = {
+            upload_zip: { needsInput: false, title: 'Upload Archive Import', stream: '/import/upload/stream' },
             email_processing: { needsInput: true, title: 'Email Processing (Gmail)', run: async (vals) => { const body = { all_labels: vals.all_folders || false, label_ids: vals.all_folders ? [] : (vals.label_ids || []), new_only: vals.new_only || false, exclude_labels: vals.exclude_labels || [] }; const r = await fetch('/gmail/process', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return r; }, stream: '/gmail/process/stream' },
             whatsapp: { needsInput: true, title: 'WhatsApp Import', fields: [{ id: 'directory_path', key: 'whatsapp_import_directory', label: 'WhatsApp Export Directory', placeholder: 'e.g., C:\\iMazingBackup\\WhatsApp', required: true }], run: async (vals) => { const r = await fetch('/whatsapp/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ directory_path: vals.directory_path }) }); return r; }, stream: '/whatsapp/import/stream' },
             facebook: { needsInput: true, title: 'Facebook Messenger Import', fields: [{ id: 'directory_path', key: 'facebook_import_directory', label: 'Export Directory', placeholder: 'e.g., G:\\My Drive\\meta-2026-Jan-11\\your_facebook_activity\\messages\\e2ee_cutover', required: true }, { id: 'user_name', key: 'facebook_user_name', label: 'Your Name (Optional)', placeholder: 'e.g., Dave Burton', required: false }], run: async (vals) => { const r = await fetch('/facebook/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ directory_path: vals.directory_path, user_name: vals.user_name || null }) }); return r; }, stream: '/facebook/import/stream' },
@@ -2741,8 +2742,8 @@ const App = (() => {
         });
 
         async function checkInitialImportStatus() {
-            const types = ['email_processing','imap_processing','imessage','whatsapp','facebook','instagram','facebook_albums','facebook_places','filesystem','reference_import','image_export','thumbnails','contacts'];
-            const statusEndpoints = { email_processing: '/emails/process/status', imap_processing: '/imap/process/status', imessage: '/imessages/import/status', whatsapp: '/whatsapp/import/status', facebook: '/facebook/import/status', instagram: '/instagram/import/status', facebook_albums: '/facebook/albums/import/status', facebook_places: '/facebook/import-places/status', filesystem: '/images/import/status', reference_import: '/images/import-reference/status', image_export: '/images/export/status', thumbnails: '/images/process-thumbnails/status', contacts: '/contacts/extract/status' };
+            const types = ['upload_zip','email_processing','imap_processing','imessage','whatsapp','facebook','instagram','facebook_albums','facebook_places','filesystem','reference_import','image_export','thumbnails','contacts'];
+            const statusEndpoints = { upload_zip: '/import/upload/status', email_processing: '/emails/process/status', imap_processing: '/imap/process/status', imessage: '/imessages/import/status', whatsapp: '/whatsapp/import/status', facebook: '/facebook/import/status', instagram: '/instagram/import/status', facebook_albums: '/facebook/albums/import/status', facebook_places: '/facebook/import-places/status', filesystem: '/images/import/status', reference_import: '/images/import-reference/status', image_export: '/images/export/status', thumbnails: '/images/process-thumbnails/status', contacts: '/contacts/extract/status' };
             for (const t of types) {
                 try {
                     const r = await fetch(statusEndpoints[t]);
@@ -2752,6 +2753,38 @@ const App = (() => {
             }
         }
         checkInitialImportStatus();
+
+        // ── Public hook for upload-import.js ────────────────────────────────
+        // Called after the upload ZIP modal closes to wire the background import
+        // job into the main import status system without going through runImport().
+        window.ImportControls = {
+            attachUploadStream: function (label) {
+                if (importInProgress) return;
+                importInProgress = true;
+                currentImportType = 'upload_zip';
+                setImportStatus('Starting ' + (label || 'upload') + ' import…');
+                importCancelBtns().forEach(btn => { btn.disabled = false; });
+                closeCurrentEventSource();
+                currentEventSource = new EventSource('/import/upload/stream');
+                currentEventSource.onmessage = function (event) {
+                    try {
+                        const ed = JSON.parse(event.data);
+                        const type = ed.type;
+                        const data = ed.data || {};
+                        if (type === 'progress' || type === 'status') {
+                            setImportStatus(data.status_line || '');
+                        } else if (type === 'completed') {
+                            finishImport('upload_zip', true, data.status_line || 'Upload import completed');
+                        } else if (type === 'error') {
+                            finishImport('upload_zip', false, data.error_message || data.status_line || 'Import error');
+                        } else if (type === 'cancelled') {
+                            finishImport('upload_zip', false, 'Import cancelled');
+                        }
+                    } catch (e) { /* ignore */ }
+                };
+                currentEventSource.onerror = function () { /* SSE auto-reconnects */ };
+            }
+        };
 
 
         
@@ -3161,6 +3194,8 @@ const App = (() => {
     function maybePromptMasterKeyUnlock() {
         (async () => {
             try {
+                // If the user is authenticated, the login flow auto-unlocks the keyring — no prompt needed.
+                if (typeof AuthModule !== 'undefined' && AuthModule.getUser && AuthModule.getUser()) return;
                 const kc = await fetch('/sensitive-data/key-count', { credentials: 'same-origin' });
                 if (!kc.ok) return;
                 const kj = await kc.json();

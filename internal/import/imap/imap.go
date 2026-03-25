@@ -20,6 +20,8 @@ import (
 
 	goImap "github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
+	"github.com/daveontour/aimuseum/internal/appctx"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/encoding/htmlindex"
@@ -161,13 +163,18 @@ func storeEmail(ctx context.Context, pool *pgxpool.Pool, folder string, msg *goI
 		return nil
 	}
 	env := msg.Envelope
-	uid := fmt.Sprintf("%d", msg.SeqNum)
+	emailUID := fmt.Sprintf("%d", msg.SeqNum)
+	userID := appctx.UserIDFromCtx(ctx)
+	userIDVal := any(nil)
+	if userID != 0 {
+		userIDVal = userID
+	}
 
 	if newOnly {
 		var exists bool
 		_ = pool.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM emails WHERE uid=$1 AND folder=$2)`,
-			uid, folder,
+			`SELECT EXISTS(SELECT 1 FROM emails WHERE uid=$1 AND folder=$2 AND (user_id=$3 OR ($3::bigint IS NULL AND user_id IS NULL)))`,
+			emailUID, folder, userIDVal,
 		).Scan(&exists)
 		if exists {
 			return nil
@@ -215,23 +222,46 @@ func storeEmail(ctx context.Context, pool *pgxpool.Pool, folder string, msg *goI
 	}
 	defer tx.Rollback(ctx)
 
+	// Manual check+insert/update to handle nullable user_id correctly
+	// (ON CONFLICT doesn't work with NULL columns in unique constraints).
 	var emailID int64
-	err = tx.QueryRow(ctx, `
-		INSERT INTO emails (uid, folder, subject, from_address, to_addresses, cc_addresses, bcc_addresses,
-		                    date, raw_message, plain_text, snippet, has_attachments,
-		                    user_deleted, is_personal, is_business, is_social, is_promotional,
-		                    is_spam, is_important, use_by_ai)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE)
-		ON CONFLICT (uid, folder) DO UPDATE
-		SET subject=$3, from_address=$4, to_addresses=$5, cc_addresses=$6, bcc_addresses=$7,
-		    date=$8, raw_message=$9, plain_text=$10, snippet=$11, has_attachments=$12,
-		    updated_at=NOW()
-		RETURNING id`,
-		uid, folder, ensureUTF8(env.Subject), ensureUTF8(from), ensureUTF8(to), ensureUTF8(cc), ensureUTF8(bcc),
-		date, ptrEnsureUTF8(rawMsg), ptrEnsureUTF8(plainText), ptrEnsureUTF8(snippet), hasAttach,
+	checkErr := tx.QueryRow(ctx,
+		`SELECT id FROM emails WHERE uid=$1 AND folder=$2 AND (user_id=$3 OR ($3::bigint IS NULL AND user_id IS NULL)) LIMIT 1`,
+		emailUID, folder, userIDVal,
 	).Scan(&emailID)
-	if err != nil {
-		return err
+
+	if checkErr == nil {
+		// Update existing row.
+		_, err = tx.Exec(ctx, `
+			UPDATE emails SET
+				subject=$1, from_address=$2, to_addresses=$3, cc_addresses=$4, bcc_addresses=$5,
+				date=$6, raw_message=$7, plain_text=$8, snippet=$9, has_attachments=$10,
+				updated_at=NOW()
+			WHERE id=$11`,
+			ensureUTF8(env.Subject), ensureUTF8(from), ensureUTF8(to), ensureUTF8(cc), ensureUTF8(bcc),
+			date, ptrEnsureUTF8(rawMsg), ptrEnsureUTF8(plainText), ptrEnsureUTF8(snippet), hasAttach,
+			emailID,
+		)
+		if err != nil {
+			return err
+		}
+	} else if checkErr == pgx.ErrNoRows {
+		// Insert new row.
+		err = tx.QueryRow(ctx, `
+			INSERT INTO emails (uid, folder, subject, from_address, to_addresses, cc_addresses, bcc_addresses,
+			                    date, raw_message, plain_text, snippet, has_attachments, user_id,
+			                    user_deleted, is_personal, is_business, is_social, is_promotional,
+			                    is_spam, is_important, use_by_ai)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE)
+			RETURNING id`,
+			emailUID, folder, ensureUTF8(env.Subject), ensureUTF8(from), ensureUTF8(to), ensureUTF8(cc), ensureUTF8(bcc),
+			date, ptrEnsureUTF8(rawMsg), ptrEnsureUTF8(plainText), ptrEnsureUTF8(snippet), hasAttach, userIDVal,
+		).Scan(&emailID)
+		if err != nil {
+			return err
+		}
+	} else {
+		return checkErr
 	}
 
 	ref := fmt.Sprintf("%d", emailID)
@@ -253,18 +283,18 @@ func storeEmail(ctx context.Context, pool *pgxpool.Pool, folder string, msg *goI
 			mt = mt[:255]
 		}
 		var blobID int64
-		if err = tx.QueryRow(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data) VALUES ($1, NULL) RETURNING id`, att.Data).Scan(&blobID); err != nil {
+		if err = tx.QueryRow(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, NULL, $2) RETURNING id`, att.Data, userIDVal).Scan(&blobID); err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `
 			INSERT INTO media_items (
-				media_blob_id, title, media_type, source, source_reference,
+				media_blob_id, title, media_type, source, source_reference, user_id,
 				processed, available_for_task, rating, has_gps, is_referenced,
 				is_personal, is_business, is_social, is_promotional, is_spam, is_important
-			) VALUES ($1, $2, $3, 'email_attachment', $4,
+			) VALUES ($1, $2, $3, 'email_attachment', $4, $5,
 				FALSE, FALSE, 5, FALSE, FALSE,
 				FALSE, FALSE, FALSE, FALSE, FALSE, FALSE)`,
-			blobID, title, mt, ref); err != nil {
+			blobID, title, mt, ref, userIDVal); err != nil {
 			return err
 		}
 	}

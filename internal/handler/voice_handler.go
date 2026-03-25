@@ -8,18 +8,20 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 
 // VoiceHandler handles all /api/voices/* endpoints.
 type VoiceHandler struct {
-	svc *service.VoiceService
+	svc          *service.VoiceService
+	sessionStore *keystore.SessionMasterStore
 }
 
 // NewVoiceHandler creates a VoiceHandler.
-func NewVoiceHandler(svc *service.VoiceService) *VoiceHandler {
-	return &VoiceHandler{svc: svc}
+func NewVoiceHandler(svc *service.VoiceService, sessionStore *keystore.SessionMasterStore) *VoiceHandler {
+	return &VoiceHandler{svc: svc, sessionStore: sessionStore}
 }
 
 // RegisterRoutes mounts all voice routes.
@@ -133,6 +135,9 @@ func (h *VoiceHandler) Create(w http.ResponseWriter, r *http.Request) {
 // ── Update ────────────────────────────────────────────────────────────────────
 
 func (h *VoiceHandler) Update(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseVoiceID(w, r)
 	if !ok {
 		return
@@ -192,6 +197,9 @@ func (h *VoiceHandler) Update(w http.ResponseWriter, r *http.Request) {
 // ── Delete ────────────────────────────────────────────────────────────────────
 
 func (h *VoiceHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseVoiceID(w, r)
 	if !ok {
 		return

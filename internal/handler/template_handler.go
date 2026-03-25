@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/daveontour/aimuseum/internal/config"
-	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/go-chi/chi/v5"
 )
@@ -27,12 +26,10 @@ type TemplateHandler struct {
 	geminiAvail     bool
 	claudeAvail     bool
 	pageTitle       string
-	sessionStore    *keystore.SessionMasterStore
 }
 
 // NewTemplateHandler creates a TemplateHandler.
-// sessionStore is cleared for this client on every GET / so each full HTML load requires unlocking the master key again.
-func NewTemplateHandler(subjectRepo *repository.SubjectConfigRepo, cfg *config.Config, sessionStore *keystore.SessionMasterStore) *TemplateHandler {
+func NewTemplateHandler(subjectRepo *repository.SubjectConfigRepo, cfg *config.Config) *TemplateHandler {
 	return &TemplateHandler{
 		subjectRepo:     subjectRepo,
 		templatesDir:    cfg.App.TemplatesDir,
@@ -40,7 +37,6 @@ func NewTemplateHandler(subjectRepo *repository.SubjectConfigRepo, cfg *config.C
 		geminiAvail:     cfg.AI.GeminiAPIKey != "",
 		claudeAvail:     cfg.AI.AnthropicAPIKey != "",
 		pageTitle:       cfg.App.PageTitle,
-		sessionStore:    sessionStore,
 	}
 }
 
@@ -51,26 +47,43 @@ func (h *TemplateHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/suggestions", h.GetSuggestions)
 	r.Get("/static/js/museum/foundation.js", h.GetFoundationJS)
 	r.Get("/static/js/museum/modals-people.js", h.GetModalsPeopleJS)
+	r.Get("/login", h.GetLogin)
+	r.Get("/s/{token}", h.GetSharePage)
 }
 
-// GetRoot handles GET / → renders index.template.html (or non_user_init.template.html).
+// GetLogin handles GET /login → serves login.html.
+func (h *TemplateHandler) GetLogin(w http.ResponseWriter, r *http.Request) {
+	content, err := h.readFile(h.templatesDir, "login.html")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "login page not found")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(content))
+}
+
+// GetSharePage handles GET /s/{token} → serves share.html.
+func (h *TemplateHandler) GetSharePage(w http.ResponseWriter, r *http.Request) {
+	content, err := h.readFile(h.templatesDir, "share.html")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "share page not found")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(content))
+}
+
+// GetRoot handles GET / → renders index.template.html.
 func (h *TemplateHandler) GetRoot(w http.ResponseWriter, r *http.Request) {
-	h.sessionStore.Clear(w, r)
 
 	ctx := h.buildContext(r)
 
-	cfg, err := h.subjectRepo.GetFirst(r.Context())
-	if err != nil {
+	if _, err := h.subjectRepo.GetFirst(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("error loading subject configuration: %s", err))
 		return
 	}
 
-	// Choose template: non_user_init when subject_configuration exists but both
-	// subject_name and family_name are empty strings (matches Python logic).
 	templateName := "index.template.html"
-	if cfg == nil || (cfg != nil && cfg.SubjectName == "" && (cfg.FamilyName == nil || *cfg.FamilyName == "")) {
-		templateName = "non_user_init.template.html"
-	}
 
 	// Derive page title (substituting SUBJECT_NAME placeholder if present).
 	pageTitle := strings.ReplaceAll(h.pageTitle, "SUBJECT_NAME", ctx["owner"])

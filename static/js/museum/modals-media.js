@@ -435,7 +435,19 @@ Modals.FBPosts = (() => {
         imgContainer.innerHTML = '<div style="text-align:center;padding:2rem;color:#666;grid-column:1/-1;">Loading media...</div>';
         try {
             const resp = await fetch(`/facebook/posts/${postId}/media`);
-            const mediaItems = await resp.json();
+            let body;
+            try {
+                body = await resp.json();
+            } catch {
+                body = null;
+            }
+            // Error responses use { detail: "..." }; (body || []) is still an object, so .map would throw.
+            if (!resp.ok) {
+                const msg = (body && typeof body.detail === 'string' && body.detail) || resp.statusText || 'Failed to load media';
+                imgContainer.innerHTML = `<div style="color:#dc3545;padding:1rem;grid-column:1/-1;">${msg.replace(/</g, '&lt;')}</div>`;
+                return;
+            }
+            const mediaItems = Array.isArray(body) ? body : [];
             if (mediaItems.length === 0) {
                 imgContainer.innerHTML = '<div style="text-align:center;padding:2rem;color:#888;grid-column:1/-1;">No media found</div>';
                 return;

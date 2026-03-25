@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/model"
 	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
@@ -16,11 +17,12 @@ import (
 type AttachmentHandler struct {
 	svc             *service.AttachmentService
 	pythonStaticDir string
+	sessionStore    *keystore.SessionMasterStore
 }
 
 // NewAttachmentHandler creates an AttachmentHandler.
-func NewAttachmentHandler(svc *service.AttachmentService, pythonStaticDir string) *AttachmentHandler {
-	return &AttachmentHandler{svc: svc, pythonStaticDir: pythonStaticDir}
+func NewAttachmentHandler(svc *service.AttachmentService, pythonStaticDir string, sessionStore *keystore.SessionMasterStore) *AttachmentHandler {
+	return &AttachmentHandler{svc: svc, pythonStaticDir: pythonStaticDir, sessionStore: sessionStore}
 }
 
 // RegisterRoutes mounts all attachment routes.
@@ -249,6 +251,9 @@ func (h *AttachmentHandler) Content(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AttachmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseAttachmentID(w, r)
 	if !ok {
 		return

@@ -28,6 +28,9 @@ func (h *HaveAChatHandler) RegisterRoutes(r chi.Router) {
 
 // POST /chat/have-a-chat/turn
 func (h *HaveAChatHandler) Turn(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req model.HaveAChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())

@@ -43,13 +43,19 @@ func scanAttachmentInfo(row interface{ Scan(...any) error }) (*model.AttachmentI
 
 // GetRandom returns one random email attachment media item with email metadata.
 func (r *AttachmentRepo) GetRandom(ctx context.Context) (*model.AttachmentInfo, error) {
-	a, err := scanAttachmentInfo(r.pool.QueryRow(ctx, `
-		SELECT `+attachmentInfoCols+`
+	uid := uidFromCtx(ctx)
+	q := `
+		SELECT ` + attachmentInfoCols + `
 		FROM media_items mm
 		JOIN emails e ON e.id = mm.source_reference::bigint
-		WHERE `+emailAttachmentSourcesSQL+`
+		WHERE ` + emailAttachmentSourcesSQL
+	args := []any{}
+	// Use qualified alias — media_items mm and emails e both have user_id
+	q, args = addUIDFilterQualified(q, args, uid, "mm")
+	q += `
 		ORDER BY RANDOM()
-		LIMIT 1`))
+		LIMIT 1`
+	a, err := scanAttachmentInfo(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -61,14 +67,21 @@ func (r *AttachmentRepo) GetRandom(ctx context.Context) (*model.AttachmentInfo, 
 
 // GetByIDOrder returns an attachment ordered by media_items.id with an offset.
 func (r *AttachmentRepo) GetByIDOrder(ctx context.Context, offset int) (*model.AttachmentInfo, error) {
-	a, err := scanAttachmentInfo(r.pool.QueryRow(ctx, `
-		SELECT `+attachmentInfoCols+`
+	uid := uidFromCtx(ctx)
+	q := `
+		SELECT ` + attachmentInfoCols + `
 		FROM media_items mm
 		JOIN emails e ON e.id = mm.source_reference::bigint
-		WHERE `+emailAttachmentSourcesSQL+`
+		WHERE ` + emailAttachmentSourcesSQL
+	args := []any{}
+	// Use qualified alias — media_items mm and emails e both have user_id
+	q, args = addUIDFilterQualified(q, args, uid, "mm")
+	args = append(args, offset)
+	q += fmt.Sprintf(`
 		ORDER BY mm.id ASC
-		OFFSET $1
-		LIMIT 1`, offset))
+		OFFSET $%d
+		LIMIT 1`, len(args))
+	a, err := scanAttachmentInfo(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -80,22 +93,28 @@ func (r *AttachmentRepo) GetByIDOrder(ctx context.Context, offset int) (*model.A
 
 // GetBySize returns one attachment ordered by blob size, with an offset.
 func (r *AttachmentRepo) GetBySize(ctx context.Context, orderDesc bool, offset int) (*model.AttachmentInfo, error) {
+	uid := uidFromCtx(ctx)
 	dir := "ASC NULLS LAST"
 	if orderDesc {
 		dir = "DESC NULLS LAST"
 	}
-	q := fmt.Sprintf(`
-		SELECT `+attachmentInfoCols+`, octet_length(mb.image_data) AS sz
+	q := `
+		SELECT ` + attachmentInfoCols + `, octet_length(mb.image_data) AS sz
 		FROM media_items mm
 		JOIN media_blobs mb ON mb.id = mm.media_blob_id
 		JOIN emails e ON e.id = mm.source_reference::bigint
-		WHERE `+emailAttachmentSourcesSQL+`
+		WHERE ` + emailAttachmentSourcesSQL
+	args := []any{}
+	// Use qualified alias — media_items mm, media_blobs mb, and emails e all have user_id
+	q, args = addUIDFilterQualified(q, args, uid, "mm")
+	args = append(args, offset)
+	q += fmt.Sprintf(`
 		ORDER BY octet_length(mb.image_data) %s
-		OFFSET $1
-		LIMIT 1`, dir)
+		OFFSET $%d
+		LIMIT 1`, dir, len(args))
 	var a model.AttachmentInfo
 	var sz *int64
-	err := r.pool.QueryRow(ctx, q, offset).Scan(
+	err := r.pool.QueryRow(ctx, q, args...).Scan(
 		&a.AttachmentID, &a.Filename, &a.ContentType,
 		&a.EmailID, &a.EmailSubject, &a.EmailFrom, &a.EmailDate, &a.EmailFolder,
 		&sz,
@@ -112,8 +131,12 @@ func (r *AttachmentRepo) GetBySize(ctx context.Context, orderDesc bool, offset i
 
 // Count returns the total number of IMAP/Gmail email attachment media items.
 func (r *AttachmentRepo) Count(ctx context.Context) (int64, error) {
+	uid := uidFromCtx(ctx)
+	q := `SELECT COUNT(*) FROM media_items WHERE source IN ('email_attachment', 'gmail_attachment')`
+	args := []any{}
+	q, args = addUIDFilter(q, args, uid)
 	var n int64
-	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM media_items WHERE source IN ('email_attachment', 'gmail_attachment')`).Scan(&n)
+	err := r.pool.QueryRow(ctx, q, args...).Scan(&n)
 	return n, err
 }
 
@@ -130,11 +153,16 @@ const attachmentInfoColsGetInfo = `
 
 // GetInfo returns metadata for a single attachment.
 func (r *AttachmentRepo) GetInfo(ctx context.Context, id int64) (*model.AttachmentInfo, error) {
-	a, err := scanAttachmentInfo(r.pool.QueryRow(ctx, `
-		SELECT `+attachmentInfoColsGetInfo+`
+	uid := uidFromCtx(ctx)
+	q := `
+		SELECT ` + attachmentInfoColsGetInfo + `
 		FROM media_items mm
 		LEFT JOIN emails e ON e.id = mm.source_reference::bigint
-		WHERE `+emailAttachmentSourcesSQL+` AND mm.id = $1`, id))
+		WHERE ` + emailAttachmentSourcesSQL + ` AND mm.id = $1`
+	args := []any{id}
+	// Use qualified alias — media_items mm and emails e both have user_id
+	q, args = addUIDFilterQualified(q, args, uid, "mm")
+	a, err := scanAttachmentInfo(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -146,11 +174,16 @@ func (r *AttachmentRepo) GetInfo(ctx context.Context, id int64) (*model.Attachme
 
 // GetData returns the raw blob data and thumbnail for an attachment.
 func (r *AttachmentRepo) GetData(ctx context.Context, id int64) (data, thumbnail []byte, mediaType string, filename string, err error) {
-	err = r.pool.QueryRow(ctx, `
+	uid := uidFromCtx(ctx)
+	q := `
 		SELECT mb.image_data, mb.thumbnail_data, COALESCE(mm.media_type,'application/octet-stream'), COALESCE(mm.title,'attachment')
 		FROM media_items mm
 		JOIN media_blobs mb ON mb.id = mm.media_blob_id
-		WHERE `+emailAttachmentSourcesSQL+` AND mm.id = $1`, id).
+		WHERE ` + emailAttachmentSourcesSQL + ` AND mm.id = $1`
+	args := []any{id}
+	// Use qualified alias — media_items mm and media_blobs mb both have user_id
+	q, args = addUIDFilterQualified(q, args, uid, "mm")
+	err = r.pool.QueryRow(ctx, q, args...).
 		Scan(&data, &thumbnail, &mediaType, &filename)
 	if err != nil {
 		if isNoRows(err) {
@@ -190,6 +223,7 @@ func (r *AttachmentRepo) Delete(ctx context.Context, id int64) (bool, error) {
 
 // ListImages returns a paginated, sorted list of image (or all) attachments.
 func (r *AttachmentRepo) ListImages(ctx context.Context, page, pageSize int, order, direction string, allTypes bool) ([]*model.AttachmentInfo, int64, error) {
+	uid := uidFromCtx(ctx)
 	var typeFilter string
 	if !allTypes {
 		typeFilter = " AND mm.media_type LIKE 'image/%'"
@@ -219,26 +253,40 @@ func (r *AttachmentRepo) ListImages(ctx context.Context, page, pageSize int, ord
 
 	offset := (page - 1) * pageSize
 
-	var total int64
-	if err := r.pool.QueryRow(ctx, fmt.Sprintf(`
+	// Build count query
+	countBase := fmt.Sprintf(`
 		SELECT COUNT(*)
 		FROM media_items mm
 		JOIN media_blobs mb ON mb.id = mm.media_blob_id
 		JOIN emails e ON e.id = mm.source_reference::bigint
-		WHERE `+emailAttachmentSourcesSQL+`%s`, typeFilter)).Scan(&total); err != nil {
+		WHERE `+emailAttachmentSourcesSQL+`%s`, typeFilter)
+	countArgs := []any{}
+	// Use qualified alias — media_items mm, media_blobs mb, and emails e all have user_id
+	countBase, countArgs = addUIDFilterQualified(countBase, countArgs, uid, "mm")
+
+	var total int64
+	if err := r.pool.QueryRow(ctx, countBase, countArgs...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("ListImagesCount: %w", err)
 	}
 
-	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
+	// Build list query
+	listBase := fmt.Sprintf(`
 		SELECT mm.id, COALESCE(mm.title,'attachment'), COALESCE(mm.media_type,'application/octet-stream'),
 		       e.id, e.subject, e.from_address, e.date, e.folder,
 		       octet_length(mb.image_data) AS sz
 		FROM media_items mm
 		JOIN media_blobs mb ON mb.id = mm.media_blob_id
 		JOIN emails e ON e.id = mm.source_reference::bigint
-		WHERE `+emailAttachmentSourcesSQL+`%s
+		WHERE `+emailAttachmentSourcesSQL+`%s`, typeFilter)
+	listArgs := []any{}
+	// Use qualified alias — media_items mm, media_blobs mb, and emails e all have user_id
+	listBase, listArgs = addUIDFilterQualified(listBase, listArgs, uid, "mm")
+	listArgs = append(listArgs, pageSize, offset)
+	listBase += fmt.Sprintf(`
 		ORDER BY %s
-		LIMIT $1 OFFSET $2`, typeFilter, orderExpr), pageSize, offset)
+		LIMIT $%d OFFSET $%d`, orderExpr, len(listArgs)-1, len(listArgs))
+
+	rows, err := r.pool.Query(ctx, listBase, listArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("ListImages: %w", err)
 	}

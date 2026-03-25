@@ -8765,3 +8765,76 @@ body {
     max-width: 70%;
     align-self: center;
 }
+
+/* ── Upload Import modals ─────────────────────────────────────────────────── */
+
+.upload-import-form-group {
+    margin-bottom: 16px;
+}
+
+.upload-import-label {
+    display: block;
+    font-size: 0.85em;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.upload-import-select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    font-size: 0.95em;
+    color: #1e293b;
+    cursor: pointer;
+}
+
+.upload-import-select:focus {
+    outline: none;
+    border-color: #10b981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+}
+
+.upload-import-dropzone {
+    border: 2px dashed #cbd5e1;
+    border-radius: 8px;
+    padding: 28px 20px;
+    text-align: center;
+    cursor: pointer;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 0.9em;
+    transition: border-color 0.15s, background 0.15s;
+    user-select: none;
+}
+
+.upload-import-dropzone:hover,
+.upload-import-dropzone-hover {
+    border-color: #10b981;
+    background: rgba(16, 185, 129, 0.05);
+}
+
+.upload-import-browse-link {
+    color: #10b981;
+    text-decoration: underline;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.upload-import-progress-bar-track {
+    background: #e2e8f0;
+    border-radius: 4px;
+    height: 8px;
+    overflow: hidden;
+}
+
+.upload-import-progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981, #059669);
+    border-radius: 4px;
+    transition: width 0.2s ease;
+}

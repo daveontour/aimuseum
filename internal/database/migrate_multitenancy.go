@@ -115,6 +115,11 @@ func multitenancyDDL() []string {
 	// app_configuration also gets RLS
 	stmts = append(stmts, rlsStatements("app_configuration")...)
 
+	// ── Step 6: sessions.is_visitor — marks sessions created via visitor key login ──
+	stmts = append(stmts,
+		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_visitor BOOLEAN NOT NULL DEFAULT FALSE`,
+	)
+
 	return stmts
 }
 

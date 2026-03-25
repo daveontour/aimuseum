@@ -34,6 +34,8 @@ func NewImageStorage(pool *pgxpool.Pool) *ImageStorage {
 // Deduplication is by source + source_reference.
 // Returns (media_item_id, is_update, error)
 func (s *ImageStorage) SaveImage(ctx context.Context, sourceRef string, imageData []byte, mediaType, title, tags string, isReferenced bool) (int64, bool, error) {
+	uid := uidFromCtx(ctx)
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to begin transaction: %w", err)
@@ -75,8 +77,8 @@ func (s *ImageStorage) SaveImage(ctx context.Context, sourceRef string, imageDat
 	}
 
 	var blobID int64
-	insertBlobQuery := `INSERT INTO media_blobs (image_data, thumbnail_data) VALUES ($1, $2) RETURNING id`
-	err = tx.QueryRow(ctx, insertBlobQuery, imageData, nil).Scan(&blobID)
+	insertBlobQuery := `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`
+	err = tx.QueryRow(ctx, insertBlobQuery, imageData, nil, uidVal(uid)).Scan(&blobID)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to insert media blob: %w", err)
 	}
@@ -86,8 +88,8 @@ func (s *ImageStorage) SaveImage(ctx context.Context, sourceRef string, imageDat
 		media_blob_id, tags, source, source_reference, title, description,
 		media_type, year, month, latitude, longitude, altitude, has_gps,
 		processed, available_for_task, rating, is_personal, is_business,
-		is_social, is_promotional, is_spam, is_important, is_referenced, created_at, updated_at
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW(), NOW())
+		is_social, is_promotional, is_spam, is_important, is_referenced, user_id, created_at, updated_at
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, NOW(), NOW())
 	RETURNING id`
 
 	err = tx.QueryRow(ctx, insertMetaQuery,
@@ -100,8 +102,9 @@ func (s *ImageStorage) SaveImage(ctx context.Context, sourceRef string, imageDat
 		nullIfEmpty(mediaType),
 		nil, nil, nil, nil, nil,
 		false, false, false, 5,
-		false, false, false, false, false, false, false,
+		false, false, false, false, false, false,
 		isReferenced,
+		uidVal(uid),
 	).Scan(&mediaItemID)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to insert media item: %w", err)
@@ -119,6 +122,8 @@ func (s *ImageStorage) SaveImagesBatch(ctx context.Context, items []BatchImageIt
 	if len(items) == 0 {
 		return 0, 0, nil
 	}
+
+	uid := uidFromCtx(ctx)
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -173,8 +178,8 @@ func (s *ImageStorage) SaveImagesBatch(ctx context.Context, items []BatchImageIt
 			updated++
 		} else {
 			var blobID int64
-			err = tx.QueryRow(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data) VALUES ($1, $2) RETURNING id`,
-				item.ImageData, nil).Scan(&blobID)
+			err = tx.QueryRow(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`,
+				item.ImageData, nil, uidVal(uid)).Scan(&blobID)
 			if err != nil {
 				return 0, 0, fmt.Errorf("failed to insert media blob for %s: %w", item.SourceRef, err)
 			}
@@ -182,8 +187,8 @@ func (s *ImageStorage) SaveImagesBatch(ctx context.Context, items []BatchImageIt
 				media_blob_id, tags, source, source_reference, title, description,
 				media_type, year, month, latitude, longitude, altitude, has_gps,
 				processed, available_for_task, rating, is_personal, is_business,
-				is_social, is_promotional, is_spam, is_important, is_referenced, created_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW(), NOW())`,
+				is_social, is_promotional, is_spam, is_important, is_referenced, user_id, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, NOW(), NOW())`,
 				blobID,
 				nullIfEmpty(item.Tags),
 				filesystemSource,
@@ -195,6 +200,7 @@ func (s *ImageStorage) SaveImagesBatch(ctx context.Context, items []BatchImageIt
 				false, false, false, 5,
 				false, false, false, false, false, false,
 				item.IsReferenced,
+				uidVal(uid),
 			)
 			if err != nil {
 				return 0, 0, fmt.Errorf("failed to insert media item for %s: %w", item.SourceRef, err)

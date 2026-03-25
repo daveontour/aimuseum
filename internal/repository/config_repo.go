@@ -56,7 +56,12 @@ func scanConfig(row interface{ Scan(...any) error }) (*model.AppConfiguration, e
 
 // List returns all configuration rows ordered by key.
 func (r *ConfigRepo) List(ctx context.Context) ([]*model.AppConfiguration, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+configCols+` FROM app_configuration ORDER BY key`)
+	uid := uidFromCtx(ctx)
+	q := `SELECT ` + configCols + ` FROM app_configuration WHERE TRUE`
+	args := []any{}
+	q, args = addUIDFilter(q, args, uid)
+	q += " ORDER BY key"
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListConfig: %w", err)
 	}
@@ -74,6 +79,7 @@ func (r *ConfigRepo) List(ctx context.Context) ([]*model.AppConfiguration, error
 
 // Upsert creates or updates a configuration key. Returns the row.
 func (r *ConfigRepo) Upsert(ctx context.Context, key string, value *string, isMandatory *bool, description *string) (*model.AppConfiguration, error) {
+	uid := uidFromCtx(ctx)
 	// Look up known-key metadata for defaults
 	var defMandatory bool
 	var defDesc *string
@@ -95,15 +101,15 @@ func (r *ConfigRepo) Upsert(ctx context.Context, key string, value *string, isMa
 	}
 
 	c, err := scanConfig(r.pool.QueryRow(ctx,
-		`INSERT INTO app_configuration (key, value, is_mandatory, description)
-		 VALUES ($1, $2, $3, $4)
+		`INSERT INTO app_configuration (key, value, is_mandatory, description, user_id)
+		 VALUES ($1, $2, $3, $4, $5)
 		 ON CONFLICT (key) DO UPDATE SET
 		   value        = EXCLUDED.value,
 		   is_mandatory = COALESCE(EXCLUDED.is_mandatory, app_configuration.is_mandatory),
 		   description  = COALESCE(EXCLUDED.description, app_configuration.description),
 		   updated_at   = NOW()
 		 RETURNING `+configCols,
-		key, value, isMandatory, description,
+		key, value, isMandatory, description, uidVal(uid),
 	))
 	if err != nil {
 		return nil, fmt.Errorf("UpsertConfig %s: %w", key, err)
@@ -113,7 +119,11 @@ func (r *ConfigRepo) Upsert(ctx context.Context, key string, value *string, isMa
 
 // Delete removes a configuration key. Returns false if not found.
 func (r *ConfigRepo) Delete(ctx context.Context, key string) (bool, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM app_configuration WHERE key = $1`, key)
+	uid := uidFromCtx(ctx)
+	q := `DELETE FROM app_configuration WHERE key = $1`
+	args := []any{key}
+	q, args = addUIDFilter(q, args, uid)
+	tag, err := r.pool.Exec(ctx, q, args...)
 	if err != nil {
 		return false, err
 	}
@@ -123,8 +133,12 @@ func (r *ConfigRepo) Delete(ctx context.Context, key string) (bool, error) {
 // SeedFromEnv inserts KNOWN_KEYS not yet in the DB, using env values or documented defaults.
 // Returns number of new rows inserted.
 func (r *ConfigRepo) SeedFromEnv(ctx context.Context) (int, error) {
+	uid := uidFromCtx(ctx)
 	// Load existing keys
-	rows, err := r.pool.Query(ctx, `SELECT key, description FROM app_configuration`)
+	q := `SELECT key, description FROM app_configuration WHERE TRUE`
+	args := []any{}
+	q, args = addUIDFilter(q, args, uid)
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -149,9 +163,10 @@ func (r *ConfigRepo) SeedFromEnv(ctx context.Context) (int, error) {
 		if ex, found := have[kk.Key]; found {
 			// Backfill description if missing
 			if ex.desc == nil && kk.Description != "" {
-				_, err := r.pool.Exec(ctx,
-					`UPDATE app_configuration SET description=$1 WHERE key=$2 AND description IS NULL`,
-					kk.Description, kk.Key)
+				uq := `UPDATE app_configuration SET description=$1 WHERE key=$2 AND description IS NULL`
+				uargs := []any{kk.Description, kk.Key}
+				uq, uargs = addUIDFilter(uq, uargs, uid)
+				_, err := r.pool.Exec(ctx, uq, uargs...)
 				if err != nil {
 					return inserted, err
 				}
@@ -167,10 +182,10 @@ func (r *ConfigRepo) SeedFromEnv(ctx context.Context) (int, error) {
 		}
 		desc := kk.Description
 		_, err := r.pool.Exec(ctx,
-			`INSERT INTO app_configuration (key, value, is_mandatory, description)
-			 VALUES ($1, $2, $3, $4)
+			`INSERT INTO app_configuration (key, value, is_mandatory, description, user_id)
+			 VALUES ($1, $2, $3, $4, $5)
 			 ON CONFLICT (key) DO NOTHING`,
-			kk.Key, value, kk.IsMandatory, desc)
+			kk.Key, value, kk.IsMandatory, desc, uidVal(uid))
 		if err != nil {
 			return inserted, fmt.Errorf("SeedFromEnv %s: %w", kk.Key, err)
 		}

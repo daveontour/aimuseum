@@ -191,6 +191,9 @@ func (h *ChatHandler) GetConversation(w http.ResponseWriter, r *http.Request) {
 
 // PUT /chat/conversations/{id}
 func (h *ChatHandler) UpdateConversation(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, err := parseIDParam(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -216,6 +219,9 @@ func (h *ChatHandler) UpdateConversation(w http.ResponseWriter, r *http.Request)
 
 // DELETE /chat/conversations/{id}
 func (h *ChatHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, err := parseIDParam(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -342,6 +348,9 @@ func (h *ChatHandler) CompleteProfileGet(w http.ResponseWriter, r *http.Request)
 
 // CompleteProfileUpdate handles PUT /chat/complete-profile.
 func (h *ChatHandler) CompleteProfileUpdate(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		Name    string `json:"name"`
 		Profile string `json:"profile"`
@@ -364,6 +373,9 @@ func (h *ChatHandler) CompleteProfileUpdate(w http.ResponseWriter, r *http.Reque
 
 // CompleteProfileDelete handles DELETE /chat/complete-profile?name=...
 func (h *ChatHandler) CompleteProfileDelete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
 	if name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
@@ -385,6 +397,9 @@ func (h *ChatHandler) CompleteProfileDelete(w http.ResponseWriter, r *http.Reque
 // Starts background profile generation using messages and emails for the contact.
 // Provider (gemini or claude) is optional; defaults to gemini.
 func (h *ChatHandler) CompleteProfileStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		FullName string `json:"full_name"`
 		Provider string `json:"provider"`

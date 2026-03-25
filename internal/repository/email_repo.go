@@ -22,14 +22,19 @@ func NewEmailRepo(pool *pgxpool.Pool) *EmailRepo {
 
 // GetByID returns a non-deleted email by primary key, or nil if not found.
 func (r *EmailRepo) GetByID(ctx context.Context, id int64) (*model.Email, error) {
-	row := r.pool.QueryRow(ctx, `
+	uid := uidFromCtx(ctx)
+	q := `
 		SELECT id, uid, folder, subject, from_address, to_addresses, cc_addresses, bcc_addresses,
 		       date, raw_message, plain_text, snippet, embedding,
 		       has_attachments, user_deleted, is_personal, is_business, is_social, is_promotional,
 		       is_spam, is_important, use_by_ai, created_at, updated_at
 		FROM emails
 		WHERE id = $1
-		  AND user_deleted = FALSE`, id)
+		  AND user_deleted = FALSE`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+
+	row := r.pool.QueryRow(ctx, q, args...)
 
 	e := &model.Email{}
 	err := row.Scan(
@@ -51,6 +56,7 @@ func (r *EmailRepo) GetByID(ctx context.Context, id int64) (*model.Email, error)
 // Search returns emails matching the given optional filters, ordered by date DESC.
 // All filters are AND-combined; within to_from the addresses are OR-combined.
 func (r *EmailRepo) Search(ctx context.Context, p model.EmailSearchParams) ([]*model.Email, error) {
+	uid := uidFromCtx(ctx)
 	var (
 		conds []string
 		args  []any
@@ -98,6 +104,11 @@ func (r *EmailRepo) Search(ctx context.Context, p model.EmailSearchParams) ([]*m
 	// Always exclude soft-deleted rows
 	conds = append(conds, "user_deleted = FALSE")
 
+	if uid > 0 {
+		args = append(args, uid)
+		conds = append(conds, fmt.Sprintf("user_id = $%d", len(args)))
+	}
+
 	sql := `SELECT id, uid, folder, subject, from_address, to_addresses, cc_addresses, bcc_addresses,
 			       date, raw_message, plain_text, snippet, embedding,
 			       has_attachments, user_deleted, is_personal, is_business, is_social, is_promotional,
@@ -123,6 +134,8 @@ func (r *EmailRepo) GetByLabels(ctx context.Context, labels []string) ([]*model.
 		return nil, nil
 	}
 
+	uid := uidFromCtx(ctx)
+
 	// Build OR conditions: exact match OR starts with "label," OR contains ",label," OR ends with ",label"
 	var conds []string
 	var args []any
@@ -147,6 +160,7 @@ func (r *EmailRepo) GetByLabels(ctx context.Context, labels []string) ([]*model.
 			       is_spam, is_important, use_by_ai, created_at, updated_at
 			FROM emails
 			WHERE (` + strings.Join(conds, " OR ") + `) AND user_deleted = FALSE`
+	sql, args = addUIDFilter(sql, args, uid)
 
 	rows, err := r.pool.Query(ctx, sql, args...)
 	if err != nil {
@@ -200,6 +214,7 @@ func (r *EmailRepo) GetAttachmentIDsForEmails(ctx context.Context, emailIDs []in
 // Update modifies the flag columns of an existing email.
 // Returns false, nil when the email does not exist (not found or already deleted).
 func (r *EmailRepo) Update(ctx context.Context, id int64, isPersonal, isBusiness, isImportant, useByAI *bool) (bool, error) {
+	uid := uidFromCtx(ctx)
 	var sets []string
 	var args []any
 	n := 1
@@ -224,17 +239,24 @@ func (r *EmailRepo) Update(ctx context.Context, id int64, isPersonal, isBusiness
 	}
 	if len(sets) == 0 {
 		// nothing to update — check existence
+		q := `SELECT EXISTS(SELECT 1 FROM emails WHERE id = $1 AND user_deleted = FALSE`
+		args2 := []any{id}
+		q, args2 = addUIDFilter(q, args2, uid)
+		q += ")"
 		var exists bool
-		err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM emails WHERE id = $1 AND user_deleted = FALSE)`, id).Scan(&exists)
+		err := r.pool.QueryRow(ctx, q, args2...).Scan(&exists)
 		return exists, err
 	}
 
 	args = append(args, id)
-	sql := fmt.Sprintf(
+	q := fmt.Sprintf(
 		"UPDATE emails SET %s WHERE id = $%d AND user_deleted = FALSE",
 		strings.Join(sets, ", "), n,
 	)
-	tag, err := r.pool.Exec(ctx, sql, args...)
+	n++
+	args2 := args
+	q, args2 = addUIDFilter(q, args2, uid)
+	tag, err := r.pool.Exec(ctx, q, args2...)
 	if err != nil {
 		return false, fmt.Errorf("email Update %d: %w", id, err)
 	}
@@ -244,7 +266,8 @@ func (r *EmailRepo) Update(ctx context.Context, id int64, isPersonal, isBusiness
 // SoftDelete nullifies message content and marks the email as deleted.
 // Returns false, nil when the email does not exist.
 func (r *EmailRepo) SoftDelete(ctx context.Context, id int64) (bool, error) {
-	tag, err := r.pool.Exec(ctx, `
+	uid := uidFromCtx(ctx)
+	q := `
 		UPDATE emails
 		SET raw_message      = NULL,
 		    plain_text        = NULL,
@@ -252,7 +275,10 @@ func (r *EmailRepo) SoftDelete(ctx context.Context, id int64) (bool, error) {
 		    embedding         = NULL,
 		    has_attachments   = FALSE,
 		    user_deleted      = TRUE
-		WHERE id = $1 AND user_deleted = FALSE`, id)
+		WHERE id = $1 AND user_deleted = FALSE`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	tag, err := r.pool.Exec(ctx, q, args...)
 	if err != nil {
 		return false, fmt.Errorf("email SoftDelete %d: %w", id, err)
 	}
@@ -279,7 +305,8 @@ func (r *EmailRepo) BulkSoftDelete(ctx context.Context, ids []int64) (int64, err
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	tag, err := r.pool.Exec(ctx, `
+	uid := uidFromCtx(ctx)
+	q := `
 		UPDATE emails
 		SET raw_message      = NULL,
 		    plain_text        = NULL,
@@ -288,7 +315,10 @@ func (r *EmailRepo) BulkSoftDelete(ctx context.Context, ids []int64) (int64, err
 		    has_attachments   = FALSE,
 		    user_deleted      = TRUE
 		WHERE id = ANY($1::bigint[])
-		  AND user_deleted = FALSE`, ids)
+		  AND user_deleted = FALSE`
+	args := []any{ids}
+	q, args = addUIDFilter(q, args, uid)
+	tag, err := r.pool.Exec(ctx, q, args...)
 	if err != nil {
 		return 0, fmt.Errorf("email BulkSoftDelete: %w", err)
 	}
@@ -311,15 +341,19 @@ func (r *EmailRepo) BulkSoftDelete(ctx context.Context, ids []int64) (int64, err
 // GetThreadEmails returns non-deleted emails where from_address or to_addresses
 // contain the given participant address, ordered by date ASC.
 func (r *EmailRepo) GetThreadEmails(ctx context.Context, participant string) ([]*model.Email, error) {
-	rows, err := r.pool.Query(ctx, `
+	uid := uidFromCtx(ctx)
+	q := `
 		SELECT id, uid, folder, subject, from_address, to_addresses, cc_addresses, bcc_addresses,
 		       date, raw_message, plain_text, snippet, embedding,
 		       has_attachments, user_deleted, is_personal, is_business, is_social, is_promotional,
 		       is_spam, is_important, use_by_ai, created_at, updated_at
 		FROM emails
 		WHERE (from_address ILIKE $1 OR to_addresses ILIKE $1)
-		  AND user_deleted = FALSE
-		ORDER BY date ASC`, "%"+participant+"%")
+		  AND user_deleted = FALSE`
+	args := []any{"%" + participant + "%"}
+	q, args = addUIDFilter(q, args, uid)
+	q += " ORDER BY date ASC"
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetThreadEmails: %w", err)
 	}
@@ -330,11 +364,15 @@ func (r *EmailRepo) GetThreadEmails(ctx context.Context, participant string) ([]
 // ListFolders returns distinct folder/label names stored across all emails.
 // Folder is stored as comma-joined label names, so this unnests and deduplicates them.
 func (r *EmailRepo) ListFolders(ctx context.Context) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `
+	uid := uidFromCtx(ctx)
+	q := `
 		SELECT DISTINCT unnest(string_to_array(folder, ',')) AS f
 		FROM emails
-		WHERE user_deleted = FALSE
-		ORDER BY f`)
+		WHERE user_deleted = FALSE`
+	args := []any{}
+	q, args = addUIDFilter(q, args, uid)
+	q += " ORDER BY f"
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListFolders: %w", err)
 	}

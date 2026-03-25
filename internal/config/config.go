@@ -46,9 +46,17 @@ func (d DatabaseConfig) AdminConnectionString() string {
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
 	Port int
-	// SessionCookieSecure sets the Secure flag on the keyring session cookie.
-	// Enable when serving over HTTPS (e.g. SESSION_COOKIE_SECURE=true).
+	// SessionCookieSecure sets the Secure flag on session cookies.
+	// Enable when serving over HTTPS (SESSION_COOKIE_SECURE=true).
 	SessionCookieSecure bool
+	// AuthRequired controls whether unauthenticated requests are rejected (401).
+	// Set AUTH_REQUIRED=true when multi-tenancy is fully rolled out (Layers 2–9).
+	// Defaults to false so the existing single-tenant app keeps working during
+	// incremental layer implementation.
+	AuthRequired bool
+	// AdminPassword is the plaintext password for the /admin panel.
+	// Set via ADMIN_PASSWORD env var. If empty, the admin panel is disabled.
+	AdminPassword string
 }
 
 // CryptoConfig holds secrets used for crypto/key-derivation.
@@ -163,6 +171,8 @@ func Load() (*Config, error) {
 		Server: ServerConfig{
 			Port:                serverPort,
 			SessionCookieSecure: parseBool(getenv("SESSION_COOKIE_SECURE", "false")),
+			AuthRequired:        parseBool(getenv("AUTH_REQUIRED", "false")),
+			AdminPassword:       os.Getenv("ADMIN_PASSWORD"),
 		},
 		App: AppConfig{
 			PageTitle:      getenv("PAGE_TITLE", "Digital Museum of SUBJECT_NAME"),

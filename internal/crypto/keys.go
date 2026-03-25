@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/daveontour/aimuseum/internal/appctx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -24,18 +25,41 @@ func DeriveUserKey(password, pepper string) string {
 	return hex.EncodeToString(DeriveKey(NormalizeKeyringPassword(password), pepper))
 }
 
-// InitSensitiveKeyring generates two fresh random DEKs, truncates sensitive_keyring
-// (CASCADE clears dependent rows, e.g. visitor_key_hints), and inserts one master seat.
-// The shared DEK (encrypted_dek) is accessible by any
-// valid seat password. The master private DEK (encrypted_master_dek) is encrypted
-// solely under masterPassword and is used for the private_store table.
+// uidFilter appends " AND user_id = $N" to q when the context carries a non-zero userID,
+// or " AND user_id IS NULL" when userID == 0 (backward-compatible single-tenant mode).
+// For keyring ops the distinction matters: rows inserted before multi-tenancy have user_id IS NULL
+// so unauthenticated callers still reach them.
+func uidFilter(ctx context.Context, q string, args []any) (string, []any) {
+	uid := appctx.UserIDFromCtx(ctx)
+	if uid > 0 {
+		args = append(args, uid)
+		return q + fmt.Sprintf(" AND user_id = $%d", len(args)), args
+	}
+	return q + " AND user_id IS NULL", args
+}
+
+// uidVal returns the user_id value to use in INSERT statements.
+// Returns nil (SQL NULL) for unauthenticated callers (uid==0).
+func uidVal(ctx context.Context) any {
+	uid := appctx.UserIDFromCtx(ctx)
+	if uid > 0 {
+		return uid
+	}
+	return nil
+}
+
+// InitSensitiveKeyring generates two fresh random DEKs, deletes existing keyring rows for
+// the current user, and inserts one master seat.
+// The shared DEK (encrypted_dek) is accessible by any valid seat password.
+// The master private DEK (encrypted_master_dek) is encrypted solely under masterPassword
+// and is used for the private_store table.
 func InitSensitiveKeyring(ctx context.Context, pool *pgxpool.Pool, masterPassword, pepper string) error {
 	masterPassword = NormalizeKeyringPassword(masterPassword)
 	if masterPassword == "" {
 		return fmt.Errorf("master password required")
 	}
 
-	// Shared DEK — wrapped under master password (other seats added later via AddSensitiveKeyringSeat).
+	// Shared DEK — wrapped under master password.
 	dek := make([]byte, 32)
 	if _, err := rand.Read(dek); err != nil {
 		return fmt.Errorf("generate DEK: %w", err)
@@ -50,9 +74,12 @@ func InitSensitiveKeyring(ctx context.Context, pool *pgxpool.Pool, masterPasswor
 	masterDekHex := hex.EncodeToString(masterDek)
 
 	userKey := DeriveUserKey(masterPassword, pepper)
+	uid := uidVal(ctx)
 
-	if _, err := pool.Exec(ctx, `TRUNCATE TABLE sensitive_keyring CASCADE`); err != nil {
-		return fmt.Errorf("truncate sensitive_keyring: %w", err)
+	// Delete only this user's keyring rows (or IS NULL rows for unauthenticated).
+	deleteQ, deleteArgs := uidFilter(ctx, `DELETE FROM sensitive_keyring WHERE TRUE`, nil)
+	if _, err := pool.Exec(ctx, deleteQ, deleteArgs...); err != nil {
+		return fmt.Errorf("delete sensitive_keyring: %w", err)
 	}
 
 	var encDek []byte
@@ -65,8 +92,9 @@ func InitSensitiveKeyring(ctx context.Context, pool *pgxpool.Pool, masterPasswor
 	}
 
 	_, err := pool.Exec(ctx,
-		`INSERT INTO sensitive_keyring (encrypted_dek, encrypted_master_dek, is_master) VALUES ($1, $2, TRUE)`,
-		encDek, encMasterDek)
+		`INSERT INTO sensitive_keyring (encrypted_dek, encrypted_master_dek, is_master, user_id)
+		 VALUES ($1, $2, TRUE, $3)`,
+		encDek, encMasterDek, uid)
 	return err
 }
 
@@ -78,10 +106,10 @@ func GetMasterPrivateDEK(ctx context.Context, pool *pgxpool.Pool, masterPassword
 		return "", nil
 	}
 	userKey := DeriveUserKey(masterPassword, pepper)
+	q, args := uidFilter(ctx, `SELECT encrypted_master_dek FROM sensitive_keyring WHERE is_master = TRUE`, nil)
+	q += " LIMIT 1"
 	var encMasterDek []byte
-	err := pool.QueryRow(ctx,
-		`SELECT encrypted_master_dek FROM sensitive_keyring WHERE is_master = TRUE LIMIT 1`,
-	).Scan(&encMasterDek)
+	err := pool.QueryRow(ctx, q, args...).Scan(&encMasterDek)
 	if err != nil {
 		return "", fmt.Errorf("query master private DEK: %w", err)
 	}
@@ -129,14 +157,15 @@ func DecryptPrivateValue(ctx context.Context, pool *pgxpool.Pool, masterPassword
 	return plain, nil
 }
 
-// GetSensitiveDEK scans all sensitive_keyring rows and returns the hex DEK that decrypts
-// successfully with userPassword. Returns "" if no matching seat is found.
+// GetSensitiveDEK scans keyring rows for the current user and returns the hex DEK that
+// decrypts successfully with userPassword. Returns "" if no matching seat is found.
 func GetSensitiveDEK(ctx context.Context, pool *pgxpool.Pool, userPassword, pepper string) (string, error) {
 	if userPassword == "" {
 		return "", nil
 	}
 	userKey := DeriveUserKey(userPassword, pepper)
-	rows, err := pool.Query(ctx, `SELECT encrypted_dek FROM sensitive_keyring`)
+	q, args := uidFilter(ctx, `SELECT encrypted_dek FROM sensitive_keyring WHERE TRUE`, nil)
+	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
 		return "", fmt.Errorf("query sensitive_keyring: %w", err)
 	}
@@ -154,13 +183,15 @@ func GetSensitiveDEK(ctx context.Context, pool *pgxpool.Pool, userPassword, pepp
 	return "", rows.Err()
 }
 
-// CheckSensitiveMasterPassword returns true if password decrypts any is_master=TRUE keyring row.
+// CheckSensitiveMasterPassword returns true if password decrypts any is_master=TRUE keyring row
+// for the current user.
 func CheckSensitiveMasterPassword(ctx context.Context, pool *pgxpool.Pool, password, pepper string) (bool, error) {
 	if password == "" {
 		return false, nil
 	}
 	userKey := DeriveUserKey(password, pepper)
-	rows, err := pool.Query(ctx, `SELECT encrypted_dek FROM sensitive_keyring WHERE is_master = TRUE`)
+	q, args := uidFilter(ctx, `SELECT encrypted_dek FROM sensitive_keyring WHERE is_master = TRUE`, nil)
+	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
 		return false, fmt.Errorf("query sensitive_keyring: %w", err)
 	}
@@ -178,9 +209,8 @@ func CheckSensitiveMasterPassword(ctx context.Context, pool *pgxpool.Pool, passw
 	return false, rows.Err()
 }
 
-// CheckSensitiveVisitorSeatPassword reports whether password unlocks a non-master keyring seat.
-// It returns false if the password is empty, if it is the owner master key (use CheckSensitiveMasterPassword),
-// or if no seat matches. Does not return true for the master row.
+// CheckSensitiveVisitorSeatPassword reports whether password unlocks a non-master keyring seat
+// for the current user. Returns false if the password is the owner master key.
 func CheckSensitiveVisitorSeatPassword(ctx context.Context, pool *pgxpool.Pool, password, pepper string) (bool, error) {
 	if password == "" {
 		return false, nil
@@ -220,8 +250,8 @@ func AddSensitiveKeyringSeatTx(ctx context.Context, tx pgx.Tx, pool *pgxpool.Poo
 	}
 	var id int64
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO sensitive_keyring (encrypted_dek, is_master) VALUES ($1, FALSE) RETURNING id`,
-		encDek).Scan(&id); err != nil {
+		`INSERT INTO sensitive_keyring (encrypted_dek, is_master, user_id) VALUES ($1, FALSE, $2) RETURNING id`,
+		encDek, uidVal(ctx)).Scan(&id); err != nil {
 		return 0, err
 	}
 	return id, nil
@@ -253,7 +283,8 @@ func DeleteSensitiveKeyringSeat(ctx context.Context, pool *pgxpool.Pool, userPas
 		return fmt.Errorf("invalid master password")
 	}
 	userKey := DeriveUserKey(userPassword, pepper)
-	rows, err := pool.Query(ctx, `SELECT id, encrypted_dek, is_master FROM sensitive_keyring`)
+	q, args := uidFilter(ctx, `SELECT id, encrypted_dek, is_master FROM sensitive_keyring WHERE TRUE`, nil)
+	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("query sensitive_keyring: %w", err)
 	}
@@ -287,9 +318,9 @@ func DeleteSensitiveKeyringSeat(ctx context.Context, pool *pgxpool.Pool, userPas
 	return err
 }
 
-// DeleteAllVisitorKeyringSeats removes every non-master keyring seat (visitor keys).
+// DeleteAllVisitorKeyringSeats removes every non-master keyring seat for the current user.
 // Associated rows in visitor_key_hints are removed via ON DELETE CASCADE.
-// The master seat (is_master = TRUE) is never deleted. masterPassword must decrypt the master row.
+// The master seat (is_master = TRUE) is never deleted.
 func DeleteAllVisitorKeyringSeats(ctx context.Context, pool *pgxpool.Pool, masterPassword, pepper string) (int64, error) {
 	ok, err := CheckSensitiveMasterPassword(ctx, pool, masterPassword, pepper)
 	if err != nil {
@@ -298,7 +329,8 @@ func DeleteAllVisitorKeyringSeats(ctx context.Context, pool *pgxpool.Pool, maste
 	if !ok {
 		return 0, fmt.Errorf("invalid master password")
 	}
-	ct, err := pool.Exec(ctx, `DELETE FROM sensitive_keyring WHERE is_master = FALSE`)
+	q, args := uidFilter(ctx, `DELETE FROM sensitive_keyring WHERE is_master = FALSE`, nil)
+	ct, err := pool.Exec(ctx, q, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -325,10 +357,11 @@ func DeleteVisitorKeyringSeatByID(ctx context.Context, pool *pgxpool.Pool, keyri
 	return nil
 }
 
-// SensitiveKeyringSeatCount returns the total number of rows in sensitive_keyring.
+// SensitiveKeyringSeatCount returns the total number of keyring rows for the current user.
 func SensitiveKeyringSeatCount(ctx context.Context, pool *pgxpool.Pool) (int, error) {
+	q, args := uidFilter(ctx, `SELECT COUNT(*) FROM sensitive_keyring WHERE TRUE`, nil)
 	var count int
-	err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM sensitive_keyring`).Scan(&count)
+	err := pool.QueryRow(ctx, q, args...).Scan(&count)
 	return count, err
 }
 

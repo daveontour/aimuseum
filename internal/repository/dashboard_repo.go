@@ -23,6 +23,18 @@ func NewDashboardRepo(pool *pgxpool.Pool) *DashboardRepo {
 // Queries are run sequentially; correctness is preferred over minimal latency
 // for this admin-facing endpoint.
 func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, error) {
+	uid := uidFromCtx(ctx)
+
+	// uidCond returns "AND user_id = $N" when uid > 0, with the arg appended.
+	// baseArgs is the starting args slice; returns updated args and the condition fragment.
+	makeUIDCond := func(baseArgs []any) (string, []any) {
+		if uid == 0 {
+			return "", baseArgs
+		}
+		baseArgs = append(baseArgs, uid)
+		return fmt.Sprintf(" AND user_id = $%d", len(baseArgs)), baseArgs
+	}
+
 	out := &model.DashboardRaw{
 		MessageCounts:      make(map[string]int64),
 		MessagesByYear:     make(map[int]int64),
@@ -32,191 +44,242 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	}
 
 	// ── Messages by service ─────────────────────────────────────────────────
-	rows, err := r.pool.Query(ctx,
-		`SELECT COALESCE(service, 'unknown'), COUNT(id) FROM messages GROUP BY service`)
-	if err != nil {
-		return nil, fmt.Errorf("messages by service: %w", err)
-	}
-	for rows.Next() {
-		var svc string
-		var cnt int64
-		if err := rows.Scan(&svc, &cnt); err != nil {
-			rows.Close()
-			return nil, err
+	{
+		uidCond, args := makeUIDCond(nil)
+		rows, err := r.pool.Query(ctx,
+			`SELECT COALESCE(service, 'unknown'), COUNT(id) FROM messages WHERE TRUE`+uidCond+` GROUP BY service`,
+			args...)
+		if err != nil {
+			return nil, fmt.Errorf("messages by service: %w", err)
 		}
-		out.MessageCounts[svc] = cnt
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("messages by service scan: %w", err)
+		for rows.Next() {
+			var svc string
+			var cnt int64
+			if err := rows.Scan(&svc, &cnt); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out.MessageCounts[svc] = cnt
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("messages by service scan: %w", err)
+		}
 	}
 
 	// ── Messages by year ────────────────────────────────────────────────────
-	rows, err = r.pool.Query(ctx,
-		`SELECT EXTRACT(year FROM message_date)::int, COUNT(id)
-		 FROM messages
-		 WHERE message_date IS NOT NULL
-		 GROUP BY 1 ORDER BY 1`)
-	if err != nil {
-		return nil, fmt.Errorf("messages by year: %w", err)
-	}
-	for rows.Next() {
-		var yr int
-		var cnt int64
-		if err := rows.Scan(&yr, &cnt); err != nil {
-			rows.Close()
-			return nil, err
+	{
+		uidCond, args := makeUIDCond(nil)
+		rows, err := r.pool.Query(ctx,
+			`SELECT EXTRACT(year FROM message_date)::int, COUNT(id)
+			 FROM messages
+			 WHERE message_date IS NOT NULL`+uidCond+`
+			 GROUP BY 1 ORDER BY 1`,
+			args...)
+		if err != nil {
+			return nil, fmt.Errorf("messages by year: %w", err)
 		}
-		out.MessagesByYear[yr] = cnt
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("messages by year scan: %w", err)
+		for rows.Next() {
+			var yr int
+			var cnt int64
+			if err := rows.Scan(&yr, &cnt); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out.MessagesByYear[yr] = cnt
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("messages by year scan: %w", err)
+		}
 	}
 
 	// ── Emails by year ──────────────────────────────────────────────────────
-	rows, err = r.pool.Query(ctx,
-		`SELECT EXTRACT(year FROM date)::int, COUNT(id)
-		 FROM emails
-		 WHERE date IS NOT NULL
-		 GROUP BY 1 ORDER BY 1`)
-	if err != nil {
-		return nil, fmt.Errorf("emails by year: %w", err)
-	}
-	for rows.Next() {
-		var yr int
-		var cnt int64
-		if err := rows.Scan(&yr, &cnt); err != nil {
-			rows.Close()
-			return nil, err
+	{
+		uidCond, args := makeUIDCond(nil)
+		rows, err := r.pool.Query(ctx,
+			`SELECT EXTRACT(year FROM date)::int, COUNT(id)
+			 FROM emails
+			 WHERE date IS NOT NULL`+uidCond+`
+			 GROUP BY 1 ORDER BY 1`,
+			args...)
+		if err != nil {
+			return nil, fmt.Errorf("emails by year: %w", err)
 		}
-		out.EmailsByYear[yr] = cnt
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("emails by year scan: %w", err)
+		for rows.Next() {
+			var yr int
+			var cnt int64
+			if err := rows.Scan(&yr, &cnt); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out.EmailsByYear[yr] = cnt
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("emails by year scan: %w", err)
+		}
 	}
 
 	// ── Top 100 senders (unfiltered — service layer removes subject names) ──
-	rows, err = r.pool.Query(ctx,
-		`SELECT sender_name, COUNT(id)
-		 FROM messages
-		 WHERE sender_name IS NOT NULL AND sender_name <> ''
-		 GROUP BY sender_name
-		 ORDER BY COUNT(id) DESC
-		 LIMIT 100`)
-	if err != nil {
-		return nil, fmt.Errorf("top senders: %w", err)
-	}
-	for rows.Next() {
-		var cc model.ContactCount
-		if err := rows.Scan(&cc.Name, &cc.Count); err != nil {
-			rows.Close()
-			return nil, err
+	{
+		uidCond, args := makeUIDCond(nil)
+		rows, err := r.pool.Query(ctx,
+			`SELECT sender_name, COUNT(id)
+			 FROM messages
+			 WHERE sender_name IS NOT NULL AND sender_name <> ''`+uidCond+`
+			 GROUP BY sender_name
+			 ORDER BY COUNT(id) DESC
+			 LIMIT 100`,
+			args...)
+		if err != nil {
+			return nil, fmt.Errorf("top senders: %w", err)
 		}
-		out.TopSenders = append(out.TopSenders, cc)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("top senders scan: %w", err)
+		for rows.Next() {
+			var cc model.ContactCount
+			if err := rows.Scan(&cc.Name, &cc.Count); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out.TopSenders = append(out.TopSenders, cc)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("top senders scan: %w", err)
+		}
 	}
 
 	// ── Contacts count ──────────────────────────────────────────────────────
-	if err := r.pool.QueryRow(ctx, `SELECT COUNT(id) FROM contacts`).Scan(&out.ContactsCount); err != nil {
-		return nil, fmt.Errorf("contacts count: %w", err)
+	{
+		uidCond, args := makeUIDCond(nil)
+		if err := r.pool.QueryRow(ctx,
+			`SELECT COUNT(id) FROM contacts WHERE TRUE`+uidCond, args...,
+		).Scan(&out.ContactsCount); err != nil {
+			return nil, fmt.Errorf("contacts count: %w", err)
+		}
 	}
 
 	// ── Contacts by category ────────────────────────────────────────────────
-	rows, err = r.pool.Query(ctx,
-		`SELECT COALESCE(NULLIF(TRIM(rel_type), ''), 'unknown'), COUNT(id)
-		 FROM contacts
-		 GROUP BY 1`)
-	if err != nil {
-		return nil, fmt.Errorf("contacts by category: %w", err)
-	}
-	for rows.Next() {
-		var cat string
-		var cnt int64
-		if err := rows.Scan(&cat, &cnt); err != nil {
-			rows.Close()
-			return nil, err
+	{
+		uidCond, args := makeUIDCond(nil)
+		rows, err := r.pool.Query(ctx,
+			`SELECT COALESCE(NULLIF(TRIM(rel_type), ''), 'unknown'), COUNT(id)
+			 FROM contacts
+			 WHERE TRUE`+uidCond+`
+			 GROUP BY 1`,
+			args...)
+		if err != nil {
+			return nil, fmt.Errorf("contacts by category: %w", err)
 		}
-		out.ContactsByCategory[cat] = cnt
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("contacts by category scan: %w", err)
+		for rows.Next() {
+			var cat string
+			var cnt int64
+			if err := rows.Scan(&cat, &cnt); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out.ContactsByCategory[cat] = cnt
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("contacts by category scan: %w", err)
+		}
 	}
 
 	// ── Image counts ────────────────────────────────────────────────────────
-	if err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(id) FROM media_items WHERE media_type LIKE 'image/%'`,
-	).Scan(&out.TotalImages); err != nil {
-		return nil, fmt.Errorf("total images: %w", err)
+	{
+		uidCond, args := makeUIDCond(nil)
+		if err := r.pool.QueryRow(ctx,
+			`SELECT COUNT(id) FROM media_items WHERE media_type LIKE 'image/%'`+uidCond, args...,
+		).Scan(&out.TotalImages); err != nil {
+			return nil, fmt.Errorf("total images: %w", err)
+		}
 	}
-	if err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(id) FROM media_items WHERE media_type LIKE 'image/%' AND is_referenced = FALSE`,
-	).Scan(&out.ImportedImages); err != nil {
-		return nil, fmt.Errorf("imported images: %w", err)
+	{
+		uidCond, args := makeUIDCond(nil)
+		if err := r.pool.QueryRow(ctx,
+			`SELECT COUNT(id) FROM media_items WHERE media_type LIKE 'image/%' AND is_referenced = FALSE`+uidCond, args...,
+		).Scan(&out.ImportedImages); err != nil {
+			return nil, fmt.Errorf("imported images: %w", err)
+		}
 	}
-	if err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(id) FROM media_items WHERE media_type LIKE 'image/%' AND is_referenced = TRUE`,
-	).Scan(&out.ReferenceImages); err != nil {
-		return nil, fmt.Errorf("reference images: %w", err)
+	{
+		uidCond, args := makeUIDCond(nil)
+		if err := r.pool.QueryRow(ctx,
+			`SELECT COUNT(id) FROM media_items WHERE media_type LIKE 'image/%' AND is_referenced = TRUE`+uidCond, args...,
+		).Scan(&out.ReferenceImages); err != nil {
+			return nil, fmt.Errorf("reference images: %w", err)
+		}
 	}
-	if err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(mi.id)
-		 FROM media_items mi
-		 JOIN media_blobs mb ON mb.id = mi.media_blob_id
-		 WHERE mi.media_type LIKE 'image/%'
-		   AND mb.thumbnail_data IS NOT NULL`,
-	).Scan(&out.ThumbnailCount); err != nil {
-		return nil, fmt.Errorf("thumbnail count: %w", err)
+	{
+		// Must use qualified alias — both media_items and media_blobs have user_id
+		var uidCond string
+		var args []any
+		if uid > 0 {
+			args = append(args, uid)
+			uidCond = fmt.Sprintf(" AND mi.user_id = $%d", len(args))
+		}
+		if err := r.pool.QueryRow(ctx,
+			`SELECT COUNT(mi.id)
+			 FROM media_items mi
+			 JOIN media_blobs mb ON mb.id = mi.media_blob_id
+			 WHERE mi.media_type LIKE 'image/%'
+			   AND mb.thumbnail_data IS NOT NULL`+uidCond, args...,
+		).Scan(&out.ThumbnailCount); err != nil {
+			return nil, fmt.Errorf("thumbnail count: %w", err)
+		}
 	}
 
 	// ── Images by region ────────────────────────────────────────────────────
-	rows, err = r.pool.Query(ctx,
-		`SELECT COALESCE(NULLIF(TRIM(region), ''), 'Unknown'), COUNT(id)
-		 FROM media_items
-		 WHERE media_type LIKE 'image/%'
-		 GROUP BY 1
-		 ORDER BY COUNT(id) DESC`)
-	if err != nil {
-		return nil, fmt.Errorf("images by region: %w", err)
-	}
-	for rows.Next() {
-		var reg string
-		var cnt int64
-		if err := rows.Scan(&reg, &cnt); err != nil {
-			rows.Close()
-			return nil, err
+	{
+		uidCond, args := makeUIDCond(nil)
+		rows, err := r.pool.Query(ctx,
+			`SELECT COALESCE(NULLIF(TRIM(region), ''), 'Unknown'), COUNT(id)
+			 FROM media_items
+			 WHERE media_type LIKE 'image/%'`+uidCond+`
+			 GROUP BY 1
+			 ORDER BY COUNT(id) DESC`,
+			args...)
+		if err != nil {
+			return nil, fmt.Errorf("images by region: %w", err)
 		}
-		out.ImagesByRegion[reg] = cnt
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("images by region scan: %w", err)
+		for rows.Next() {
+			var reg string
+			var cnt int64
+			if err := rows.Scan(&reg, &cnt); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out.ImagesByRegion[reg] = cnt
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("images by region scan: %w", err)
+		}
 	}
 
 	// ── Simple scalar counts ────────────────────────────────────────────────
-	scalars := []struct {
-		dest  *int64
-		query string
-		label string
-	}{
-		{&out.FacebookAlbumsCount, `SELECT COUNT(id) FROM facebook_albums`, "facebook_albums"},
-		{&out.FacebookPostsCount, `SELECT COUNT(id) FROM facebook_posts`, "facebook_posts"},
-		{&out.LocationsCount, `SELECT COUNT(id) FROM locations`, "locations"},
-		{&out.PlacesCount, `SELECT COUNT(id) FROM places`, "places"},
-		{&out.EmailsCount, `SELECT COUNT(id) FROM emails`, "emails"},
-		{&out.ArtefactsCount, `SELECT COUNT(id) FROM artefacts`, "artefacts"},
-		{&out.ReferenceDocsCount, `SELECT COUNT(id) FROM reference_documents`, "reference_docs"},
-		{&out.ReferenceDocsEnabled, `SELECT COUNT(id) FROM reference_documents WHERE available_for_task = TRUE`, "reference_docs_enabled"},
-		{&out.CompleteProfilesCount, `SELECT COUNT(id) FROM complete_profiles`, "complete_profiles"},
-	}
-	for _, s := range scalars {
-		if err := r.pool.QueryRow(ctx, s.query).Scan(s.dest); err != nil {
-			return nil, fmt.Errorf("%s count: %w", s.label, err)
+	{
+		uidCond, args := makeUIDCond(nil)
+		scalars := []struct {
+			dest  *int64
+			query string
+			label string
+		}{
+			{&out.FacebookAlbumsCount, `SELECT COUNT(id) FROM facebook_albums WHERE TRUE` + uidCond, "facebook_albums"},
+			{&out.FacebookPostsCount, `SELECT COUNT(id) FROM facebook_posts WHERE TRUE` + uidCond, "facebook_posts"},
+			{&out.LocationsCount, `SELECT COUNT(id) FROM locations WHERE TRUE` + uidCond, "locations"},
+			{&out.PlacesCount, `SELECT COUNT(id) FROM places WHERE TRUE` + uidCond, "places"},
+			{&out.EmailsCount, `SELECT COUNT(id) FROM emails WHERE TRUE` + uidCond, "emails"},
+			{&out.ArtefactsCount, `SELECT COUNT(id) FROM artefacts WHERE TRUE` + uidCond, "artefacts"},
+			{&out.ReferenceDocsCount, `SELECT COUNT(id) FROM reference_documents WHERE TRUE` + uidCond, "reference_docs"},
+			{&out.ReferenceDocsEnabled, `SELECT COUNT(id) FROM reference_documents WHERE available_for_task = TRUE` + uidCond, "reference_docs_enabled"},
+			{&out.CompleteProfilesCount, `SELECT COUNT(id) FROM complete_profiles WHERE TRUE` + uidCond, "complete_profiles"},
+		}
+		for _, s := range scalars {
+			if err := r.pool.QueryRow(ctx, s.query, args...).Scan(s.dest); err != nil {
+				return nil, fmt.Errorf("%s count: %w", s.label, err)
+			}
 		}
 	}
 
@@ -227,8 +290,11 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 // the subject person (contacts WHERE is_subject=TRUE plus the contact with id=0).
 // Names are returned as-is (lowercasing is done in the service layer).
 func (r *DashboardRepo) GetSubjectContactNames(ctx context.Context) ([]string, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT name FROM contacts WHERE (is_subject = TRUE OR id = 0) AND name IS NOT NULL`)
+	uid := uidFromCtx(ctx)
+	q := `SELECT name FROM contacts WHERE (is_subject = TRUE OR id = 0) AND name IS NOT NULL`
+	args := []any{}
+	q, args = addUIDFilter(q, args, uid)
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("subject contact names: %w", err)
 	}
@@ -253,12 +319,14 @@ func (r *DashboardRepo) HasCompleteProfileForNames(ctx context.Context, namesLow
 	if len(namesLower) == 0 {
 		return false, nil
 	}
+	uid := uidFromCtx(ctx)
+	q := `SELECT profile FROM complete_profiles
+	      WHERE LOWER(name) = ANY($1) AND profile IS NOT NULL`
+	args := []any{namesLower}
+	q, args = addUIDFilter(q, args, uid)
+	q += ` LIMIT 1`
 	var profile *string
-	err := r.pool.QueryRow(ctx,
-		`SELECT profile FROM complete_profiles
-		 WHERE LOWER(name) = ANY($1) AND profile IS NOT NULL
-		 LIMIT 1`, namesLower,
-	).Scan(&profile)
+	err := r.pool.QueryRow(ctx, q, args...).Scan(&profile)
 	if err != nil {
 		if isNoRows(err) {
 			return false, nil

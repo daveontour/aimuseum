@@ -41,6 +41,7 @@ type ContactListParams struct {
 
 // ListShort returns contacts with short response fields.
 func (r *ContactRepo) ListShort(ctx context.Context, p ContactListParams) ([]*model.Contact, int, error) {
+	uid := uidFromCtx(ctx)
 	const cols = `id, name, email, numemails, facebookid, numfacebook, whatsappid,
 		numwhatsapp, imessageid, numimessages, smsid, numsms, instagramid, numinstagram`
 
@@ -76,6 +77,11 @@ func (r *ContactRepo) ListShort(ctx context.Context, p ContactListParams) ([]*mo
 	}
 	if p.ExcludePhoneNums != nil && *p.ExcludePhoneNums {
 		conds = append(conds, `(name IS NULL OR name = '' OR name !~ '^[0-9\s+]+$')`)
+	}
+
+	if uid > 0 {
+		args = append(args, uid)
+		conds = append(conds, fmt.Sprintf("user_id = $%d", len(args)))
 	}
 
 	where := ""
@@ -137,11 +143,14 @@ func (r *ContactRepo) ListNames(ctx context.Context) ([]struct {
 	ID   int64
 	Name string
 }, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT id, name FROM contacts
-		 WHERE (name IS NULL OR name = '' OR name !~ '^[0-9\s+]+$')
-		   AND (COALESCE(numemails,0)+COALESCE(numfacebook,0)+COALESCE(numwhatsapp,0)+COALESCE(numsms,0)+COALESCE(numimessages,0)+COALESCE(numinstagram,0)) > 0
-		 ORDER BY name`)
+	uid := uidFromCtx(ctx)
+	q := `SELECT id, name FROM contacts
+	      WHERE (name IS NULL OR name = '' OR name !~ '^[0-9\s+]+$')
+	        AND (COALESCE(numemails,0)+COALESCE(numfacebook,0)+COALESCE(numwhatsapp,0)+COALESCE(numsms,0)+COALESCE(numimessages,0)+COALESCE(numinstagram,0)) > 0`
+	args := []any{}
+	q, args = addUIDFilter(q, args, uid)
+	q += " ORDER BY name"
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -168,11 +177,16 @@ func (r *ContactRepo) GetByName(ctx context.Context, name string) (*struct {
 	ID      int64
 	RelType *string
 }, error) {
+	uid := uidFromCtx(ctx)
+	q := `SELECT id, rel_type FROM contacts WHERE name = $1`
+	args := []any{name}
+	q, args = addUIDFilter(q, args, uid)
+	q += " LIMIT 1"
 	var c struct {
 		ID      int64
 		RelType *string
 	}
-	err := r.pool.QueryRow(ctx, `SELECT id, rel_type FROM contacts WHERE name = $1 LIMIT 1`, name).
+	err := r.pool.QueryRow(ctx, q, args...).
 		Scan(&c.ID, &c.RelType)
 	if err != nil {
 		if isNoRows(err) {
@@ -185,13 +199,21 @@ func (r *ContactRepo) GetByName(ctx context.Context, name string) (*struct {
 
 // UpdateRelType sets rel_type for a contact by ID.
 func (r *ContactRepo) UpdateRelType(ctx context.Context, id int64, relType string) error {
-	_, err := r.pool.Exec(ctx, `UPDATE contacts SET rel_type=$1, updated_at=NOW() WHERE id=$2`, relType, id)
+	uid := uidFromCtx(ctx)
+	q := `UPDATE contacts SET rel_type=$1, updated_at=NOW() WHERE id=$2`
+	args := []any{relType, id}
+	q, args = addUIDFilter(q, args, uid)
+	_, err := r.pool.Exec(ctx, q, args...)
 	return err
 }
 
 // Delete removes a contact. Returns false if not found.
 func (r *ContactRepo) Delete(ctx context.Context, id int64) (bool, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM contacts WHERE id = $1`, id)
+	uid := uidFromCtx(ctx)
+	q := `DELETE FROM contacts WHERE id = $1`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	tag, err := r.pool.Exec(ctx, q, args...)
 	if err != nil {
 		return false, err
 	}
@@ -244,6 +266,7 @@ var sourceContactCond = map[string]string{
 
 // GetRelationshipGraph returns nodes for the relationship graph.
 func (r *ContactRepo) GetRelationshipGraph(ctx context.Context, types, sources []string, maxNodes int) ([]*model.ContactGraph, error) {
+	uid := uidFromCtx(ctx)
 	// Validate types
 	var validT []string
 	for _, t := range types {
@@ -281,6 +304,13 @@ func (r *ContactRepo) GetRelationshipGraph(ctx context.Context, types, sources [
 		maxNodes = 1000
 	}
 
+	args := []any{validT}
+	uidCond := ""
+	if uid > 0 {
+		args = append(args, uid)
+		uidCond = fmt.Sprintf(" AND user_id = $%d", len(args))
+	}
+
 	q := fmt.Sprintf(`
 		SELECT id, name, rel_type, numemails, numimessages, numfacebook, numwhatsapp, numsms, numinstagram,
 		       (%s) AS total
@@ -289,11 +319,11 @@ func (r *ContactRepo) GetRelationshipGraph(ctx context.Context, types, sources [
 		    %s
 		    AND (%s)
 		    AND ((%s) > 3)
-		))
+		))%s
 		ORDER BY total DESC
-		LIMIT %d`, sumClause, typeClause, sourceClause, sumClause, maxNodes)
+		LIMIT %d`, sumClause, typeClause, sourceClause, sumClause, uidCond, maxNodes)
 
-	rows, err := r.pool.Query(ctx, q, validT)
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetRelationshipGraph: %w", err)
 	}
@@ -322,12 +352,14 @@ func scanEmailMatch(row interface{ Scan(...any) error }) (*model.EmailMatch, err
 
 // ListEmailMatches returns all email matches with optional primary_name filter.
 func (r *ContactRepo) ListEmailMatches(ctx context.Context, primaryName string) ([]*model.EmailMatch, error) {
-	q := `SELECT id, primary_name, email, created_at, updated_at FROM email_matches`
-	var args []any
+	uid := uidFromCtx(ctx)
+	q := `SELECT id, primary_name, email, created_at, updated_at FROM email_matches WHERE TRUE`
+	args := []any{}
 	if primaryName != "" {
 		args = append(args, "%"+primaryName+"%")
-		q += " WHERE primary_name ILIKE $1"
+		q += fmt.Sprintf(" AND primary_name ILIKE $%d", len(args))
 	}
+	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY primary_name, email"
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -346,8 +378,11 @@ func (r *ContactRepo) ListEmailMatches(ctx context.Context, primaryName string) 
 }
 
 func (r *ContactRepo) GetEmailMatchByID(ctx context.Context, id int64) (*model.EmailMatch, error) {
-	m, err := scanEmailMatch(r.pool.QueryRow(ctx,
-		`SELECT id, primary_name, email, created_at, updated_at FROM email_matches WHERE id=$1`, id))
+	uid := uidFromCtx(ctx)
+	q := `SELECT id, primary_name, email, created_at, updated_at FROM email_matches WHERE id=$1`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	m, err := scanEmailMatch(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -358,16 +393,20 @@ func (r *ContactRepo) GetEmailMatchByID(ctx context.Context, id int64) (*model.E
 }
 
 func (r *ContactRepo) EmailMatchExists(ctx context.Context, primaryName, email string) (bool, error) {
+	uid := uidFromCtx(ctx)
+	q := `SELECT COUNT(*) FROM email_matches WHERE primary_name=$1 AND email=$2`
+	args := []any{primaryName, email}
+	q, args = addUIDFilter(q, args, uid)
 	var n int
-	err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM email_matches WHERE primary_name=$1 AND email=$2`, primaryName, email).Scan(&n)
+	err := r.pool.QueryRow(ctx, q, args...).Scan(&n)
 	return n > 0, err
 }
 
 func (r *ContactRepo) CreateEmailMatch(ctx context.Context, primaryName, email string) (*model.EmailMatch, error) {
+	uid := uidFromCtx(ctx)
 	m, err := scanEmailMatch(r.pool.QueryRow(ctx,
-		`INSERT INTO email_matches (primary_name, email) VALUES ($1,$2)
-		 RETURNING id, primary_name, email, created_at, updated_at`, primaryName, email))
+		`INSERT INTO email_matches (primary_name, email, user_id) VALUES ($1,$2,$3)
+		 RETURNING id, primary_name, email, created_at, updated_at`, primaryName, email, uidVal(uid)))
 	if err != nil {
 		return nil, fmt.Errorf("CreateEmailMatch: %w", err)
 	}
@@ -375,14 +414,16 @@ func (r *ContactRepo) CreateEmailMatch(ctx context.Context, primaryName, email s
 }
 
 func (r *ContactRepo) UpdateEmailMatch(ctx context.Context, id int64, primaryName, email *string) (*model.EmailMatch, error) {
-	m, err := scanEmailMatch(r.pool.QueryRow(ctx,
-		`UPDATE email_matches SET
-		 primary_name = COALESCE($1, primary_name),
-		 email        = COALESCE($2, email),
-		 updated_at   = NOW()
-		 WHERE id=$3
-		 RETURNING id, primary_name, email, created_at, updated_at`,
-		primaryName, email, id))
+	uid := uidFromCtx(ctx)
+	q := `UPDATE email_matches SET
+	      primary_name = COALESCE($1, primary_name),
+	      email        = COALESCE($2, email),
+	      updated_at   = NOW()
+	      WHERE id=$3`
+	args := []any{primaryName, email, id}
+	q, args = addUIDFilter(q, args, uid)
+	q += ` RETURNING id, primary_name, email, created_at, updated_at`
+	m, err := scanEmailMatch(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -393,7 +434,11 @@ func (r *ContactRepo) UpdateEmailMatch(ctx context.Context, id int64, primaryNam
 }
 
 func (r *ContactRepo) DeleteEmailMatch(ctx context.Context, id int64) (bool, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM email_matches WHERE id=$1`, id)
+	uid := uidFromCtx(ctx)
+	q := `DELETE FROM email_matches WHERE id=$1`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	tag, err := r.pool.Exec(ctx, q, args...)
 	if err != nil {
 		return false, err
 	}
@@ -409,6 +454,7 @@ func scanEmailExclusion(row interface{ Scan(...any) error }) (*model.EmailExclus
 }
 
 func (r *ContactRepo) ListEmailExclusions(ctx context.Context, search string, nameEmail *bool) ([]*model.EmailExclusion, error) {
+	uid := uidFromCtx(ctx)
 	var args []any
 	var conds []string
 	if search != "" {
@@ -420,10 +466,11 @@ func (r *ContactRepo) ListEmailExclusions(ctx context.Context, search string, na
 		args = append(args, *nameEmail)
 		conds = append(conds, fmt.Sprintf("name_email = $%d", len(args)))
 	}
-	q := `SELECT id, email, name, name_email, created_at, updated_at FROM email_exclusions`
+	q := `SELECT id, email, name, name_email, created_at, updated_at FROM email_exclusions WHERE TRUE`
 	if len(conds) > 0 {
-		q += " WHERE " + joinAnd(conds)
+		q += " AND " + joinAnd(conds)
 	}
+	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY email, name"
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -442,8 +489,11 @@ func (r *ContactRepo) ListEmailExclusions(ctx context.Context, search string, na
 }
 
 func (r *ContactRepo) GetEmailExclusionByID(ctx context.Context, id int64) (*model.EmailExclusion, error) {
-	e, err := scanEmailExclusion(r.pool.QueryRow(ctx,
-		`SELECT id, email, name, name_email, created_at, updated_at FROM email_exclusions WHERE id=$1`, id))
+	uid := uidFromCtx(ctx)
+	q := `SELECT id, email, name, name_email, created_at, updated_at FROM email_exclusions WHERE id=$1`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	e, err := scanEmailExclusion(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -454,17 +504,20 @@ func (r *ContactRepo) GetEmailExclusionByID(ctx context.Context, id int64) (*mod
 }
 
 func (r *ContactRepo) ExclusionExists(ctx context.Context, email, name string, nameEmail bool) (bool, error) {
+	uid := uidFromCtx(ctx)
+	q := `SELECT COUNT(*) FROM email_exclusions WHERE email=$1 AND name=$2 AND name_email=$3`
+	args := []any{email, name, nameEmail}
+	q, args = addUIDFilter(q, args, uid)
 	var n int
-	err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM email_exclusions WHERE email=$1 AND name=$2 AND name_email=$3`,
-		email, name, nameEmail).Scan(&n)
+	err := r.pool.QueryRow(ctx, q, args...).Scan(&n)
 	return n > 0, err
 }
 
 func (r *ContactRepo) CreateEmailExclusion(ctx context.Context, email, name string, nameEmail bool) (*model.EmailExclusion, error) {
+	uid := uidFromCtx(ctx)
 	e, err := scanEmailExclusion(r.pool.QueryRow(ctx,
-		`INSERT INTO email_exclusions (email, name, name_email) VALUES ($1,$2,$3)
-		 RETURNING id, email, name, name_email, created_at, updated_at`, email, name, nameEmail))
+		`INSERT INTO email_exclusions (email, name, name_email, user_id) VALUES ($1,$2,$3,$4)
+		 RETURNING id, email, name, name_email, created_at, updated_at`, email, name, nameEmail, uidVal(uid)))
 	if err != nil {
 		return nil, fmt.Errorf("CreateEmailExclusion: %w", err)
 	}
@@ -472,15 +525,17 @@ func (r *ContactRepo) CreateEmailExclusion(ctx context.Context, email, name stri
 }
 
 func (r *ContactRepo) UpdateEmailExclusion(ctx context.Context, id int64, email, name *string, nameEmail *bool) (*model.EmailExclusion, error) {
-	e, err := scanEmailExclusion(r.pool.QueryRow(ctx,
-		`UPDATE email_exclusions SET
-		 email      = COALESCE($1, email),
-		 name       = COALESCE($2, name),
-		 name_email = COALESCE($3, name_email),
-		 updated_at = NOW()
-		 WHERE id=$4
-		 RETURNING id, email, name, name_email, created_at, updated_at`,
-		email, name, nameEmail, id))
+	uid := uidFromCtx(ctx)
+	q := `UPDATE email_exclusions SET
+	      email      = COALESCE($1, email),
+	      name       = COALESCE($2, name),
+	      name_email = COALESCE($3, name_email),
+	      updated_at = NOW()
+	      WHERE id=$4`
+	args := []any{email, name, nameEmail, id}
+	q, args = addUIDFilter(q, args, uid)
+	q += ` RETURNING id, email, name, name_email, created_at, updated_at`
+	e, err := scanEmailExclusion(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -491,7 +546,11 @@ func (r *ContactRepo) UpdateEmailExclusion(ctx context.Context, id int64, email,
 }
 
 func (r *ContactRepo) DeleteEmailExclusion(ctx context.Context, id int64) (bool, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM email_exclusions WHERE id=$1`, id)
+	uid := uidFromCtx(ctx)
+	q := `DELETE FROM email_exclusions WHERE id=$1`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	tag, err := r.pool.Exec(ctx, q, args...)
 	if err != nil {
 		return false, err
 	}
@@ -507,6 +566,7 @@ func scanEmailClassification(row interface{ Scan(...any) error }) (*model.EmailC
 }
 
 func (r *ContactRepo) ListEmailClassifications(ctx context.Context, name, classification string) ([]*model.EmailClassification, error) {
+	uid := uidFromCtx(ctx)
 	var args []any
 	var conds []string
 	if name != "" {
@@ -517,10 +577,11 @@ func (r *ContactRepo) ListEmailClassifications(ctx context.Context, name, classi
 		args = append(args, classification)
 		conds = append(conds, fmt.Sprintf("classification = $%d", len(args)))
 	}
-	q := `SELECT id, name, classification, created_at, updated_at FROM email_classifications`
+	q := `SELECT id, name, classification, created_at, updated_at FROM email_classifications WHERE TRUE`
 	if len(conds) > 0 {
-		q += " WHERE " + joinAnd(conds)
+		q += " AND " + joinAnd(conds)
 	}
+	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY classification, name"
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -539,8 +600,11 @@ func (r *ContactRepo) ListEmailClassifications(ctx context.Context, name, classi
 }
 
 func (r *ContactRepo) GetEmailClassificationByID(ctx context.Context, id int64) (*model.EmailClassification, error) {
-	c, err := scanEmailClassification(r.pool.QueryRow(ctx,
-		`SELECT id, name, classification, created_at, updated_at FROM email_classifications WHERE id=$1`, id))
+	uid := uidFromCtx(ctx)
+	q := `SELECT id, name, classification, created_at, updated_at FROM email_classifications WHERE id=$1`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	c, err := scanEmailClassification(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -551,16 +615,20 @@ func (r *ContactRepo) GetEmailClassificationByID(ctx context.Context, id int64) 
 }
 
 func (r *ContactRepo) ClassificationExists(ctx context.Context, name, classification string) (bool, error) {
+	uid := uidFromCtx(ctx)
+	q := `SELECT COUNT(*) FROM email_classifications WHERE name=$1 AND classification=$2`
+	args := []any{name, classification}
+	q, args = addUIDFilter(q, args, uid)
 	var n int
-	err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM email_classifications WHERE name=$1 AND classification=$2`, name, classification).Scan(&n)
+	err := r.pool.QueryRow(ctx, q, args...).Scan(&n)
 	return n > 0, err
 }
 
 func (r *ContactRepo) CreateEmailClassification(ctx context.Context, name, classification string) (*model.EmailClassification, error) {
+	uid := uidFromCtx(ctx)
 	c, err := scanEmailClassification(r.pool.QueryRow(ctx,
-		`INSERT INTO email_classifications (name, classification) VALUES ($1,$2)
-		 RETURNING id, name, classification, created_at, updated_at`, name, classification))
+		`INSERT INTO email_classifications (name, classification, user_id) VALUES ($1,$2,$3)
+		 RETURNING id, name, classification, created_at, updated_at`, name, classification, uidVal(uid)))
 	if err != nil {
 		return nil, fmt.Errorf("CreateEmailClassification: %w", err)
 	}
@@ -568,14 +636,16 @@ func (r *ContactRepo) CreateEmailClassification(ctx context.Context, name, class
 }
 
 func (r *ContactRepo) UpdateEmailClassification(ctx context.Context, id int64, name, classification *string) (*model.EmailClassification, error) {
-	c, err := scanEmailClassification(r.pool.QueryRow(ctx,
-		`UPDATE email_classifications SET
-		 name           = COALESCE($1, name),
-		 classification = COALESCE($2, classification),
-		 updated_at     = NOW()
-		 WHERE id=$3
-		 RETURNING id, name, classification, created_at, updated_at`,
-		name, classification, id))
+	uid := uidFromCtx(ctx)
+	q := `UPDATE email_classifications SET
+	      name           = COALESCE($1, name),
+	      classification = COALESCE($2, classification),
+	      updated_at     = NOW()
+	      WHERE id=$3`
+	args := []any{name, classification, id}
+	q, args = addUIDFilter(q, args, uid)
+	q += ` RETURNING id, name, classification, created_at, updated_at`
+	c, err := scanEmailClassification(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -586,7 +656,11 @@ func (r *ContactRepo) UpdateEmailClassification(ctx context.Context, id int64, n
 }
 
 func (r *ContactRepo) DeleteEmailClassification(ctx context.Context, id int64) (bool, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM email_classifications WHERE id=$1`, id)
+	uid := uidFromCtx(ctx)
+	q := `DELETE FROM email_classifications WHERE id=$1`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	tag, err := r.pool.Exec(ctx, q, args...)
 	if err != nil {
 		return false, err
 	}
@@ -595,8 +669,12 @@ func (r *ContactRepo) DeleteEmailClassification(ctx context.Context, id int64) (
 
 // GetClassificationByNameLower returns a classification row matching name (case-insensitive).
 func (r *ContactRepo) GetClassificationByNameLower(ctx context.Context, name string) (*model.EmailClassification, error) {
-	c, err := scanEmailClassification(r.pool.QueryRow(ctx,
-		`SELECT id, name, classification, created_at, updated_at FROM email_classifications WHERE LOWER(name)=LOWER($1) LIMIT 1`, name))
+	uid := uidFromCtx(ctx)
+	q := `SELECT id, name, classification, created_at, updated_at FROM email_classifications WHERE LOWER(name)=LOWER($1)`
+	args := []any{name}
+	q, args = addUIDFilter(q, args, uid)
+	q += " LIMIT 1"
+	c, err := scanEmailClassification(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -608,12 +686,14 @@ func (r *ContactRepo) GetClassificationByNameLower(ctx context.Context, name str
 
 // ApplyClassificationToContacts updates rel_type for all contacts matching the given name.
 func (r *ContactRepo) ApplyClassificationToContacts(ctx context.Context, name, classification string) error {
-	_, err := r.pool.Exec(ctx,
-		`UPDATE contacts SET rel_type=$1, updated_at=NOW()
-		 WHERE id != 0 AND (
-		     LOWER(name) = LOWER($2)
-		     OR LOWER(alternative_names) LIKE '%' || LOWER($2) || '%'
-		 )`,
-		classification, name)
+	uid := uidFromCtx(ctx)
+	q := `UPDATE contacts SET rel_type=$1, updated_at=NOW()
+	      WHERE id != 0 AND (
+	          LOWER(name) = LOWER($2)
+	          OR LOWER(alternative_names) LIKE '%' || LOWER($2) || '%'
+	      )`
+	args := []any{classification, name}
+	q, args = addUIDFilter(q, args, uid)
+	_, err := r.pool.Exec(ctx, q, args...)
 	return err
 }

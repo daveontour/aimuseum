@@ -27,6 +27,17 @@ func New(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 
+	// ── Authentication service (shared by handler + middleware) ───────────────
+	userRepo := repository.NewUserRepo(pool)
+	authSvc := service.NewAuthService(userRepo, cfg.Server.SessionCookieSecure)
+
+	// ── Auth middleware — runs on every request after RealIP ───────────────────
+	// Auth endpoints and static assets are exempt (see middleware.isExempt).
+	// While AUTH_REQUIRED=false (default) the middleware enriches the context
+	// but does not block unauthenticated requests, preserving single-tenant
+	// behaviour during the incremental multi-tenant rollout.
+	r.Use(middleware.NewAuthMiddleware(authSvc, cfg.Server.AuthRequired))
+
 	// ── Health check ───────────────────────────────────────────────────────────
 	r.Get("/health", healthHandler)
 
@@ -36,17 +47,19 @@ func New(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 	fs := http.FileServer(http.Dir(cfg.App.AssetStaticDir))
 	r.Handle("/static/*", http.StripPrefix("/static/", fs))
 
+	sessionMasterStore := keystore.NewSessionMasterStore(cfg.Server.SessionCookieSecure)
+
 	// ── Emails ─────────────────────────────────────────────────────────────────
 	emailRepo := repository.NewEmailRepo(pool)
 	emailSvc := service.NewEmailService(emailRepo)
-	emailHandler := handler.NewEmailHandler(emailSvc)
+	emailHandler := handler.NewEmailHandler(emailSvc, sessionMasterStore)
 	emailHandler.RegisterRoutes(r)
 
 	// ── Shared: documents / sensitive / private store / RAM master key ───────
 	documentRepo := repository.NewDocumentRepo(pool)
 	documentSvc := service.NewDocumentService(documentRepo, pool, cfg.Crypto.KeyringPepper)
 	sensitiveSvc := service.NewSensitiveService(documentRepo, pool, cfg.Crypto.KeyringPepper)
-	sessionMasterStore := keystore.NewSessionMasterStore(cfg.Server.SessionCookieSecure)
+
 	privateStoreRepo := repository.NewPrivateStoreRepo(pool)
 	privateStoreSvc := service.NewPrivateStoreService(privateStoreRepo, pool, cfg.Crypto.KeyringPepper)
 
@@ -55,24 +68,24 @@ func New(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 	importDialogSettingsHandler.RegisterRoutes(r)
 
 	// ── IMAP ──────────────────────────────────────────────────────────────────
-	imapHandler := handler.NewIMAPHandler(pool)
+	imapHandler := handler.NewIMAPHandler(pool, sessionMasterStore)
 	imapHandler.RegisterRoutes(r)
 
 	// ── Gmail ─────────────────────────────────────────────────────────────────
 	gmailHandler := handler.NewGmailHandler(pool,
-		cfg.Gmail.ClientID, cfg.Gmail.ClientSecret, cfg.Gmail.RedirectURL)
+		cfg.Gmail.ClientID, cfg.Gmail.ClientSecret, cfg.Gmail.RedirectURL, sessionMasterStore)
 	gmailHandler.RegisterRoutes(r)
 
 	// ── Images & media ─────────────────────────────────────────────────────────
 	imageRepo := repository.NewImageRepo(pool)
 	imageSvc := service.NewImageService(imageRepo)
-	imageHandler := handler.NewImageHandler(imageSvc)
+	imageHandler := handler.NewImageHandler(imageSvc, sessionMasterStore)
 	imageHandler.RegisterRoutes(r)
 
 	// ── Messages ────────────────────────────────────────────────────────────────
 	messageRepo := repository.NewMessageRepo(pool)
 	messageSvc := service.NewMessageService(messageRepo)
-	messageHandler := handler.NewMessageHandler(messageSvc)
+	messageHandler := handler.NewMessageHandler(messageSvc, sessionMasterStore)
 	messageHandler.RegisterRoutes(r)
 
 	// ── Dashboard & subject configuration ────────────────────────────────────
@@ -80,11 +93,16 @@ func New(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 	subjectConfigRepo := repository.NewSubjectConfigRepo(pool)
 	dashboardSvc := service.NewDashboardService(dashboardRepo, subjectConfigRepo)
 	subjectConfigSvc := service.NewSubjectConfigService(subjectConfigRepo)
-	dashboardHandler := handler.NewDashboardHandler(dashboardSvc, subjectConfigSvc)
+
+	// ── Auth HTTP endpoints ────────────────────────────────────────────────────
+	authHandler := handler.NewAuthHandler(authSvc, sensitiveSvc, subjectConfigSvc, sessionMasterStore, cfg.Server.SessionCookieSecure)
+	authHandler.RegisterRoutes(r)
+
+	dashboardHandler := handler.NewDashboardHandler(dashboardSvc, subjectConfigSvc, sessionMasterStore)
 	dashboardHandler.RegisterRoutes(r)
 
 	// ── Templated endpoints (GET /, suggestions, JS files) ───────────────────
-	templateHandler := handler.NewTemplateHandler(subjectConfigRepo, cfg, sessionMasterStore)
+	templateHandler := handler.NewTemplateHandler(subjectConfigRepo, cfg)
 	templateHandler.RegisterRoutes(r)
 
 	// ── Reference documents & sensitive data (shared keyring) ────────────────
@@ -103,43 +121,43 @@ func New(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 	// ── Artefacts ─────────────────────────────────────────────────────────────
 	artefactRepo := repository.NewArtefactRepo(pool)
 	artefactSvc := service.NewArtefactService(artefactRepo)
-	artefactHandler := handler.NewArtefactHandler(artefactSvc)
+	artefactHandler := handler.NewArtefactHandler(artefactSvc, sessionMasterStore)
 	artefactHandler.RegisterRoutes(r)
 
 	// ── Voices ────────────────────────────────────────────────────────────────
 	voiceRepo := repository.NewVoiceRepo(pool)
 	voiceSvc := service.NewVoiceService(voiceRepo, subjectConfigRepo, cfg.App.AssetStaticDir)
-	voiceHandler := handler.NewVoiceHandler(voiceSvc)
+	voiceHandler := handler.NewVoiceHandler(voiceSvc, sessionMasterStore)
 	voiceHandler.RegisterRoutes(r)
 
 	// ── Interests ─────────────────────────────────────────────────────────────
 	interestRepo := repository.NewInterestRepo(pool)
 	interestSvc := service.NewInterestService(interestRepo)
-	interestHandler := handler.NewInterestHandler(interestSvc)
+	interestHandler := handler.NewInterestHandler(interestSvc, sessionMasterStore)
 	interestHandler.RegisterRoutes(r)
 
 	// ── Saved responses ───────────────────────────────────────────────────────
 	savedResponseRepo := repository.NewSavedResponseRepo(pool)
 	savedResponseSvc := service.NewSavedResponseService(savedResponseRepo)
-	savedResponseHandler := handler.NewSavedResponseHandler(savedResponseSvc)
+	savedResponseHandler := handler.NewSavedResponseHandler(savedResponseSvc, sessionMasterStore)
 	savedResponseHandler.RegisterRoutes(r)
 
 	// ── Configuration ─────────────────────────────────────────────────────────
 	configRepo := repository.NewConfigRepo(pool)
 	configSvc := service.NewConfigService(configRepo)
-	configHandler := handler.NewConfigHandler(configSvc)
+	configHandler := handler.NewConfigHandler(configSvc, sessionMasterStore)
 	configHandler.RegisterRoutes(r)
 
 	// ── Contacts, email-matches, exclusions, classifications ──────────────────
 	contactRepo := repository.NewContactRepo(pool)
 	contactSvc := service.NewContactService(contactRepo)
-	contactHandler := handler.NewContactHandler(contactSvc)
+	contactHandler := handler.NewContactHandler(contactSvc, sessionMasterStore)
 	contactHandler.RegisterRoutes(r)
 
 	// ── Attachments ───────────────────────────────────────────────────────────
 	attachmentRepo := repository.NewAttachmentRepo(pool)
 	attachmentSvc := service.NewAttachmentService(attachmentRepo)
-	attachmentHandler := handler.NewAttachmentHandler(attachmentSvc, cfg.App.AssetStaticDir)
+	attachmentHandler := handler.NewAttachmentHandler(attachmentSvc, cfg.App.AssetStaticDir, sessionMasterStore)
 	attachmentHandler.RegisterRoutes(r)
 
 	// ── Import jobs ───────────────────────────────────────────────────────────
@@ -148,8 +166,13 @@ func New(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 		ImageRepo:         imageRepo,
 		Pool:              pool,
 		SubjectConfigRepo: subjectConfigRepo,
+		SessionStore:      sessionMasterStore,
 	})
 	importerHandler.RegisterRoutes(r)
+
+	// ── Upload-based imports (Tier B ZIP upload, Tier C1 photo batch) ─────────
+	uploadImportHandler := handler.NewUploadImportHandler(pool, subjectConfigRepo, sessionMasterStore)
+	uploadImportHandler.RegisterRoutes(r)
 
 	// ── Chat & AI ────────────────────────────────────────────────────────────
 	geminiProvider := appai.NewGeminiProvider(cfg.AI.GeminiAPIKey, cfg.AI.GeminiModelName)
@@ -157,9 +180,13 @@ func New(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 	messageSvc.WithGemini(geminiProvider)
 
 	// ── Admin & AI summarization ───────────────────────────────────────────────
-	adminHandler := handler.NewAdminHandler(pool, subjectConfigRepo)
+	adminHandler := handler.NewAdminHandler(pool, subjectConfigRepo, sessionMasterStore)
 	adminHandler.WithGemini(geminiProvider)
 	adminHandler.RegisterRoutes(r)
+
+	// ── Admin user management ──────────────────────────────────────────────────
+	adminUsersHandler := handler.NewAdminUsersHandler(userRepo, sensitiveSvc, subjectConfigSvc, dashboardSvc, cfg.Server.AdminPassword, cfg.Server.SessionCookieSecure)
+	adminUsersHandler.RegisterRoutes(r)
 	claudeProvider := appai.NewClaudeProvider(cfg.AI.AnthropicAPIKey, cfg.AI.ClaudeModelName)
 	chatRepo := repository.NewChatRepo(pool)
 	completeProfileRepo := repository.NewCompleteProfileRepo(pool)
@@ -184,6 +211,17 @@ func New(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 
 	llmToolsAccessHandler := handler.NewLLMToolsAccessHandler(privateStoreSvc, sessionMasterStore)
 	llmToolsAccessHandler.RegisterRoutes(r)
+
+	// ── Share tokens ──────────────────────────────────────────────────────────
+	shareRepo := repository.NewArchiveShareRepo(pool)
+	shareSvc := service.NewArchiveShareService(shareRepo, authSvc)
+	shareHandler := handler.NewShareHandler(shareSvc, cfg.Server.SessionCookieSecure, sessionMasterStore)
+	shareHandler.RegisterRoutes(r)
+
+	// ── Visitor access (unauthenticated discovery + key login) ────────────────
+	visitorSvc := service.NewVisitorService(userRepo, subjectConfigRepo, sensitiveSvc, pool, cfg.Crypto.KeyringPepper)
+	visitorHandler := handler.NewVisitorHandler(visitorSvc, authSvc, sessionMasterStore, cfg.Server.SessionCookieSecure)
+	visitorHandler.RegisterRoutes(r)
 
 	return r
 }

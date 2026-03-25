@@ -7,18 +7,20 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 
 // SavedResponseHandler handles all /api/saved-responses/* endpoints.
 type SavedResponseHandler struct {
-	svc *service.SavedResponseService
+	svc          *service.SavedResponseService
+	sessionStore *keystore.SessionMasterStore
 }
 
 // NewSavedResponseHandler creates a SavedResponseHandler.
-func NewSavedResponseHandler(svc *service.SavedResponseService) *SavedResponseHandler {
-	return &SavedResponseHandler{svc: svc}
+func NewSavedResponseHandler(svc *service.SavedResponseService, sessionStore *keystore.SessionMasterStore) *SavedResponseHandler {
+	return &SavedResponseHandler{svc: svc, sessionStore: sessionStore}
 }
 
 // RegisterRoutes mounts all saved response routes.
@@ -90,6 +92,9 @@ func (h *SavedResponseHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 // ── Create ────────────────────────────────────────────────────────────────────
 
 func (h *SavedResponseHandler) Create(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		Title       string  `json:"title"`
 		Content     string  `json:"content"`
@@ -147,6 +152,9 @@ func (h *SavedResponseHandler) Update(w http.ResponseWriter, r *http.Request) {
 // ── Delete ────────────────────────────────────────────────────────────────────
 
 func (h *SavedResponseHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseSavedResponseID(w, r)
 	if !ok {
 		return

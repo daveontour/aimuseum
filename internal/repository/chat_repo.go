@@ -21,12 +21,13 @@ func NewChatRepo(pool *pgxpool.Pool) *ChatRepo {
 
 // CreateConversation inserts a new chat_conversations row.
 func (r *ChatRepo) CreateConversation(ctx context.Context, title, voice string) (*model.ChatConversation, error) {
+	uid := uidFromCtx(ctx)
 	var c model.ChatConversation
 	err := r.pool.QueryRow(ctx,
-		`INSERT INTO chat_conversations (title, voice)
-		 VALUES ($1, $2)
+		`INSERT INTO chat_conversations (title, voice, user_id)
+		 VALUES ($1, $2, $3)
 		 RETURNING id, title, voice, created_at, updated_at, last_message_at`,
-		title, voice,
+		title, voice, uidVal(uid),
 	).Scan(&c.ID, &c.Title, &c.Voice, &c.CreatedAt, &c.UpdatedAt, &c.LastMessageAt)
 	if err != nil {
 		return nil, fmt.Errorf("CreateConversation: %w", err)
@@ -36,9 +37,12 @@ func (r *ChatRepo) CreateConversation(ctx context.Context, title, voice string) 
 
 // GetConversation returns a single conversation by ID, or nil if not found.
 func (r *ChatRepo) GetConversation(ctx context.Context, id int64) (*model.ChatConversation, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT id, title, voice, created_at, updated_at, last_message_at
-		 FROM chat_conversations WHERE id = $1`, id)
+	uid := uidFromCtx(ctx)
+	q := `SELECT id, title, voice, created_at, updated_at, last_message_at
+	      FROM chat_conversations WHERE id = $1`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetConversation %d: %w", id, err)
 	}
@@ -55,12 +59,15 @@ func (r *ChatRepo) GetConversation(ctx context.Context, id int64) (*model.ChatCo
 
 // ListConversations returns conversations ordered by most recent activity.
 func (r *ChatRepo) ListConversations(ctx context.Context, limit *int) ([]*model.ChatConversation, error) {
+	uid := uidFromCtx(ctx)
 	q := `SELECT id, title, voice, created_at, updated_at, last_message_at
-	      FROM chat_conversations ORDER BY COALESCE(last_message_at, created_at) DESC`
-	var args []any
+	      FROM chat_conversations WHERE TRUE`
+	args := []any{}
+	q, args = addUIDFilter(q, args, uid)
+	q += " ORDER BY COALESCE(last_message_at, created_at) DESC"
 	if limit != nil {
-		q += " LIMIT $1"
 		args = append(args, *limit)
+		q += fmt.Sprintf(" LIMIT $%d", len(args))
 	}
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -110,14 +117,16 @@ func (r *ChatRepo) TurnCountsBatch(ctx context.Context, ids []int64) (map[int64]
 
 // UpdateConversation modifies title and/or voice.
 func (r *ChatRepo) UpdateConversation(ctx context.Context, id int64, title, voice *string) (*model.ChatConversation, error) {
+	uid := uidFromCtx(ctx)
+	q := `UPDATE chat_conversations
+	      SET title = COALESCE($1, title), voice = COALESCE($2, voice), updated_at = NOW()
+	      WHERE id = $3`
+	args := []any{title, voice, id}
+	q, args = addUIDFilter(q, args, uid)
+	q += ` RETURNING id, title, voice, created_at, updated_at, last_message_at`
 	var c model.ChatConversation
-	err := r.pool.QueryRow(ctx,
-		`UPDATE chat_conversations
-		 SET title = COALESCE($1, title), voice = COALESCE($2, voice), updated_at = NOW()
-		 WHERE id = $3
-		 RETURNING id, title, voice, created_at, updated_at, last_message_at`,
-		title, voice, id,
-	).Scan(&c.ID, &c.Title, &c.Voice, &c.CreatedAt, &c.UpdatedAt, &c.LastMessageAt)
+	err := r.pool.QueryRow(ctx, q, args...).
+		Scan(&c.ID, &c.Title, &c.Voice, &c.CreatedAt, &c.UpdatedAt, &c.LastMessageAt)
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -129,7 +138,11 @@ func (r *ChatRepo) UpdateConversation(ctx context.Context, id int64, title, voic
 
 // DeleteConversation removes a conversation (cascade deletes turns).
 func (r *ChatRepo) DeleteConversation(ctx context.Context, id int64) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM chat_conversations WHERE id = $1`, id)
+	uid := uidFromCtx(ctx)
+	q := `DELETE FROM chat_conversations WHERE id = $1`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	_, err := r.pool.Exec(ctx, q, args...)
 	return err
 }
 

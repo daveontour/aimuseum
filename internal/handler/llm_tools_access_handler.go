@@ -95,6 +95,9 @@ type llmToolsPutBody struct {
 
 // Put replaces the stored policy (merges only listed tools; unknown names ignored).
 func (h *LLMToolsAccessHandler) Put(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	mp, ok := h.masterPassword(w, r)
 	if !ok {
 		return

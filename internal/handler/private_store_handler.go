@@ -83,6 +83,9 @@ func (h *PrivateStoreHandler) GetByKey(w http.ResponseWriter, r *http.Request) {
 // Create handles POST /private-store
 // Body: {"key":"...","value":"...","master_password":"..."}
 func (h *PrivateStoreHandler) Create(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		Key            string `json:"key"`
 		Value          string `json:"value"`
@@ -115,6 +118,9 @@ func (h *PrivateStoreHandler) Create(w http.ResponseWriter, r *http.Request) {
 // Update handles PUT /private-store/{key}
 // Body: {"value":"...","master_password":"..."}
 func (h *PrivateStoreHandler) Update(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	key := chi.URLParam(r, "key")
 	var req struct {
 		Value          string `json:"value"`
@@ -142,6 +148,9 @@ func (h *PrivateStoreHandler) Update(w http.ResponseWriter, r *http.Request) {
 // Delete handles DELETE /private-store/{key}
 // Master password: X-Master-Password header, ?master_password= query param, or JSON body.
 func (h *PrivateStoreHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	key := chi.URLParam(r, "key")
 	mp := h.masterPasswordFromRequest(r)
 	if strings.TrimSpace(mp) == "" {

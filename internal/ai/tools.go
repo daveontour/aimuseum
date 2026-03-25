@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/daveontour/aimuseum/internal/appctx"
 	appcrypto "github.com/daveontour/aimuseum/internal/crypto"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -78,9 +79,22 @@ func NewToolExecutor(pool *pgxpool.Pool, subjectName, tavilyKey, pepper string, 
 	}
 }
 
+// toolsUIDFilter appends AND user_id = $N to q+args when the context carries
+// a non-zero userID. When userID == 0 (unauthenticated / single-tenant mode)
+// no filter is added, preserving backward-compatible behaviour.
+func toolsUIDFilter(ctx context.Context, q string, args []any) (string, []any) {
+	uid := appctx.UserIDFromCtx(ctx)
+	if uid == 0 {
+		return q, args
+	}
+	args = append(args, uid)
+	return q + fmt.Sprintf(" AND user_id = $%d", len(args)), args
+}
+
 // tool to get the title, description, id and tags of all reference documents
 func getAvailableReferenceDocuments(ctx context.Context, pool *pgxpool.Pool) (map[string]any, error) {
-	rows, err := pool.Query(ctx, `SELECT id, title, description, tags FROM reference_documents WHERE available_for_task = TRUE`)
+	q, args := toolsUIDFilter(ctx, `SELECT id, title, description, tags FROM reference_documents WHERE available_for_task = TRUE`, nil)
+	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "documents": []any{}}, nil
 	}
@@ -107,10 +121,11 @@ func getAvailableReferenceDocuments(ctx context.Context, pool *pgxpool.Pool) (ma
 }
 
 func getMessagesByChatSession(ctx context.Context, pool *pgxpool.Pool, chatSession string) (map[string]any, error) {
-	rows, err := pool.Query(ctx,
+	q, args := toolsUIDFilter(ctx,
 		`SELECT id, message_date, sender_name, sender_id, type, text, service, subject
 		 FROM messages WHERE chat_session ILIKE $1 ORDER BY message_date ASC LIMIT 500`,
-		"%"+chatSession+"%")
+		[]any{"%"+chatSession+"%"})
+	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "chat_session": chatSession, "message_count": 0, "messages": []any{}}, nil
 	}
@@ -150,10 +165,11 @@ func getMessagesByChatSession(ctx context.Context, pool *pgxpool.Pool, chatSessi
 
 func getEmailsByContact(ctx context.Context, pool *pgxpool.Pool, name string) (map[string]any, error) {
 	pattern := "%" + name + "%"
-	rows, err := pool.Query(ctx,
+	q, args := toolsUIDFilter(ctx,
 		`SELECT id, date, from_address, to_addresses, subject, plain_text, snippet, has_attachments
-		 FROM emails WHERE from_address ILIKE $1 OR to_addresses ILIKE $1 ORDER BY date ASC LIMIT 500`,
-		pattern)
+		 FROM emails WHERE (from_address ILIKE $1 OR to_addresses ILIKE $1) ORDER BY date ASC LIMIT 500`,
+		[]any{pattern})
+	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "contact_name": name, "email_count": 0, "emails": []any{}}, nil
 	}
@@ -198,10 +214,11 @@ func getEmailsByContact(ctx context.Context, pool *pgxpool.Pool, name string) (m
 }
 
 func getSubjectWritingExamples(ctx context.Context, pool *pgxpool.Pool, subjectName string) (map[string]any, error) {
-	rows, err := pool.Query(ctx,
+	q, args := toolsUIDFilter(ctx,
 		`SELECT id, message_date, sender_name, sender_id, type, text, service, subject
 		 FROM messages WHERE sender_id = $1 AND type = 'text' ORDER BY RANDOM() LIMIT 200`,
-		subjectName)
+		[]any{subjectName})
+	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error()}, nil
 	}
@@ -248,7 +265,8 @@ func getAllMessagesByContact(ctx context.Context, pool *pgxpool.Pool, name strin
 
 func getUniqueTagsCount(ctx context.Context, pool *pgxpool.Pool) (map[string]any, error) {
 	mediaTags := map[string]struct{}{}
-	rows, err := pool.Query(ctx, `SELECT tags FROM media_items WHERE tags IS NOT NULL AND tags != ''`)
+	q, args := toolsUIDFilter(ctx, `SELECT tags FROM media_items WHERE tags IS NOT NULL AND tags != ''`, nil)
+	rows, err := pool.Query(ctx, q, args...)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -268,7 +286,8 @@ func getUniqueTagsCount(ctx context.Context, pool *pgxpool.Pool) (map[string]any
 		}
 	}
 	artefactTags := map[string]struct{}{}
-	rows2, err := pool.Query(ctx, `SELECT tags FROM artefacts WHERE tags IS NOT NULL AND tags != ''`)
+	q2, args2 := toolsUIDFilter(ctx, `SELECT tags FROM artefacts WHERE tags IS NOT NULL AND tags != ''`, nil)
+	rows2, err := pool.Query(ctx, q2, args2...)
 	if err == nil {
 		defer rows2.Close()
 		for rows2.Next() {
@@ -306,10 +325,11 @@ func getUniqueTagsCount(ctx context.Context, pool *pgxpool.Pool) (map[string]any
 
 func searchFacebookAlbums(ctx context.Context, pool *pgxpool.Pool, keyword string) (map[string]any, error) {
 	pattern := "%" + keyword + "%"
-	rows, err := pool.Query(ctx,
+	q, args := toolsUIDFilter(ctx,
 		`SELECT id, name, description, cover_photo_uri, last_modified_timestamp
 		 FROM facebook_albums WHERE name ILIKE $1 OR description ILIKE $1 ORDER BY name ASC`,
-		pattern)
+		[]any{pattern})
+	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "albums": []any{}, "count": 0}, nil
 	}
@@ -342,9 +362,10 @@ func searchFacebookAlbums(ctx context.Context, pool *pgxpool.Pool, keyword strin
 
 func searchFacebookPosts(ctx context.Context, pool *pgxpool.Pool, description string) (map[string]any, error) {
 	pattern := "%" + description + "%"
-	rows, err := pool.Query(ctx,
+	q, args := toolsUIDFilter(ctx,
 		`SELECT id, title, post_text FROM facebook_posts WHERE post_text ILIKE $1 ORDER BY timestamp DESC`,
-		pattern)
+		[]any{pattern})
+	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "posts": []any{}, "count": 0}, nil
 	}
@@ -369,8 +390,10 @@ func searchFacebookPosts(ctx context.Context, pool *pgxpool.Pool, description st
 }
 
 func getAllFacebookPosts(ctx context.Context, pool *pgxpool.Pool) (map[string]any, error) {
-	rows, err := pool.Query(ctx,
-		`SELECT id, timestamp, title, post_text, external_url, post_type FROM facebook_posts ORDER BY timestamp DESC LIMIT 500`)
+	q, args := toolsUIDFilter(ctx,
+		`SELECT id, timestamp, title, post_text, external_url, post_type FROM facebook_posts ORDER BY timestamp DESC LIMIT 500`,
+		nil)
+	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "posts": []any{}, "count": 0}, nil
 	}
@@ -403,7 +426,8 @@ func getAllFacebookPosts(ctx context.Context, pool *pgxpool.Pool) (map[string]an
 }
 
 func getUserInterests(ctx context.Context, pool *pgxpool.Pool) (map[string]any, error) {
-	rows, err := pool.Query(ctx, `SELECT name FROM interests ORDER BY name`)
+	q, args := toolsUIDFilter(ctx, `SELECT name FROM interests ORDER BY name`, nil)
+	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "interests": []any{}}, nil
 	}
@@ -438,9 +462,10 @@ func getReferenceDocuments(ctx context.Context, pool *pgxpool.Pool, ids []int64,
 		var title, filename, contentType *string
 		var data []byte
 		var isEncrypted bool
-		err := pool.QueryRow(ctx,
-			`SELECT title, filename, content_type, data, is_encrypted FROM reference_documents WHERE id = $1 AND is_sensitive = FALSE`, id,
-		).Scan(&title, &filename, &contentType, &data, &isEncrypted)
+		q, args := toolsUIDFilter(ctx,
+			`SELECT title, filename, content_type, data, is_encrypted FROM reference_documents WHERE id = $1 AND is_sensitive = FALSE`,
+			[]any{id})
+		err := pool.QueryRow(ctx, q, args...).Scan(&title, &filename, &contentType, &data, &isEncrypted)
 		if err != nil {
 			results = append(results, map[string]any{"id": id, "error": "not found"})
 			continue

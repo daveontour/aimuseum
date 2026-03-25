@@ -98,7 +98,7 @@
             <label for="its-me-visitor-switch" class="top-bar-label" style="margin-right: 8px;">Who's Asking? </label>
             <div class="its-me-visitor-switch" id="its-me-visitor-switch" role="switch" aria-checked="false">
                 <span class="its-me-visitor-option" data-value="its-me">{{owner}}</span>
-                <span class="its-me-visitor-option active" data-value="visitor">Visitor</span>
+                <span class="its-me-visitor-option active" data-value="visitor">A Visitor</span>
             </div>
             <div class="top-bar-right-buttons" style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
                 <button id="guide-sidebar-btn" class="top-bar-guide-btn" type="button" title="Guide">
@@ -107,6 +107,18 @@
                 <button id="hamburger-menu" class="hamburger-btn">
                     <i class="fas fa-cog"></i>
                 </button>
+                <!-- Auth account dropdown -->
+                <div id="account-dropdown" class="account-dropdown" style="display:none; position:relative; margin-left: 8px;">
+                    <button class="top-bar-guide-btn" id="account-dropdown-trigger" type="button" title="Account">
+                        <i class="fas fa-user-circle"></i>
+                        <span id="account-display-name" style="margin-left:4px; font-size:0.85em;"></span>
+                    </button>
+                    <div id="account-dropdown-menu" class="account-dropdown-menu" style="display:none; position:absolute; right:0; top:100%; background:#19264d; border:1px solid #2a3a6b; border-radius:6px; min-width:160px; z-index:1000; padding:4px 0;">
+                        <button id="account-logout-btn" class="account-dropdown-item" type="button" style="width:100%; text-align:left; padding:8px 16px; background:none; border:none; color:#fff; cursor:pointer; font-size:0.9em;">
+                            <i class="fas fa-sign-out-alt" style="margin-right:6px;"></i>Sign Out
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -934,6 +946,14 @@
                                     <div data-import-last-run="imap_processing" class="import-tile-last-run"></div>
                                     <div class="import-tile-explanation">Import emails from other IMAP sources. Choose folders or process all, and optionally import only new messages.</div>
                                 </div>
+                                <div class="import-control-tile" data-open-modal="upload-zip-modal" title="Upload a platform export ZIP file" style="background-color: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.35);">
+                                    <div class="import-tile-title"><i class="fas fa-file-archive"></i> Upload Archive (ZIP)</div>
+                                    <div class="import-tile-explanation">Upload a <strong>Facebook, Instagram, WhatsApp, or iMessage</strong> export ZIP from your device. The server will extract and import it automatically.</div>
+                                </div>
+                                <div class="import-control-tile" data-open-modal="upload-photos-modal" title="Upload photos from your device" style="background-color: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.35);">
+                                    <div class="import-tile-title"><i class="fas fa-cloud-upload-alt"></i> Upload Photos from Device</div>
+                                    <div class="import-tile-explanation">Pick a folder of photos from your device. Files are uploaded in batches directly to the media library.</div>
+                                </div>
                                 <div class="import-control-tile" data-import="imessage" title="Click to run">
                                     <div class="import-tile-title"><i class="fas fa-comment-dots"></i> iMessage and SMS</div>
                                     <div data-import-last-run="imessage" class="import-tile-last-run"></div>
@@ -944,7 +964,7 @@
                                     <div data-import-last-run="whatsapp" class="import-tile-last-run"></div>
                                     <div class="import-tile-explanation">Import messages from a WhatsApp export directory (e.g. from iMazing or Android backup).</div>
                                 </div>
-                                
+
                                 <div class="import-control-tile" data-import="facebook_all" title="Click to run">
                                     <div class="import-tile-title"><i class="fab fa-facebook"></i> Facebook Archive</div>
                                     <div data-import-last-run="facebook_all" class="import-tile-last-run"></div>
@@ -2341,6 +2361,87 @@
             </div>
         </div>
         
+        <!-- Upload Archive (ZIP) Import Modal -->
+        <div id="upload-zip-modal" class="modal" style="display: none; position: fixed; z-index: 4100; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.55); justify-content: center; align-items: center;">
+            <div class="modal-content" style="max-width: 540px; width: 92vw; padding: 0; display: flex; flex-direction: column; overflow: hidden;" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <h2><i class="fas fa-file-archive" style="margin-right: 8px; color: #10b981;"></i>Upload Archive (ZIP)</h2>
+                    <button class="modal-close-btn" id="close-upload-zip-modal">&times;</button>
+                </div>
+                <div style="padding: 20px; overflow-y: auto; flex: 1;">
+                    <p style="margin: 0 0 16px 0; font-size: 0.9em; color: #64748b; line-height: 1.5;">
+                        Download your data export ZIP from Facebook, Instagram, WhatsApp, or iMessage, then upload it here. The archive will be extracted and imported on the server.
+                    </p>
+                    <div class="upload-import-form-group">
+                        <label for="upload-zip-type" class="upload-import-label">Archive type</label>
+                        <select id="upload-zip-type" class="upload-import-select">
+                            <option value="facebook">Facebook (full export)</option>
+                            <option value="instagram">Instagram</option>
+                            <option value="whatsapp">WhatsApp</option>
+                            <option value="imessage">iMessage / SMS (iMazing export)</option>
+                        </select>
+                    </div>
+                    <div class="upload-import-form-group">
+                        <label class="upload-import-label">ZIP file</label>
+                        <div class="upload-import-dropzone" id="upload-zip-dropzone">
+                            <i class="fas fa-cloud-upload-alt" style="font-size: 2rem; color: #10b981; margin-bottom: 8px;"></i>
+                            <div id="upload-zip-drop-text">Drag &amp; drop your ZIP here, or <span class="upload-import-browse-link">browse</span></div>
+                            <div id="upload-zip-filename" style="display: none; margin-top: 8px; font-weight: 600; color: #1e293b;"></div>
+                            <input type="file" id="upload-zip-file" accept=".zip" style="display: none;">
+                        </div>
+                    </div>
+                    <div id="upload-zip-progress-wrap" style="display: none;">
+                        <div class="upload-import-label" style="margin-bottom: 6px;" id="upload-zip-progress-label">Uploading…</div>
+                        <div class="upload-import-progress-bar-track">
+                            <div class="upload-import-progress-bar-fill" id="upload-zip-progress-bar" style="width: 0%;"></div>
+                        </div>
+                        <div id="upload-zip-status" style="margin-top: 8px; font-size: 0.85em; color: #475569; min-height: 2.5em; line-height: 1.5;"></div>
+                    </div>
+                    <div id="upload-zip-result" style="display: none; margin-top: 12px; font-size: 0.9em; border-radius: 6px; padding: 10px 14px;"></div>
+                </div>
+                <div style="padding: 12px 20px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 10px; flex-shrink: 0; background: #f8fafc;">
+                    <button type="button" class="modal-btn modal-btn-secondary" id="upload-zip-cancel-btn">Cancel</button>
+                    <button type="button" class="modal-btn modal-btn-primary" id="upload-zip-start-btn"><i class="fas fa-upload"></i> Upload &amp; Import</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upload Photos Import Modal -->
+        <div id="upload-photos-modal" class="modal" style="display: none; position: fixed; z-index: 4100; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.55); justify-content: center; align-items: center;">
+            <div class="modal-content" style="max-width: 540px; width: 92vw; padding: 0; display: flex; flex-direction: column; overflow: hidden;" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <h2><i class="fas fa-cloud-upload-alt" style="margin-right: 8px; color: #10b981;"></i>Upload Photos from Device</h2>
+                    <button class="modal-close-btn" id="close-upload-photos-modal">&times;</button>
+                </div>
+                <div style="padding: 20px; overflow-y: auto; flex: 1;">
+                    <p style="margin: 0 0 16px 0; font-size: 0.9em; color: #64748b; line-height: 1.5;">
+                        Select a folder of photos from your device. All image files inside will be uploaded in batches and added to your media library.
+                    </p>
+                    <div class="upload-import-form-group">
+                        <label class="upload-import-label">Photo folder</label>
+                        <div class="upload-import-dropzone" id="upload-photos-dropzone" style="cursor: pointer;">
+                            <i class="fas fa-folder-open" style="font-size: 2rem; color: #10b981; margin-bottom: 8px;"></i>
+                            <div id="upload-photos-drop-text">Click to select a folder, or drag files here</div>
+                            <div id="upload-photos-count" style="display: none; margin-top: 8px; font-weight: 600; color: #1e293b;"></div>
+                            <input type="file" id="upload-photos-file" webkitdirectory multiple accept="image/*" style="display: none;">
+                        </div>
+                    </div>
+                    <div id="upload-photos-progress-wrap" style="display: none;">
+                        <div class="upload-import-label" style="margin-bottom: 6px;" id="upload-photos-progress-label">Uploading…</div>
+                        <div class="upload-import-progress-bar-track">
+                            <div class="upload-import-progress-bar-fill" id="upload-photos-progress-bar" style="width: 0%;"></div>
+                        </div>
+                        <div id="upload-photos-status" style="margin-top: 8px; font-size: 0.85em; color: #475569; min-height: 2em; line-height: 1.5;"></div>
+                    </div>
+                    <div id="upload-photos-result" style="display: none; margin-top: 12px; font-size: 0.9em; border-radius: 6px; padding: 10px 14px;"></div>
+                </div>
+                <div style="padding: 12px 20px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 10px; flex-shrink: 0; background: #f8fafc;">
+                    <button type="button" class="modal-btn modal-btn-secondary" id="upload-photos-cancel-btn">Cancel</button>
+                    <button type="button" class="modal-btn modal-btn-primary" id="upload-photos-start-btn"><i class="fas fa-upload"></i> Upload Photos</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Upload Document Modal -->
         <div id="reference-documents-upload-modal" class="modal" style="z-index: 4200;">
             <div class="modal-content reference-documents-upload-content">
@@ -2868,6 +2969,8 @@
     <script src="/static/js/museum/guide.js" defer></script>
     <script src="/static/js/museum/app.js" defer></script>
     <script src="/static/js/museum/have-a-chat.js" defer></script>
+    <script src="/static/js/museum/auth.js" defer></script>
+    <script src="/static/js/museum/upload-import.js" defer></script>
     <script src="/static/js/leaflet.js"></script>
     <script src="/static/js/images_grid.js"></script>
     <script>

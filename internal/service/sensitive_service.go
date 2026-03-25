@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/daveontour/aimuseum/internal/appctx"
 	appcrypto "github.com/daveontour/aimuseum/internal/crypto"
 	"github.com/daveontour/aimuseum/internal/model"
 	"github.com/daveontour/aimuseum/internal/repository"
@@ -28,14 +29,25 @@ func NewSensitiveService(docRepo *repository.DocumentRepo, pool *pgxpool.Pool, p
 	return &SensitiveService{docRepo: docRepo, pool: pool, pepper: pepper}
 }
 
-// Count returns the total number of sensitive records in reference_documents.
+// uidFilter appends a user_id condition to q based on the authenticated user in ctx.
+func (s *SensitiveService) uidFilter(ctx context.Context, q string, args []any) (string, []any) {
+	uid := appctx.UserIDFromCtx(ctx)
+	if uid > 0 {
+		args = append(args, uid)
+		return q + fmt.Sprintf(" AND user_id = $%d", len(args)), args
+	}
+	return q + " AND user_id IS NULL", args
+}
+
+// Count returns the total number of sensitive records in reference_documents for this user.
 func (s *SensitiveService) Count(ctx context.Context) (int64, error) {
+	q, args := s.uidFilter(ctx, `SELECT COUNT(*) FROM reference_documents WHERE is_sensitive = TRUE`, nil)
 	var n int64
-	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM reference_documents WHERE is_sensitive = TRUE`).Scan(&n)
+	err := s.pool.QueryRow(ctx, q, args...).Scan(&n)
 	return n, err
 }
 
-// KeyCount returns the total number of sensitive_keyring seats.
+// KeyCount returns the total number of sensitive_keyring seats for this user.
 func (s *SensitiveService) KeyCount(ctx context.Context) (int64, error) {
 	var n int64
 	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sensitive_keyring`).Scan(&n)
@@ -45,6 +57,13 @@ func (s *SensitiveService) KeyCount(ctx context.Context) (int64, error) {
 // VerifyMasterPassword returns true if masterPassword decrypts the master (is_master) keyring row.
 func (s *SensitiveService) VerifyMasterPassword(ctx context.Context, masterPassword string) (bool, error) {
 	return appcrypto.CheckSensitiveMasterPassword(ctx, s.pool, masterPassword, s.pepper)
+}
+
+// InitKeyring initialises the master sensitive_keyring seat for the current user
+// using masterPassword as both the unlock key and the key-derivation input.
+// Any existing keyring rows for this user are replaced.
+func (s *SensitiveService) InitKeyring(ctx context.Context, masterPassword string) error {
+	return appcrypto.InitSensitiveKeyring(ctx, s.pool, masterPassword, s.pepper)
 }
 
 // VerifyVisitorKeyringPassword returns true if password unlocks a non-master keyring seat only
@@ -125,7 +144,6 @@ func (s *SensitiveService) GenerateKeyring(ctx context.Context, masterPassword s
 const maxVisitorKeyHintLen = 2000
 
 // AddUser adds a new keyring seat for userPassword and stores a plain-text hint for the unlock dialog.
-// hint must be non-empty (after trim).
 func (s *SensitiveService) AddUser(ctx context.Context, userPassword, masterPassword, hint string) error {
 	hint = strings.TrimSpace(hint)
 	if hint == "" {
@@ -151,13 +169,28 @@ func (s *SensitiveService) AddUser(ctx context.Context, userPassword, masterPass
 	return tx.Commit(ctx)
 }
 
-// ListVisitorKeyHints returns hints for non-master keyring seats (for visitor unlock UI).
+// ListVisitorKeyHints returns hints for non-master keyring seats for this user.
 func (s *SensitiveService) ListVisitorKeyHints(ctx context.Context) ([]model.VisitorKeyHint, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT h.id, h.keyring_id, h.hint, h.created_at
-		FROM visitor_key_hints h
-		INNER JOIN sensitive_keyring k ON k.id = h.keyring_id AND k.is_master = FALSE
-		ORDER BY h.created_at ASC`)
+	uid := appctx.UserIDFromCtx(ctx)
+	var q string
+	var args []any
+	if uid > 0 {
+		q = `
+			SELECT h.id, h.keyring_id, h.hint, h.created_at
+			FROM visitor_key_hints h
+			INNER JOIN sensitive_keyring k ON k.id = h.keyring_id AND k.is_master = FALSE
+			WHERE k.user_id = $1
+			ORDER BY h.created_at ASC`
+		args = []any{uid}
+	} else {
+		q = `
+			SELECT h.id, h.keyring_id, h.hint, h.created_at
+			FROM visitor_key_hints h
+			INNER JOIN sensitive_keyring k ON k.id = h.keyring_id AND k.is_master = FALSE
+			WHERE k.user_id IS NULL
+			ORDER BY h.created_at ASC`
+	}
+	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -173,13 +206,26 @@ func (s *SensitiveService) ListVisitorKeyHints(ctx context.Context) ([]model.Vis
 	return out, rows.Err()
 }
 
-// ListOrphanVisitorKeyringIDs returns visitor seat IDs that have no visitor_key_hints row.
+// ListOrphanVisitorKeyringIDs returns visitor seat IDs that have no visitor_key_hints row for this user.
 func (s *SensitiveService) ListOrphanVisitorKeyringIDs(ctx context.Context) ([]int64, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT k.id FROM sensitive_keyring k
-		WHERE k.is_master = FALSE
-		AND NOT EXISTS (SELECT 1 FROM visitor_key_hints h WHERE h.keyring_id = k.id)
-		ORDER BY k.id ASC`)
+	uid := appctx.UserIDFromCtx(ctx)
+	var q string
+	var args []any
+	if uid > 0 {
+		q = `
+			SELECT k.id FROM sensitive_keyring k
+			WHERE k.is_master = FALSE AND k.user_id = $1
+			AND NOT EXISTS (SELECT 1 FROM visitor_key_hints h WHERE h.keyring_id = k.id)
+			ORDER BY k.id ASC`
+		args = []any{uid}
+	} else {
+		q = `
+			SELECT k.id FROM sensitive_keyring k
+			WHERE k.is_master = FALSE AND k.user_id IS NULL
+			AND NOT EXISTS (SELECT 1 FROM visitor_key_hints h WHERE h.keyring_id = k.id)
+			ORDER BY k.id ASC`
+	}
+	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -271,8 +317,8 @@ func (s *SensitiveService) RemoveUser(ctx context.Context, userPassword, masterP
 	return appcrypto.DeleteSensitiveKeyringSeat(ctx, s.pool, userPassword, masterPassword, s.pepper)
 }
 
-// RemoveAllVisitorKeys deletes every visitor (non-master) keyring seat. Requires masterPassword
-// that decrypts the owner master row. The master seat is preserved.
+// RemoveAllVisitorKeys deletes every visitor (non-master) keyring seat for this user.
+// Requires masterPassword that decrypts the owner master row. The master seat is preserved.
 func (s *SensitiveService) RemoveAllVisitorKeys(ctx context.Context, masterPassword string) (removed int64, err error) {
 	return appcrypto.DeleteAllVisitorKeyringSeats(ctx, s.pool, masterPassword, s.pepper)
 }

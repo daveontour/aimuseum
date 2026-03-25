@@ -9,18 +9,20 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 
 // ArtefactHandler handles all /artefacts/* endpoints.
 type ArtefactHandler struct {
-	svc *service.ArtefactService
+	svc          *service.ArtefactService
+	sessionStore *keystore.SessionMasterStore
 }
 
 // NewArtefactHandler creates an ArtefactHandler.
-func NewArtefactHandler(svc *service.ArtefactService) *ArtefactHandler {
-	return &ArtefactHandler{svc: svc}
+func NewArtefactHandler(svc *service.ArtefactService, sessionStore *keystore.SessionMasterStore) *ArtefactHandler {
+	return &ArtefactHandler{svc: svc, sessionStore: sessionStore}
 }
 
 // RegisterRoutes mounts all artefact routes onto r.
@@ -143,6 +145,9 @@ func (h *ArtefactHandler) Export(w http.ResponseWriter, r *http.Request) {
 // ── Import ────────────────────────────────────────────────────────────────────
 
 func (h *ArtefactHandler) Import(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "could not read request body")
@@ -225,6 +230,9 @@ func (h *ArtefactHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 // ── Create ────────────────────────────────────────────────────────────────────
 
 func (h *ArtefactHandler) Create(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		Name        string  `json:"name"`
 		Description *string `json:"description"`
@@ -253,6 +261,9 @@ func (h *ArtefactHandler) Create(w http.ResponseWriter, r *http.Request) {
 // ── Update ────────────────────────────────────────────────────────────────────
 
 func (h *ArtefactHandler) Update(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseArtefactID(w, r)
 	if !ok {
 		return
@@ -291,6 +302,9 @@ func (h *ArtefactHandler) Update(w http.ResponseWriter, r *http.Request) {
 // ── Delete ────────────────────────────────────────────────────────────────────
 
 func (h *ArtefactHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseArtefactID(w, r)
 	if !ok {
 		return
@@ -335,6 +349,9 @@ func (h *ArtefactHandler) GetThumbnail(w http.ResponseWriter, r *http.Request) {
 // ── UploadMedia ───────────────────────────────────────────────────────────────
 
 func (h *ArtefactHandler) UploadMedia(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseArtefactID(w, r)
 	if !ok {
 		return
@@ -393,6 +410,9 @@ func (h *ArtefactHandler) UploadMedia(w http.ResponseWriter, r *http.Request) {
 // ── LinkMedia ─────────────────────────────────────────────────────────────────
 
 func (h *ArtefactHandler) LinkMedia(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	artefactID, ok := parseArtefactID(w, r)
 	if !ok {
 		return
@@ -417,6 +437,9 @@ func (h *ArtefactHandler) LinkMedia(w http.ResponseWriter, r *http.Request) {
 // ── UnlinkMedia ───────────────────────────────────────────────────────────────
 
 func (h *ArtefactHandler) UnlinkMedia(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	artefactID, ok := parseArtefactID(w, r)
 	if !ok {
 		return

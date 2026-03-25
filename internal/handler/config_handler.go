@@ -6,18 +6,20 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 
 // ConfigHandler handles all /api/configuration/* endpoints.
 type ConfigHandler struct {
-	svc *service.ConfigService
+	svc          *service.ConfigService
+	sessionStore *keystore.SessionMasterStore
 }
 
 // NewConfigHandler creates a ConfigHandler.
-func NewConfigHandler(svc *service.ConfigService) *ConfigHandler {
-	return &ConfigHandler{svc: svc}
+func NewConfigHandler(svc *service.ConfigService, sessionStore *keystore.SessionMasterStore) *ConfigHandler {
+	return &ConfigHandler{svc: svc, sessionStore: sessionStore}
 }
 
 // RegisterRoutes mounts all configuration routes.
@@ -88,6 +90,9 @@ func (h *ConfigHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 // ── Delete ────────────────────────────────────────────────────────────────────
 
 func (h *ConfigHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	key := chi.URLParam(r, "key")
 	if key == "" {
 		writeError(w, http.StatusBadRequest, "key is required")
@@ -108,6 +113,9 @@ func (h *ConfigHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // ── Seed ──────────────────────────────────────────────────────────────────────
 
 func (h *ConfigHandler) Seed(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	count, err := h.svc.SeedFromEnv(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("error seeding configuration: %s", err))

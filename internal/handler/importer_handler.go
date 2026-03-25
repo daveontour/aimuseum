@@ -24,8 +24,10 @@ import (
 	instagramimport "github.com/daveontour/aimuseum/internal/import/instagram"
 	thumbnailsimport "github.com/daveontour/aimuseum/internal/import/thumbnails"
 	whatsappimport "github.com/daveontour/aimuseum/internal/import/whatsapp"
+	"github.com/daveontour/aimuseum/internal/appctx"
 	"github.com/daveontour/aimuseum/internal/importer"
 	"github.com/daveontour/aimuseum/internal/importstorage"
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -136,6 +138,7 @@ type ImporterHandler struct {
 	imageRepo         *repository.ImageRepo
 	pool              *pgxpool.Pool
 	subjectConfigRepo *repository.SubjectConfigRepo
+	sessionStore      *keystore.SessionMasterStore
 }
 
 // ImporterHandlerDeps holds dependencies for NewImporterHandler.
@@ -144,6 +147,7 @@ type ImporterHandlerDeps struct {
 	ImageRepo         *repository.ImageRepo
 	Pool              *pgxpool.Pool
 	SubjectConfigRepo *repository.SubjectConfigRepo
+	SessionStore      *keystore.SessionMasterStore
 }
 
 // NewImporterHandler creates an ImporterHandler.
@@ -153,6 +157,7 @@ func NewImporterHandler(deps ImporterHandlerDeps) *ImporterHandler {
 		imageRepo:         deps.ImageRepo,
 		pool:              deps.Pool,
 		subjectConfigRepo: deps.SubjectConfigRepo,
+		sessionStore:      deps.SessionStore,
 	}
 }
 
@@ -267,12 +272,15 @@ func runThumbnailsAfterImportIfIdle(pool *pgxpool.Pool) {
 		"phase2_scanned": 0, "phase2_total": 0, "phase2_processed": 0, "phase2_errors": 0,
 	})
 	thumbnailsJob.Broadcast("status", map[string]any{"status_line": "Starting thumbnail processing (auto after import)..."})
-	go runThumbnailsInProcess(pool, thumbnailsJob, false)
+	go runThumbnailsInProcess(pool, thumbnailsJob, false, 0)
 }
 
 // ── Filesystem ────────────────────────────────────────────────────────────────
 
 func (h *ImporterHandler) FilesystemStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := filesystemJob.AssertNotRunning(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -329,7 +337,8 @@ func (h *ImporterHandler) FilesystemStart(w http.ResponseWriter, r *http.Request
 	if maxImages != nil && *maxImages <= 0 {
 		maxImages = nil
 	}
-	go runFilesystemInProcess(h.pool, filesystemJob, validPaths, h.excludePatterns, maxImages, req.ReferenceMode)
+	uid := appctx.UserIDFromCtx(r.Context())
+	go runFilesystemInProcess(h.pool, filesystemJob, validPaths, h.excludePatterns, maxImages, req.ReferenceMode, uid)
 
 	writeJSON(w, map[string]any{
 		"message":        "Filesystem images import started",
@@ -337,8 +346,8 @@ func (h *ImporterHandler) FilesystemStart(w http.ResponseWriter, r *http.Request
 	})
 }
 
-func runFilesystemInProcess(pool *pgxpool.Pool, job *importer.ImportJob, directories []string, excludePatterns []string, maxImages *int, referenceMode bool) {
-	ctx := context.Background()
+func runFilesystemInProcess(pool *pgxpool.Pool, job *importer.ImportJob, directories []string, excludePatterns []string, maxImages *int, referenceMode bool, uid int64) {
+	ctx := context.WithValue(context.Background(), appctx.ContextKeyUserID, uid)
 	defer job.Finish()
 
 	storage := importstorage.NewImageStorage(pool)
@@ -398,6 +407,9 @@ func (h *ImporterHandler) FilesystemStream(w http.ResponseWriter, r *http.Reques
 	filesystemJob.ServeSSE(w, r)
 }
 func (h *ImporterHandler) FilesystemCancel(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	writeJSON(w, filesystemJob.Cancel())
 }
 func (h *ImporterHandler) FilesystemStatus(w http.ResponseWriter, r *http.Request) {
@@ -407,6 +419,9 @@ func (h *ImporterHandler) FilesystemStatus(w http.ResponseWriter, r *http.Reques
 // ── Thumbnails ────────────────────────────────────────────────────────────────
 
 func (h *ImporterHandler) ThumbnailsStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := thumbnailsJob.AssertNotRunning(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -426,12 +441,16 @@ func (h *ImporterHandler) ThumbnailsStart(w http.ResponseWriter, r *http.Request
 	})
 	thumbnailsJob.Broadcast("status", map[string]any{"status_line": "Starting thumbnail processing..."})
 
-	go runThumbnailsInProcess(h.pool, thumbnailsJob, reprocess)
+	uid := appctx.UserIDFromCtx(r.Context())
+	go runThumbnailsInProcess(h.pool, thumbnailsJob, reprocess, uid)
 
 	writeJSON(w, map[string]any{"message": "Thumbnail processing started", "status": "started"})
 }
 
 func (h *ImporterHandler) ThumbnailsStartAsync(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := thumbnailsJob.AssertNotRunning(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -451,15 +470,16 @@ func (h *ImporterHandler) ThumbnailsStartAsync(w http.ResponseWriter, r *http.Re
 	})
 	thumbnailsJob.Broadcast("status", map[string]any{"status_line": "Starting thumbnail processing..."})
 
-	go runThumbnailsInProcess(h.pool, thumbnailsJob, reprocess)
+	uid := appctx.UserIDFromCtx(r.Context())
+	go runThumbnailsInProcess(h.pool, thumbnailsJob, reprocess, uid)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]any{"status": "accepted"})
 }
 
-func runThumbnailsInProcess(pool *pgxpool.Pool, job *importer.ImportJob, reprocess bool) {
-	ctx := context.Background()
+func runThumbnailsInProcess(pool *pgxpool.Pool, job *importer.ImportJob, reprocess bool, uid int64) {
+	ctx := context.WithValue(context.Background(), appctx.ContextKeyUserID, uid)
 	defer job.Finish()
 
 	// Region updates before (match Python behavior)
@@ -516,6 +536,9 @@ func (h *ImporterHandler) ThumbnailsStream(w http.ResponseWriter, r *http.Reques
 	thumbnailsJob.ServeSSE(w, r)
 }
 func (h *ImporterHandler) ThumbnailsCancel(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	writeJSON(w, thumbnailsJob.Cancel())
 }
 func (h *ImporterHandler) ThumbnailsStatus(w http.ResponseWriter, r *http.Request) {
@@ -674,6 +697,9 @@ func (h *ImporterHandler) ThumbnailsStatus(w http.ResponseWriter, r *http.Reques
 // ── Facebook All ──────────────────────────────────────────────────────────────
 
 func (h *ImporterHandler) FacebookAllStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := facebookAllJob.AssertNotRunning(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -709,7 +735,8 @@ func (h *ImporterHandler) FacebookAllStart(w http.ResponseWriter, r *http.Reques
 	if req.UserName != nil && *req.UserName != "" {
 		userName = strings.TrimSpace(*req.UserName)
 	}
-	go runFacebookAllInProcess(h.pool, h.subjectConfigRepo, facebookAllJob, req.DirectoryPath, userName)
+	uid := appctx.UserIDFromCtx(r.Context())
+	go runFacebookAllInProcess(h.pool, h.subjectConfigRepo, facebookAllJob, req.DirectoryPath, userName, uid)
 
 	writeJSON(w, map[string]any{"message": "Facebook All import started", "directory_path": req.DirectoryPath})
 }
@@ -718,6 +745,9 @@ func (h *ImporterHandler) FacebookAllStream(w http.ResponseWriter, r *http.Reque
 	facebookAllJob.ServeSSE(w, r)
 }
 func (h *ImporterHandler) FacebookAllCancel(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	writeJSON(w, facebookAllJob.Cancel())
 }
 func (h *ImporterHandler) FacebookAllStatus(w http.ResponseWriter, r *http.Request) {
@@ -727,6 +757,9 @@ func (h *ImporterHandler) FacebookAllStatus(w http.ResponseWriter, r *http.Reque
 // ── Contacts extract ──────────────────────────────────────────────────────────
 
 func (h *ImporterHandler) ContactsExtractStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := contactsExtractJob.AssertNotRunning(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -739,13 +772,14 @@ func (h *ImporterHandler) ContactsExtractStart(w http.ResponseWriter, r *http.Re
 	})
 	contactsExtractJob.Broadcast("status", map[string]any{"status_line": "Starting contacts extract..."})
 
-	go runContactsExtractInProcess(h.pool, contactsExtractJob)
+	uid := appctx.UserIDFromCtx(r.Context())
+	go runContactsExtractInProcess(h.pool, contactsExtractJob, uid)
 
 	writeJSON(w, map[string]any{"message": "Contacts extract started", "status": "started"})
 }
 
-func runContactsExtractInProcess(pool *pgxpool.Pool, job *importer.ImportJob) {
-	ctx := context.Background()
+func runContactsExtractInProcess(pool *pgxpool.Pool, job *importer.ImportJob, uid int64) {
+	ctx := context.WithValue(context.Background(), appctx.ContextKeyUserID, uid)
 	defer job.Finish()
 
 	progressFunc := func(msg string) {
@@ -783,6 +817,9 @@ func (h *ImporterHandler) ContactsExtractStream(w http.ResponseWriter, r *http.R
 	contactsExtractJob.ServeSSE(w, r)
 }
 func (h *ImporterHandler) ContactsExtractCancel(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	writeJSON(w, contactsExtractJob.Cancel())
 }
 func (h *ImporterHandler) ContactsExtractStatus(w http.ResponseWriter, r *http.Request) {
@@ -792,6 +829,9 @@ func (h *ImporterHandler) ContactsExtractStatus(w http.ResponseWriter, r *http.R
 // ── Reference import ──────────────────────────────────────────────────────────
 
 func (h *ImporterHandler) ReferenceImportStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := referenceImportJob.AssertNotRunning(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -809,13 +849,14 @@ func (h *ImporterHandler) ReferenceImportStart(w http.ResponseWriter, r *http.Re
 	})
 	referenceImportJob.Broadcast("status", map[string]any{"status_line": "Starting reference import..."})
 
-	go runReferenceImport(h.imageRepo, referenceImportJob, h.pool)
+	uid := appctx.UserIDFromCtx(r.Context())
+	go runReferenceImport(h.imageRepo, referenceImportJob, h.pool, uid)
 
 	writeJSON(w, map[string]any{"message": "Reference import started", "status": "started"})
 }
 
-func runReferenceImport(repo *repository.ImageRepo, job *importer.ImportJob, pool *pgxpool.Pool) {
-	ctx := context.Background()
+func runReferenceImport(repo *repository.ImageRepo, job *importer.ImportJob, pool *pgxpool.Pool, uid int64) {
+	ctx := context.WithValue(context.Background(), appctx.ContextKeyUserID, uid)
 	defer job.Finish()
 
 	items, err := repo.ListReferencedItems(ctx)
@@ -877,6 +918,9 @@ func (h *ImporterHandler) ReferenceImportStream(w http.ResponseWriter, r *http.R
 	referenceImportJob.ServeSSE(w, r)
 }
 func (h *ImporterHandler) ReferenceImportCancel(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	writeJSON(w, referenceImportJob.Cancel())
 }
 func (h *ImporterHandler) ReferenceImportStatus(w http.ResponseWriter, r *http.Request) {
@@ -886,6 +930,9 @@ func (h *ImporterHandler) ReferenceImportStatus(w http.ResponseWriter, r *http.R
 // ── Image export ───────────────────────────────────────────────────────────────
 
 func (h *ImporterHandler) ImageExportStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := imageExportJob.AssertNotRunning(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -915,13 +962,14 @@ func (h *ImporterHandler) ImageExportStart(w http.ResponseWriter, r *http.Reques
 	})
 	imageExportJob.Broadcast("status", map[string]any{"status_line": "Starting image export..."})
 
-	go runImageExport(h.imageRepo, imageExportJob, targetDir)
+	uid := appctx.UserIDFromCtx(r.Context())
+	go runImageExport(h.imageRepo, imageExportJob, targetDir, uid)
 
 	writeJSON(w, map[string]any{"message": "Image export started", "status": "started"})
 }
 
-func runImageExport(repo *repository.ImageRepo, job *importer.ImportJob, targetDir string) {
-	ctx := context.Background()
+func runImageExport(repo *repository.ImageRepo, job *importer.ImportJob, targetDir string, uid int64) {
+	ctx := context.WithValue(context.Background(), appctx.ContextKeyUserID, uid)
 	defer job.Finish()
 
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
@@ -1029,6 +1077,9 @@ func (h *ImporterHandler) ImageExportStream(w http.ResponseWriter, r *http.Reque
 	imageExportJob.ServeSSE(w, r)
 }
 func (h *ImporterHandler) ImageExportCancel(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	writeJSON(w, imageExportJob.Cancel())
 }
 func (h *ImporterHandler) ImageExportStatus(w http.ResponseWriter, r *http.Request) {
@@ -1038,6 +1089,9 @@ func (h *ImporterHandler) ImageExportStatus(w http.ResponseWriter, r *http.Reque
 // ── WhatsApp ──────────────────────────────────────────────────────────────────
 
 func (h *ImporterHandler) WhatsAppStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := whatsappJob.AssertNotRunning(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1067,13 +1121,14 @@ func (h *ImporterHandler) WhatsAppStart(w http.ResponseWriter, r *http.Request) 
 	})
 	whatsappJob.Broadcast("status", map[string]any{"status_line": "Starting WhatsApp import..."})
 
-	go runWhatsAppInProcess(h.pool, h.subjectConfigRepo, whatsappJob, req.DirectoryPath)
+	uid := appctx.UserIDFromCtx(r.Context())
+	go runWhatsAppInProcess(h.pool, h.subjectConfigRepo, whatsappJob, req.DirectoryPath, uid)
 
 	writeJSON(w, map[string]any{"message": "WhatsApp import started", "directory_path": req.DirectoryPath})
 }
 
-func runWhatsAppInProcess(pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *importer.ImportJob, directoryPath string) {
-	ctx := context.Background()
+func runWhatsAppInProcess(pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *importer.ImportJob, directoryPath string, uid int64) {
+	ctx := context.WithValue(context.Background(), appctx.ContextKeyUserID, uid)
 	defer job.Finish()
 
 	storage := importstorage.NewMessageStorage(ctx, pool, subjectRepo)
@@ -1140,6 +1195,9 @@ func (h *ImporterHandler) WhatsAppStream(w http.ResponseWriter, r *http.Request)
 	whatsappJob.ServeSSE(w, r)
 }
 func (h *ImporterHandler) WhatsAppCancel(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	writeJSON(w, whatsappJob.Cancel())
 }
 func (h *ImporterHandler) WhatsAppStatus(w http.ResponseWriter, r *http.Request) {
@@ -1149,6 +1207,9 @@ func (h *ImporterHandler) WhatsAppStatus(w http.ResponseWriter, r *http.Request)
 // ── iMessage ──────────────────────────────────────────────────────────────────
 
 func (h *ImporterHandler) IMessageStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := imessageJob.AssertNotRunning(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1178,13 +1239,14 @@ func (h *ImporterHandler) IMessageStart(w http.ResponseWriter, r *http.Request) 
 	})
 	imessageJob.Broadcast("status", map[string]any{"status_line": "Starting iMessage import..."})
 
-	go runIMessageInProcess(h.pool, h.subjectConfigRepo, imessageJob, req.DirectoryPath)
+	uid := appctx.UserIDFromCtx(r.Context())
+	go runIMessageInProcess(h.pool, h.subjectConfigRepo, imessageJob, req.DirectoryPath, uid)
 
 	writeJSON(w, map[string]any{"message": "iMessage import started", "directory_path": req.DirectoryPath})
 }
 
-func runIMessageInProcess(pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *importer.ImportJob, directoryPath string) {
-	ctx := context.Background()
+func runIMessageInProcess(pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *importer.ImportJob, directoryPath string, uid int64) {
+	ctx := context.WithValue(context.Background(), appctx.ContextKeyUserID, uid)
 	defer job.Finish()
 
 	storage := importstorage.NewMessageStorage(ctx, pool, subjectRepo)
@@ -1250,6 +1312,9 @@ func (h *ImporterHandler) IMessageStream(w http.ResponseWriter, r *http.Request)
 	imessageJob.ServeSSE(w, r)
 }
 func (h *ImporterHandler) IMessageCancel(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	writeJSON(w, imessageJob.Cancel())
 }
 func (h *ImporterHandler) IMessageStatus(w http.ResponseWriter, r *http.Request) {
@@ -1259,6 +1324,9 @@ func (h *ImporterHandler) IMessageStatus(w http.ResponseWriter, r *http.Request)
 // ── Instagram ─────────────────────────────────────────────────────────────────
 
 func (h *ImporterHandler) InstagramStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := instagramJob.AssertNotRunning(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1297,13 +1365,14 @@ func (h *ImporterHandler) InstagramStart(w http.ResponseWriter, r *http.Request)
 	if req.ExportRoot != nil && *req.ExportRoot != "" {
 		exportRoot = *req.ExportRoot
 	}
-	go runInstagramInProcess(h.pool, h.subjectConfigRepo, instagramJob, req.DirectoryPath, userName, exportRoot)
+	uid := appctx.UserIDFromCtx(r.Context())
+	go runInstagramInProcess(h.pool, h.subjectConfigRepo, instagramJob, req.DirectoryPath, userName, exportRoot, uid)
 
 	writeJSON(w, map[string]any{"message": "Instagram import started", "directory_path": req.DirectoryPath})
 }
 
-func runInstagramInProcess(pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *importer.ImportJob, directoryPath, userName, exportRoot string) {
-	ctx := context.Background()
+func runInstagramInProcess(pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *importer.ImportJob, directoryPath, userName, exportRoot string, uid int64) {
+	ctx := context.WithValue(context.Background(), appctx.ContextKeyUserID, uid)
 	defer job.Finish()
 
 	storage := importstorage.NewMessageStorage(ctx, pool, subjectRepo)
@@ -1362,6 +1431,9 @@ func (h *ImporterHandler) InstagramStream(w http.ResponseWriter, r *http.Request
 	instagramJob.ServeSSE(w, r)
 }
 func (h *ImporterHandler) InstagramCancel(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	writeJSON(w, instagramJob.Cancel())
 }
 func (h *ImporterHandler) InstagramStatus(w http.ResponseWriter, r *http.Request) {
@@ -1473,8 +1545,8 @@ func (h *ImporterHandler) InstagramStatus(w http.ResponseWriter, r *http.Request
 // 	job.Broadcast("completed", job.GetState())
 // }
 
-func runFacebookAllInProcess(pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *importer.ImportJob, directoryPath, userName string) {
-	ctx := context.Background()
+func runFacebookAllInProcess(pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *importer.ImportJob, directoryPath, userName string, uid int64) {
+	ctx := context.WithValue(context.Background(), appctx.ContextKeyUserID, uid)
 	defer job.Finish()
 
 	// Clear all existing Facebook data before re-importing
@@ -1678,7 +1750,10 @@ func runFacebookAllInProcess(pool *pgxpool.Pool, subjectRepo *repository.Subject
 // Gmail import uses OAuth and is not implemented in Go.
 // Use POST /imap/process for IMAP-based email import instead.
 
-func (h *ImporterHandler) EmailProcessStart(w http.ResponseWriter, _ *http.Request) {
+func (h *ImporterHandler) EmailProcessStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	writeError(w, http.StatusNotImplemented,
 		"Gmail import via OAuth is not implemented in the Go server. Use POST /imap/process for IMAP-based email import.")
 }
@@ -1686,6 +1761,9 @@ func (h *ImporterHandler) EmailProcessStream(w http.ResponseWriter, r *http.Requ
 	emailProcessJob.ServeSSE(w, r)
 }
 func (h *ImporterHandler) EmailProcessCancel(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	writeJSON(w, emailProcessJob.Cancel())
 }
 func (h *ImporterHandler) EmailProcessStatus(w http.ResponseWriter, r *http.Request) {

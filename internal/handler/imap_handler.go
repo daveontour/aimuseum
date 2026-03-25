@@ -7,22 +7,26 @@ import (
 	"net/http"
 	"regexp"
 
+	"github.com/daveontour/aimuseum/internal/appctx"
 	appimporter "github.com/daveontour/aimuseum/internal/importer"
 	imapimport "github.com/daveontour/aimuseum/internal/import/imap"
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // IMAPHandler handles all /imap/* routes.
 type IMAPHandler struct {
-	pool *pgxpool.Pool
-	job  *appimporter.ImportJob
+	pool         *pgxpool.Pool
+	job          *appimporter.ImportJob
+	sessionStore *keystore.SessionMasterStore
 }
 
 // NewIMAPHandler creates an IMAPHandler.
-func NewIMAPHandler(pool *pgxpool.Pool) *IMAPHandler {
+func NewIMAPHandler(pool *pgxpool.Pool, sessionStore *keystore.SessionMasterStore) *IMAPHandler {
 	return &IMAPHandler{
-		pool: pool,
+		pool:         pool,
+		sessionStore: sessionStore,
 		job: appimporter.NewImportJob("IMAP import", map[string]any{
 			"status":               "idle",
 			"status_line":          nil,
@@ -81,6 +85,9 @@ func toConnParams(p imapConnParams) imapimport.ConnParams {
 
 // StartProcess handles POST /imap/process
 func (h *IMAPHandler) StartProcess(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := h.job.AssertNotRunning(); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -134,7 +141,8 @@ func (h *IMAPHandler) StartProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go h.runIMAPImport(req, folders)
+	uid := appctx.UserIDFromCtx(r.Context())
+	go h.runIMAPImport(req, folders, uid)
 
 	writeJSON(w, map[string]any{
 		"message": fmt.Sprintf("IMAP processing started for %d folder(s)", len(folders)),
@@ -149,6 +157,9 @@ func (h *IMAPHandler) StreamProgress(w http.ResponseWriter, r *http.Request) {
 
 // CancelProcess handles POST /imap/process/cancel
 func (h *IMAPHandler) CancelProcess(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	writeJSON(w, h.job.Cancel())
 }
 
@@ -179,7 +190,7 @@ func (h *IMAPHandler) GetFolders(w http.ResponseWriter, r *http.Request) {
 
 // ── Background import job ─────────────────────────────────────────────────────
 
-func (h *IMAPHandler) runIMAPImport(req imapProcessRequest, folders []string) {
+func (h *IMAPHandler) runIMAPImport(req imapProcessRequest, folders []string, uid int64) {
 	h.job.Start()
 	h.job.UpdateState(map[string]any{
 		"status":               "in_progress",
@@ -206,7 +217,7 @@ func (h *IMAPHandler) runIMAPImport(req imapProcessRequest, folders []string) {
 	}
 
 	total, err := imapimport.ImportFolders(
-		context.Background(),
+		context.WithValue(context.Background(), appctx.ContextKeyUserID, uid),
 		h.pool,
 		toConnParams(req.imapConnParams),
 		folders,

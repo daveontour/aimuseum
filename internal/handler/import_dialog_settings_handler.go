@@ -114,6 +114,9 @@ func (h *ImportDialogSettingsHandler) Get(w http.ResponseWriter, r *http.Request
 
 // Put handles PUT /api/import-saved-settings/{kind} with a JSON object body.
 func (h *ImportDialogSettingsHandler) Put(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	kindSeg := chi.URLParam(r, "kind")
 	storedKind, ok := allowedImportDialogKinds[kindSeg]
 	if !ok {

@@ -13,6 +13,7 @@ import (
 
 	appgmail "github.com/daveontour/aimuseum/internal/gmail"
 	appimporter "github.com/daveontour/aimuseum/internal/importer"
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
@@ -23,16 +24,18 @@ const gmailAttachmentSource = "gmail_attachment"
 
 // GmailHandler handles all /gmail/* routes.
 type GmailHandler struct {
-	pool     *pgxpool.Pool
-	oauthCfg *oauth2.Config
-	job      *appimporter.ImportJob
+	pool         *pgxpool.Pool
+	oauthCfg     *oauth2.Config
+	job          *appimporter.ImportJob
+	sessionStore *keystore.SessionMasterStore
 }
 
 // NewGmailHandler creates a GmailHandler.
-func NewGmailHandler(pool *pgxpool.Pool, clientID, clientSecret, redirectURL string) *GmailHandler {
+func NewGmailHandler(pool *pgxpool.Pool, clientID, clientSecret, redirectURL string, sessionStore *keystore.SessionMasterStore) *GmailHandler {
 	return &GmailHandler{
-		pool:     pool,
-		oauthCfg: appgmail.OAuthConfig(clientID, clientSecret, redirectURL),
+		pool:         pool,
+		sessionStore: sessionStore,
+		oauthCfg:     appgmail.OAuthConfig(clientID, clientSecret, redirectURL),
 		job: appimporter.NewImportJob("Gmail import", map[string]any{
 			"status":               "idle",
 			"status_line":          nil,
@@ -69,6 +72,9 @@ func (h *GmailHandler) RegisterRoutes(r chi.Router) {
 // AuthStart handles GET /gmail/auth/start
 // Generates a CSRF state, saves it, and redirects to Google's consent page.
 func (h *GmailHandler) AuthStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if h.oauthCfg.ClientID == "" || h.oauthCfg.ClientSecret == "" {
 		writeError(w, http.StatusServiceUnavailable,
 			"Gmail OAuth is not configured — set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET")
@@ -93,6 +99,9 @@ func (h *GmailHandler) AuthStart(w http.ResponseWriter, r *http.Request) {
 // AuthCallback handles GET /gmail/auth/callback
 // Validates the state, exchanges the code for a token, and saves it.
 func (h *GmailHandler) AuthCallback(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	ctx := r.Context()
 
 	storedState, err := appgmail.LoadState(ctx, h.pool)
@@ -147,6 +156,9 @@ func (h *GmailHandler) AuthStatus(w http.ResponseWriter, r *http.Request) {
 
 // AuthRevoke handles DELETE /gmail/auth
 func (h *GmailHandler) AuthRevoke(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := appgmail.DeleteToken(r.Context(), h.pool); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -201,6 +213,9 @@ type gmailProcessRequest struct {
 
 // StartProcess handles POST /gmail/process
 func (h *GmailHandler) StartProcess(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := h.job.AssertNotRunning(); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -289,6 +304,9 @@ func (h *GmailHandler) StreamProgress(w http.ResponseWriter, r *http.Request) {
 
 // CancelProcess handles POST /gmail/process/cancel
 func (h *GmailHandler) CancelProcess(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	writeJSON(w, h.job.Cancel())
 }
 

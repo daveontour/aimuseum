@@ -140,6 +140,9 @@ func (h *SensitiveHandler) GenerateMasterKey(w http.ResponseWriter, r *http.Requ
 // Endpoint: POST /sensitive-data/trusted-key
 // Body: {"user_password":"...","master_password":"..."}
 func (h *SensitiveHandler) GenerateTrustedKey(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		UserPassword   string `json:"user_password"`
 		MasterPassword string `json:"master_password"`
@@ -173,6 +176,9 @@ func (h *SensitiveHandler) GenerateTrustedKey(w http.ResponseWriter, r *http.Req
 // Endpoint: DELETE /sensitive-data/trusted-key
 // Body: {"user_password":"...","master_password":"..."}
 func (h *SensitiveHandler) DeleteTrustedKey(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		UserPassword   string `json:"user_password"`
 		MasterPassword string `json:"master_password"`
@@ -199,6 +205,9 @@ func (h *SensitiveHandler) DeleteTrustedKey(w http.ResponseWriter, r *http.Reque
 // ── write endpoints ───────────────────────────────────────────────────────────
 
 func (h *SensitiveHandler) Create(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		Description string `json:"description"`
 		Details     string `json:"details"`
@@ -224,6 +233,9 @@ func (h *SensitiveHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SensitiveHandler) Update(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseSensitiveID(w, r)
 	if !ok {
 		return
@@ -252,6 +264,9 @@ func (h *SensitiveHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SensitiveHandler) DeleteRecord(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseSensitiveID(w, r)
 	if !ok {
 		return

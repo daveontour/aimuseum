@@ -21,7 +21,8 @@ func NewMessageRepo(pool *pgxpool.Pool) *MessageRepo {
 // GetChatSessionRows runs the aggregation query that powers the chat-sessions endpoint.
 // Returns one row per distinct chat_session, ordered by last message date DESC.
 func (r *MessageRepo) GetChatSessionRows(ctx context.Context) ([]model.ChatSessionRow, error) {
-	rows, err := r.pool.Query(ctx, `
+	uid := uidFromCtx(ctx)
+	q := `
 		SELECT
 		    m.chat_session,
 		    COUNT(DISTINCT m.id)                                                           AS message_count,
@@ -36,9 +37,14 @@ func (r *MessageRepo) GetChatSessionRows(ctx context.Context) ([]model.ChatSessi
 		    COUNT(         CASE WHEN m.is_group_chat = TRUE       THEN 1    END)          AS group_chat_count
 		FROM messages m
 		LEFT JOIN message_attachments ma ON ma.message_id = m.id
-		WHERE m.chat_session IS NOT NULL
+		WHERE m.chat_session IS NOT NULL`
+	args := []any{}
+	// Use qualified alias — messages m and message_attachments ma both have user_id
+	q, args = addUIDFilterQualified(q, args, uid, "m")
+	q += `
 		GROUP BY m.chat_session
-		ORDER BY MAX(m.message_date) DESC`)
+		ORDER BY MAX(m.message_date) DESC`
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetChatSessionRows: %w", err)
 	}
@@ -69,13 +75,17 @@ func (r *MessageRepo) GetChatSessionRows(ctx context.Context) ([]model.ChatSessi
 
 // GetConversationMessages returns all messages for a chat session ordered by message_date ASC.
 func (r *MessageRepo) GetConversationMessages(ctx context.Context, chatSession string) ([]*model.Message, error) {
-	rows, err := r.pool.Query(ctx, `
+	uid := uidFromCtx(ctx)
+	q := `
 		SELECT id, chat_session, message_date, is_group_chat, delivered_date, read_date,
 		       edited_date, service, type, sender_id, sender_name, status, replying_to,
 		       subject, text, processed, created_at, updated_at
 		FROM messages
-		WHERE chat_session = $1
-		ORDER BY message_date ASC`, chatSession)
+		WHERE chat_session = $1`
+	args := []any{chatSession}
+	q, args = addUIDFilter(q, args, uid)
+	q += ` ORDER BY message_date ASC`
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetConversationMessages: %w", err)
 	}
@@ -120,12 +130,16 @@ func (r *MessageRepo) GetFirstAttachmentForMessages(ctx context.Context, message
 
 // GetMessageByID returns a single message by primary key.
 func (r *MessageRepo) GetMessageByID(ctx context.Context, id int64) (*model.Message, error) {
-	rows, err := r.pool.Query(ctx, `
+	uid := uidFromCtx(ctx)
+	q := `
 		SELECT id, chat_session, message_date, is_group_chat, delivered_date, read_date,
 		       edited_date, service, type, sender_id, sender_name, status, replying_to,
 		       subject, text, processed, created_at, updated_at
 		FROM messages
-		WHERE id = $1`, id)
+		WHERE id = $1`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetMessageByID %d: %w", id, err)
 	}
@@ -190,19 +204,32 @@ func (r *MessageRepo) GetAttachmentMediaForMessage(ctx context.Context, messageI
 // DeleteBySession deletes all message_attachments and messages for a chat_session in a single transaction.
 // Returns the number of messages deleted.
 func (r *MessageRepo) DeleteBySession(ctx context.Context, chatSession string) (int64, error) {
+	uid := uidFromCtx(ctx)
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("DeleteBySession begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	_, err = tx.Exec(ctx, `
+	q := `
 		DELETE FROM message_attachments
-		WHERE message_id IN (SELECT id FROM messages WHERE chat_session = $1)`, chatSession)
+		WHERE message_id IN (SELECT id FROM messages WHERE chat_session = $1`
+	args := []any{chatSession}
+	// For the subquery we need uid filter inline
+	if uid > 0 {
+		args = append(args, uid)
+		q += fmt.Sprintf(" AND user_id = $%d", len(args))
+	}
+	q += ")"
+	_, err = tx.Exec(ctx, q, args...)
 	if err != nil {
 		return 0, fmt.Errorf("DeleteBySession attachments: %w", err)
 	}
-	tag, err := tx.Exec(ctx, `DELETE FROM messages WHERE chat_session = $1`, chatSession)
+
+	dq := `DELETE FROM messages WHERE chat_session = $1`
+	dargs := []any{chatSession}
+	dq, dargs = addUIDFilter(dq, dargs, uid)
+	tag, err := tx.Exec(ctx, dq, dargs...)
 	if err != nil {
 		return 0, fmt.Errorf("DeleteBySession messages: %w", err)
 	}

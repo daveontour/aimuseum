@@ -78,6 +78,8 @@ type BatchSaveResult struct {
 // SaveIMessage saves a message to the database.
 // Returns the message ID and whether it was an update (true) or create (false)
 func (s *MessageStorage) SaveIMessage(ctx context.Context, data MessageData, attachmentData []byte, attachmentFilename, attachmentType, source string) (int64, bool, error) {
+	uid := uidFromCtx(ctx)
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to begin transaction: %w", err)
@@ -148,8 +150,8 @@ func (s *MessageStorage) SaveIMessage(ctx context.Context, data MessageData, att
 		insertQuery := `INSERT INTO messages (
 			chat_session, message_date, delivered_date, read_date, edited_date,
 			service, type, sender_id, sender_name, status, replying_to,
-			subject, text, is_group_chat, processed, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
+			subject, text, is_group_chat, processed, user_id, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
 		RETURNING id`
 
 		err = tx.QueryRow(ctx, insertQuery,
@@ -168,6 +170,7 @@ func (s *MessageStorage) SaveIMessage(ctx context.Context, data MessageData, att
 			data.Text,
 			data.IsGroupChat,
 			false,
+			uidVal(uid),
 		).Scan(&existingID)
 		if err != nil {
 			return 0, false, fmt.Errorf("failed to insert message: %w", err)
@@ -177,7 +180,7 @@ func (s *MessageStorage) SaveIMessage(ctx context.Context, data MessageData, att
 	}
 
 	if len(attachmentData) > 0 {
-		err = s.saveAttachment(ctx, tx, existingID, attachmentData, attachmentFilename, attachmentType, source, data)
+		err = s.saveAttachment(ctx, tx, existingID, attachmentData, attachmentFilename, attachmentType, source, data, uid)
 		if err != nil {
 			slog.Warn("could not save attachment", "err", err)
 		}
@@ -190,12 +193,12 @@ func (s *MessageStorage) SaveIMessage(ctx context.Context, data MessageData, att
 	return existingID, isUpdate, nil
 }
 
-func (s *MessageStorage) saveAttachment(ctx context.Context, tx pgx.Tx, messageID int64, attachmentData []byte, attachmentFilename, attachmentType, source string, messageData MessageData) error {
+func (s *MessageStorage) saveAttachment(ctx context.Context, tx pgx.Tx, messageID int64, attachmentData []byte, attachmentFilename, attachmentType, source string, messageData MessageData, uid int64) error {
 	var thumbnailData []byte
 
 	var blobID int64
-	insertBlobQuery := `INSERT INTO media_blobs (image_data, thumbnail_data) VALUES ($1, $2) RETURNING id`
-	err := tx.QueryRow(ctx, insertBlobQuery, attachmentData, thumbnailData).Scan(&blobID)
+	insertBlobQuery := `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`
+	err := tx.QueryRow(ctx, insertBlobQuery, attachmentData, thumbnailData, uidVal(uid)).Scan(&blobID)
 	if err != nil {
 		return fmt.Errorf("failed to insert media blob (filename: %s, size: %d bytes, type: %s): %w",
 			attachmentFilename, len(attachmentData), attachmentType, err)
@@ -223,8 +226,8 @@ func (s *MessageStorage) saveAttachment(ctx context.Context, tx pgx.Tx, messageI
 		media_blob_id, tags, source, source_reference, title, description,
 		media_type, year, month, latitude, longitude, altitude, has_gps,
 		processed, available_for_task, rating, is_personal, is_business,
-		is_social, is_promotional, is_spam, is_important, created_at, updated_at, is_referenced
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW(), NOW(), FALSE)
+		is_social, is_promotional, is_spam, is_important, user_id, created_at, updated_at, is_referenced
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW(), NOW(), FALSE)
 	RETURNING id`
 
 	var mediaItemID int64
@@ -246,6 +249,7 @@ func (s *MessageStorage) saveAttachment(ctx context.Context, tx pgx.Tx, messageI
 		false,
 		5,
 		false, false, false, false, false, false,
+		uidVal(uid),
 	).Scan(&mediaItemID)
 	if err != nil {
 		return fmt.Errorf("failed to insert media metadata (blob_id: %d, filename: %s, type: %s): %w",
@@ -301,6 +305,8 @@ func (s *MessageStorage) SaveMessagesBatch(ctx context.Context, messages []Messa
 	if len(messages) == 0 {
 		return &BatchSaveResult{}, nil
 	}
+
+	uid := uidFromCtx(ctx)
 
 	result := &BatchSaveResult{}
 	tx, err := s.pool.Begin(ctx)
@@ -425,7 +431,7 @@ func (s *MessageStorage) SaveMessagesBatch(ctx context.Context, messages []Messa
 		for i, msg := range toInsert {
 			if len(msg.AttachmentData) > 0 && i < len(insertedIDs) {
 				if err := s.saveAttachment(ctx, tx, insertedIDs[i], msg.AttachmentData,
-					msg.AttachmentFilename, msg.AttachmentType, msg.Source, msg.MessageData); err != nil {
+					msg.AttachmentFilename, msg.AttachmentType, msg.Source, msg.MessageData, uid); err != nil {
 					slog.Error("failed to save attachment",
 						"message_id", insertedIDs[i],
 						"filename", msg.AttachmentFilename,
@@ -457,7 +463,7 @@ func (s *MessageStorage) SaveMessagesBatch(ctx context.Context, messages []Messa
 
 			if len(item.msg.AttachmentData) > 0 {
 				if err := s.saveAttachment(ctx, tx, item.id, item.msg.AttachmentData,
-					item.msg.AttachmentFilename, item.msg.AttachmentType, item.msg.Source, item.msg.MessageData); err != nil {
+					item.msg.AttachmentFilename, item.msg.AttachmentType, item.msg.Source, item.msg.MessageData, uid); err != nil {
 					slog.Error("failed to save attachment", "message_id", item.id, "err", err)
 					errorTextLower := strings.ToLower(err.Error())
 					if strings.Contains(errorTextLower, "failed to insert media blob") {
@@ -487,11 +493,13 @@ func (s *MessageStorage) batchInsertMessages(ctx context.Context, tx pgx.Tx, mes
 		return []int64{}, nil
 	}
 
+	uid := uidFromCtx(ctx)
+
 	var insertQuery strings.Builder
 	insertQuery.WriteString(`INSERT INTO messages (
 		chat_session, message_date, delivered_date, read_date, edited_date,
 		service, type, sender_id, sender_name, status, replying_to,
-		subject, text, is_group_chat, processed, created_at, updated_at
+		subject, text, is_group_chat, processed, user_id, created_at, updated_at
 	) VALUES `)
 
 	args := make([]interface{}, 0)
@@ -499,9 +507,9 @@ func (s *MessageStorage) batchInsertMessages(ctx context.Context, tx pgx.Tx, mes
 	argIndex := 1
 
 	for _, msg := range messages {
-		placeholder := fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, NOW(), NOW())",
+		placeholder := fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, NOW(), NOW())",
 			argIndex, argIndex+1, argIndex+2, argIndex+3, argIndex+4, argIndex+5, argIndex+6, argIndex+7,
-			argIndex+8, argIndex+9, argIndex+10, argIndex+11, argIndex+12, argIndex+13, argIndex+14)
+			argIndex+8, argIndex+9, argIndex+10, argIndex+11, argIndex+12, argIndex+13, argIndex+14, argIndex+15)
 		placeholders = append(placeholders, placeholder)
 
 		args = append(args,
@@ -520,8 +528,9 @@ func (s *MessageStorage) batchInsertMessages(ctx context.Context, tx pgx.Tx, mes
 			msg.MessageData.Text,
 			msg.MessageData.IsGroupChat,
 			false,
+			uidVal(uid),
 		)
-		argIndex += 15
+		argIndex += 16
 	}
 
 	insertQuery.WriteString(strings.Join(placeholders, ", "))

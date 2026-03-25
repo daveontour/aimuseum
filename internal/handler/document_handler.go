@@ -225,6 +225,9 @@ func (h *DocumentHandler) Download(w http.ResponseWriter, r *http.Request) {
 // ── Create ────────────────────────────────────────────────────────────────────
 
 func (h *DocumentHandler) Create(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, "could not parse multipart form")
 		return
@@ -296,6 +299,9 @@ func (h *DocumentHandler) Create(w http.ResponseWriter, r *http.Request) {
 // ── Update ────────────────────────────────────────────────────────────────────
 
 func (h *DocumentHandler) Update(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseDocID(w, r)
 	if !ok {
 		return
@@ -337,6 +343,9 @@ func (h *DocumentHandler) Update(w http.ResponseWriter, r *http.Request) {
 // ── Delete ────────────────────────────────────────────────────────────────────
 
 func (h *DocumentHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseDocID(w, r)
 	if !ok {
 		return
@@ -375,6 +384,9 @@ func (h *DocumentHandler) InitKeyring(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DocumentHandler) AddUser(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		UserPassword   string `json:"user_password"`
 		MasterPassword string `json:"master_password"`
@@ -397,6 +409,9 @@ func (h *DocumentHandler) AddUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DocumentHandler) RemoveUser(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		UserPassword   string `json:"user_password"`
 		MasterPassword string `json:"master_password"`
@@ -525,6 +540,9 @@ func (h *DocumentHandler) KeyringCount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DocumentHandler) EncryptExisting(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		Password string `json:"password"`
 	}

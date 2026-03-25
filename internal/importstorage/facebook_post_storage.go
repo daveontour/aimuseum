@@ -57,6 +57,8 @@ func (s *FacebookPostStorage) SaveOrUpdatePost(
 	ts *time.Time,
 	title, postText, externalURL, postType string,
 ) (int64, bool, error) {
+	uid := uidFromCtx(ctx)
+
 	existingID, found, err := s.FindPostByTimestampAndTitle(ctx, ts, title)
 	if err != nil {
 		return 0, false, err
@@ -67,13 +69,14 @@ func (s *FacebookPostStorage) SaveOrUpdatePost(
 
 	var postID int64
 	err = s.pool.QueryRow(ctx,
-		`INSERT INTO facebook_posts (timestamp, title, post_text, external_url, post_type, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) RETURNING id`,
+		`INSERT INTO facebook_posts (timestamp, title, post_text, external_url, post_type, user_id, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) RETURNING id`,
 		ts,
 		nullIfEmpty(title),
 		nullIfEmpty(postText),
 		nullIfEmpty(externalURL),
 		nullIfEmpty(postType),
+		uidVal(uid),
 	).Scan(&postID)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to insert post: %w", err)
@@ -87,6 +90,8 @@ func (s *FacebookPostStorage) SavePostImagesBatch(ctx context.Context, items []B
 		return 0, nil
 	}
 
+	uid := uidFromCtx(ctx)
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin transaction: %w", err)
@@ -98,13 +103,13 @@ func (s *FacebookPostStorage) SavePostImagesBatch(ctx context.Context, items []B
 		var blobID int64
 		if len(item.ImageData) > 0 {
 			err = tx.QueryRow(ctx,
-				`INSERT INTO media_blobs (image_data, thumbnail_data) VALUES ($1, $2) RETURNING id`,
-				item.ImageData, nil,
+				`INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`,
+				item.ImageData, nil, uidVal(uid),
 			).Scan(&blobID)
 		} else {
 			err = tx.QueryRow(ctx,
-				`INSERT INTO media_blobs (image_data, thumbnail_data) VALUES ($1, $2) RETURNING id`,
-				nil, nil,
+				`INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`,
+				nil, nil, uidVal(uid),
 			).Scan(&blobID)
 		}
 		if err != nil {
@@ -129,8 +134,8 @@ func (s *FacebookPostStorage) SavePostImagesBatch(ctx context.Context, items []B
 			media_blob_id, tags, source, source_reference, title, description,
 			media_type, year, month, latitude, longitude, altitude, has_gps,
 			processed, available_for_task, rating, is_personal, is_business,
-			is_social, is_promotional, is_spam, is_important, created_at, updated_at, is_referenced
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW(), NOW(), FALSE)
+			is_social, is_promotional, is_spam, is_important, user_id, created_at, updated_at, is_referenced
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW(), NOW(), FALSE)
 		RETURNING id`,
 			blobID,
 			nullIfEmpty(item.PostTitle),
@@ -143,6 +148,7 @@ func (s *FacebookPostStorage) SavePostImagesBatch(ctx context.Context, items []B
 			nil, nil, nil,
 			false, false, false, 5,
 			false, false, false, false, false, false,
+			uidVal(uid),
 		).Scan(&mediaItemID)
 		if err != nil {
 			return imported, fmt.Errorf("failed to insert media item for %s: %w", item.URI, err)

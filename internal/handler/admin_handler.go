@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	appai "github.com/daveontour/aimuseum/internal/ai"
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,11 +18,12 @@ type AdminHandler struct {
 	pool              *pgxpool.Pool
 	subjectConfigRepo *repository.SubjectConfigRepo
 	gemini            *appai.GeminiProvider
+	sessionStore      *keystore.SessionMasterStore
 }
 
 // NewAdminHandler creates an AdminHandler.
-func NewAdminHandler(pool *pgxpool.Pool, subjectConfigRepo *repository.SubjectConfigRepo) *AdminHandler {
-	return &AdminHandler{pool: pool, subjectConfigRepo: subjectConfigRepo}
+func NewAdminHandler(pool *pgxpool.Pool, subjectConfigRepo *repository.SubjectConfigRepo, sessionStore *keystore.SessionMasterStore) *AdminHandler {
+	return &AdminHandler{pool: pool, subjectConfigRepo: subjectConfigRepo, sessionStore: sessionStore}
 }
 
 // WithGemini injects a GeminiProvider for AI summarization.
@@ -95,6 +97,9 @@ func (h *AdminHandler) GetControlDefaults(w http.ResponseWriter, r *http.Request
 // DeleteEmptyMediaTables handles DELETE /admin/empty-media-tables.
 // Removes media_blobs with no data and media_items with no blob reference.
 func (h *AdminHandler) DeleteEmptyMediaTables(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	ctx := r.Context()
 
 	blobTag, err := h.pool.Exec(ctx,
@@ -122,6 +127,9 @@ func (h *AdminHandler) DeleteEmptyMediaTables(w http.ResponseWriter, r *http.Req
 // Samples emails, asks Gemini to describe the subject's writing style,
 // and stores the result in subject_configuration.writing_style_ai.
 func (h *AdminHandler) SummarizeWritingStyle(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	ctx := r.Context()
 	if h.gemini == nil {
 		writeError(w, http.StatusServiceUnavailable, "AI summarization is not configured")
@@ -170,6 +178,9 @@ Email samples:
 // Samples emails, asks Gemini to generate a psychological profile,
 // and stores the result in subject_configuration.psychological_profile_ai.
 func (h *AdminHandler) SummarizePsychologicalProfile(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	ctx := r.Context()
 	if h.gemini == nil {
 		writeError(w, http.StatusServiceUnavailable, "AI summarization is not configured")

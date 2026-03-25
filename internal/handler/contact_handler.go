@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
@@ -15,12 +16,13 @@ import (
 // ContactHandler handles contacts, email-matches, email-exclusions,
 // email-classifications, and the relationship graph.
 type ContactHandler struct {
-	svc *service.ContactService
+	svc          *service.ContactService
+	sessionStore *keystore.SessionMasterStore
 }
 
 // NewContactHandler creates a ContactHandler.
-func NewContactHandler(svc *service.ContactService) *ContactHandler {
-	return &ContactHandler{svc: svc}
+func NewContactHandler(svc *service.ContactService, sessionStore *keystore.SessionMasterStore) *ContactHandler {
+	return &ContactHandler{svc: svc, sessionStore: sessionStore}
 }
 
 // RegisterRoutes mounts all contact-related routes.
@@ -213,6 +215,9 @@ func (h *ContactHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ContactHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseContactID(w, r)
 	if !ok {
 		return
@@ -230,6 +235,9 @@ func (h *ContactHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ContactHandler) BulkDelete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		IDs []int64 `json:"ids"`
 	}
@@ -252,6 +260,9 @@ func (h *ContactHandler) BulkDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ContactHandler) UpdateClassification(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		Name           string `json:"name"`
 		Classification string `json:"classification"`
@@ -318,6 +329,9 @@ func (h *ContactHandler) GetEmailMatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ContactHandler) CreateEmailMatch(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		PrimaryName string `json:"primary_name"`
 		Email       string `json:"email"`
@@ -352,6 +366,9 @@ func (h *ContactHandler) CreateEmailMatch(w http.ResponseWriter, r *http.Request
 }
 
 func (h *ContactHandler) UpdateEmailMatch(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseMatchID(w, r)
 	if !ok {
 		return
@@ -383,6 +400,9 @@ func (h *ContactHandler) UpdateEmailMatch(w http.ResponseWriter, r *http.Request
 }
 
 func (h *ContactHandler) DeleteEmailMatch(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseMatchID(w, r)
 	if !ok {
 		return
@@ -449,6 +469,9 @@ func (h *ContactHandler) GetEmailExclusion(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *ContactHandler) CreateEmailExclusion(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		Email     string `json:"email"`
 		Name      string `json:"name"`
@@ -479,6 +502,9 @@ func (h *ContactHandler) CreateEmailExclusion(w http.ResponseWriter, r *http.Req
 }
 
 func (h *ContactHandler) UpdateEmailExclusion(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseExclID(w, r)
 	if !ok {
 		return
@@ -512,6 +538,9 @@ func (h *ContactHandler) UpdateEmailExclusion(w http.ResponseWriter, r *http.Req
 }
 
 func (h *ContactHandler) DeleteEmailExclusion(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseExclID(w, r)
 	if !ok {
 		return
@@ -576,6 +605,9 @@ func (h *ContactHandler) GetEmailClassification(w http.ResponseWriter, r *http.R
 }
 
 func (h *ContactHandler) CreateEmailClassification(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		Name           string `json:"name"`
 		Classification string `json:"classification"`
@@ -610,6 +642,9 @@ func (h *ContactHandler) CreateEmailClassification(w http.ResponseWriter, r *htt
 }
 
 func (h *ContactHandler) UpdateEmailClassification(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseClsID(w, r)
 	if !ok {
 		return
@@ -641,6 +676,9 @@ func (h *ContactHandler) UpdateEmailClassification(w http.ResponseWriter, r *htt
 }
 
 func (h *ContactHandler) DeleteEmailClassification(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseClsID(w, r)
 	if !ok {
 		return

@@ -54,6 +54,8 @@ func (s *FacebookAlbumStorage) FindAlbumByName(ctx context.Context, name string)
 
 // SaveOrUpdateAlbum creates a new album or updates an existing one by name.
 func (s *FacebookAlbumStorage) SaveOrUpdateAlbum(ctx context.Context, name, description, coverPhotoURI string, lastModified *time.Time) (int64, bool, error) {
+	uid := uidFromCtx(ctx)
+
 	existingID, found, err := s.FindAlbumByName(ctx, name)
 	if err != nil {
 		return 0, false, err
@@ -73,13 +75,14 @@ func (s *FacebookAlbumStorage) SaveOrUpdateAlbum(ctx context.Context, name, desc
 		return existingID, false, nil
 	}
 	var albumID int64
-	query := `INSERT INTO facebook_albums (name, description, cover_photo_uri, last_modified_timestamp, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING id`
+	query := `INSERT INTO facebook_albums (name, description, cover_photo_uri, last_modified_timestamp, user_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) RETURNING id`
 	err = s.pool.QueryRow(ctx, query,
 		name,
 		nullIfEmpty(description),
 		nullIfEmpty(coverPhotoURI),
 		lastModified,
+		uidVal(uid),
 	).Scan(&albumID)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to insert album: %w", err)
@@ -92,6 +95,8 @@ func (s *FacebookAlbumStorage) SaveAlbumImagesBatch(ctx context.Context, items [
 	if len(items) == 0 {
 		return 0, nil
 	}
+
+	uid := uidFromCtx(ctx)
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -133,11 +138,11 @@ func (s *FacebookAlbumStorage) SaveAlbumImagesBatch(ctx context.Context, items [
 
 		var blobID int64
 		if len(item.ImageData) > 0 {
-			err = tx.QueryRow(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data) VALUES ($1, $2) RETURNING id`,
-				item.ImageData, nil).Scan(&blobID)
+			err = tx.QueryRow(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`,
+				item.ImageData, nil, uidVal(uid)).Scan(&blobID)
 		} else {
-			err = tx.QueryRow(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data) VALUES ($1, $2) RETURNING id`,
-				nil, nil).Scan(&blobID)
+			err = tx.QueryRow(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`,
+				nil, nil, uidVal(uid)).Scan(&blobID)
 		}
 		if err != nil {
 			return imported, fmt.Errorf("failed to insert media blob for %s: %w", item.URI, err)
@@ -160,8 +165,8 @@ func (s *FacebookAlbumStorage) SaveAlbumImagesBatch(ctx context.Context, items [
 			media_blob_id, tags, source, source_reference, title, description,
 			media_type, year, month, latitude, longitude, altitude, has_gps,
 			processed, available_for_task, rating, is_personal, is_business,
-			is_social, is_promotional, is_spam, is_important, created_at, updated_at, is_referenced
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW(), NOW(), FALSE)
+			is_social, is_promotional, is_spam, is_important, user_id, created_at, updated_at, is_referenced
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW(), NOW(), FALSE)
 		RETURNING id`,
 			blobID,
 			nullIfEmpty(item.AlbumName),
@@ -174,6 +179,7 @@ func (s *FacebookAlbumStorage) SaveAlbumImagesBatch(ctx context.Context, items [
 			nil, nil, nil,
 			false, false, false, 5,
 			false, false, false, false, false, false,
+			uidVal(uid),
 		).Scan(&mediaItemID)
 		if err != nil {
 			return imported, fmt.Errorf("failed to insert media item for %s: %w", item.URI, err)

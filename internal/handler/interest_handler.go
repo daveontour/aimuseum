@@ -7,18 +7,20 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 
 // InterestHandler handles all /api/interests/* endpoints.
 type InterestHandler struct {
-	svc *service.InterestService
+	svc          *service.InterestService
+	sessionStore *keystore.SessionMasterStore
 }
 
 // NewInterestHandler creates an InterestHandler.
-func NewInterestHandler(svc *service.InterestService) *InterestHandler {
-	return &InterestHandler{svc: svc}
+func NewInterestHandler(svc *service.InterestService, sessionStore *keystore.SessionMasterStore) *InterestHandler {
+	return &InterestHandler{svc: svc, sessionStore: sessionStore}
 }
 
 // RegisterRoutes mounts all interest routes.
@@ -92,6 +94,9 @@ func (h *InterestHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 // ── Create ────────────────────────────────────────────────────────────────────
 
 func (h *InterestHandler) Create(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -161,6 +166,9 @@ func (h *InterestHandler) Update(w http.ResponseWriter, r *http.Request) {
 // ── Delete ────────────────────────────────────────────────────────────────────
 
 func (h *InterestHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseInterestID(w, r)
 	if !ok {
 		return

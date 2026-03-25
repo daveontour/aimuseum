@@ -1,0 +1,634 @@
+package handler
+
+import (
+	"archive/zip"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/daveontour/aimuseum/internal/appctx"
+	facebookimport "github.com/daveontour/aimuseum/internal/import/facebook"
+	facebookalbumsimport "github.com/daveontour/aimuseum/internal/import/facebookalbums"
+	facebookplacesimport "github.com/daveontour/aimuseum/internal/import/facebookplaces"
+	facebookpostsimport "github.com/daveontour/aimuseum/internal/import/facebookposts"
+	imessageimport "github.com/daveontour/aimuseum/internal/import/imessage"
+	instagramimport "github.com/daveontour/aimuseum/internal/import/instagram"
+	whatsappimport "github.com/daveontour/aimuseum/internal/import/whatsapp"
+	appimporter "github.com/daveontour/aimuseum/internal/importer"
+	"github.com/daveontour/aimuseum/internal/importstorage"
+	"github.com/daveontour/aimuseum/internal/keystore"
+	"github.com/daveontour/aimuseum/internal/repository"
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// ── Upload job singleton ───────────────────────────────────────────────────────
+
+var uploadJob = appimporter.NewImportJob("ZIP upload import", map[string]any{
+	"status":        "idle",
+	"status_line":   nil,
+	"error_message": nil,
+	"import_type":   nil,
+})
+
+// ── UploadImportHandler ───────────────────────────────────────────────────────
+
+// UploadImportHandler handles web-based upload import endpoints.
+type UploadImportHandler struct {
+	pool              *pgxpool.Pool
+	subjectConfigRepo *repository.SubjectConfigRepo
+	sessionStore      *keystore.SessionMasterStore
+}
+
+// NewUploadImportHandler creates an UploadImportHandler.
+func NewUploadImportHandler(pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, sessionStore *keystore.SessionMasterStore) *UploadImportHandler {
+	return &UploadImportHandler{pool: pool, subjectConfigRepo: subjectRepo, sessionStore: sessionStore}
+}
+
+// RegisterRoutes mounts upload import routes.
+func (h *UploadImportHandler) RegisterRoutes(r chi.Router) {
+	r.Post("/import/upload", h.Upload)
+	r.Get("/import/upload/stream", h.UploadStream)
+	r.Get("/import/upload/status", h.UploadStatus)
+	r.Post("/import/photo-batch", h.PhotoBatch)
+	r.Get("/import/jobs", h.Jobs)
+}
+
+// ── POST /import/upload ───────────────────────────────────────────────────────
+
+// Upload accepts a ZIP file and starts a background import.
+func (h *UploadImportHandler) Upload(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
+	if err := uploadJob.AssertNotRunning(); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+
+	// Limit upload to 2 GB
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<30)
+
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "failed to parse multipart form: "+err.Error())
+		return
+	}
+
+	importType := r.FormValue("type")
+	validTypes := map[string]bool{
+		"facebook":  true,
+		"instagram": true,
+		"whatsapp":  true,
+		"imessage":  true,
+	}
+	if !validTypes[importType] {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid import type %q; must be one of: facebook, instagram, whatsapp, imessage", importType))
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing or unreadable file field: "+err.Error())
+		return
+	}
+	defer file.Close()
+
+	uid := appctx.UserIDFromCtx(r.Context())
+	jobID := randomJobID()
+
+	var uidStr string
+	if uid == 0 {
+		uidStr = "0"
+	} else {
+		uidStr = fmt.Sprintf("%d", uid)
+	}
+
+	tmpDir := filepath.Join("tmp", "imports", uidStr, jobID)
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create temp directory: "+err.Error())
+		return
+	}
+
+	// Ensure tmpDir is always removed — either by this handler on error, or by
+	// the background goroutine on completion.  The flag is flipped to false just
+	// before the goroutine is launched so the defer becomes a no-op on the
+	// happy path.
+	handlerOwnsCleanup := true
+	defer func() {
+		if handlerOwnsCleanup {
+			os.RemoveAll(tmpDir)
+		}
+	}()
+
+	// Write uploaded ZIP to temp file
+	zipPath := filepath.Join(tmpDir, "upload.zip")
+	zipFile, err := os.Create(zipPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create temp ZIP: "+err.Error())
+		return
+	}
+	if _, err := io.Copy(zipFile, file); err != nil {
+		zipFile.Close()
+		writeError(w, http.StatusInternalServerError, "failed to write uploaded file: "+err.Error())
+		return
+	}
+	zipFile.Close()
+
+	// Extract ZIP, then remove the archive immediately to free disk space
+	extractDir := filepath.Join(tmpDir, "extracted")
+	if err := os.MkdirAll(extractDir, 0755); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create extract directory: "+err.Error())
+		return
+	}
+	if err := extractZip(zipPath, extractDir); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to extract ZIP: "+err.Error())
+		return
+	}
+	_ = os.Remove(zipPath) // ZIP is no longer needed once extracted
+
+	// Start import — goroutine takes ownership of tmpDir cleanup
+	uploadJob.Start()
+	uploadJob.UpdateState(map[string]any{
+		"status":        "in_progress",
+		"status_line":   fmt.Sprintf("Starting %s import...", importType),
+		"error_message": nil,
+		"import_type":   importType,
+	})
+	uploadJob.Broadcast("status", map[string]any{"status_line": fmt.Sprintf("Starting %s import...", importType)})
+
+	// Unwrap single-folder ZIPs: most platform exports wrap everything in one
+	// top-level directory (e.g. "facebook-export-2024/"). Pass the actual data
+	// root to the importer rather than the extraction wrapper directory.
+	importRoot := resolveImportRoot(extractDir)
+
+	ctx := context.WithValue(context.Background(), appctx.ContextKeyUserID, uid)
+	handlerOwnsCleanup = false // goroutine takes over from here
+
+	go func() {
+		defer os.RemoveAll(tmpDir) // always remove extracted files when import ends
+		switch importType {
+		case "whatsapp":
+			runUploadWhatsApp(ctx, h.pool, h.subjectConfigRepo, uploadJob, importRoot)
+		case "imessage":
+			runUploadIMessage(ctx, h.pool, h.subjectConfigRepo, uploadJob, importRoot)
+		case "instagram":
+			runUploadInstagram(ctx, h.pool, h.subjectConfigRepo, uploadJob, importRoot)
+		case "facebook":
+			runUploadFacebook(ctx, h.pool, h.subjectConfigRepo, uploadJob, importRoot)
+		}
+	}()
+
+	writeJSON(w, map[string]any{
+		"message": fmt.Sprintf("%s import started from uploaded ZIP (original: %s)", importType, header.Filename),
+		"job_id":  jobID,
+	})
+}
+
+// ── GET /import/upload/stream ─────────────────────────────────────────────────
+
+// UploadStream serves SSE progress for the upload import job.
+func (h *UploadImportHandler) UploadStream(w http.ResponseWriter, r *http.Request) {
+	uploadJob.ServeSSE(w, r)
+}
+
+// ── GET /import/upload/status ─────────────────────────────────────────────────
+
+// UploadStatus returns the current JSON status of the upload import job.
+func (h *UploadImportHandler) UploadStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, uploadJob.Status())
+}
+
+// ── POST /import/photo-batch ──────────────────────────────────────────────────
+
+// PhotoBatch accepts multipart image files and inserts them with the user_id from context.
+func (h *UploadImportHandler) PhotoBatch(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
+	if err := r.ParseMultipartForm(100 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "failed to parse multipart form: "+err.Error())
+		return
+	}
+
+	ctx := r.Context()
+	storage := importstorage.NewImageStorage(h.pool)
+
+	var imported, updated, errors int
+
+	for fieldName, fileHeaders := range r.MultipartForm.File {
+		_ = fieldName
+		for _, fh := range fileHeaders {
+			f, err := fh.Open()
+			if err != nil {
+				errors++
+				continue
+			}
+			data, err := io.ReadAll(f)
+			f.Close()
+			if err != nil {
+				errors++
+				continue
+			}
+
+			mediaType := fh.Header.Get("Content-Type")
+			_, isUpdate, err := storage.SaveImage(ctx, fh.Filename, data, mediaType, fh.Filename, "", false)
+			if err != nil {
+				errors++
+				continue
+			}
+			if isUpdate {
+				updated++
+			} else {
+				imported++
+			}
+		}
+	}
+
+	writeJSON(w, map[string]any{
+		"imported": imported,
+		"updated":  updated,
+		"errors":   errors,
+	})
+}
+
+// ── GET /import/jobs ──────────────────────────────────────────────────────────
+
+// Jobs returns a JSON map of all import job statuses.
+func (h *UploadImportHandler) Jobs(w http.ResponseWriter, r *http.Request) {
+	jobs := map[string]any{
+		"upload":           uploadJob.Status(),
+		"filesystem":       filesystemJob.Status(),
+		"whatsapp":         whatsappJob.Status(),
+		"imessage":         imessageJob.Status(),
+		"instagram":        instagramJob.Status(),
+		"facebook_all":     facebookAllJob.Status(),
+		"thumbnails":       thumbnailsJob.Status(),
+		"contacts_extract": contactsExtractJob.Status(),
+		"reference_import": referenceImportJob.Status(),
+	}
+	writeJSON(w, jobs)
+}
+
+// ── Upload run functions ───────────────────────────────────────────────────────
+
+func runUploadWhatsApp(ctx context.Context, pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *appimporter.ImportJob, directoryPath string) {
+	defer job.Finish()
+
+	storage := importstorage.NewMessageStorage(ctx, pool, subjectRepo)
+
+	progressCallback := func(stats whatsappimport.ImportStats) {
+		statusLine := ""
+		if stats.TotalConversations > 0 {
+			statusLine = fmt.Sprintf("Processing conversation %d of %d: %s | Messages: %d (%d created, %d updated) | Attachments: %d found, %d missing | Errors: %d",
+				stats.ConversationsProcessed, stats.TotalConversations, stats.CurrentConversation,
+				stats.MessagesImported, stats.MessagesCreated, stats.MessagesUpdated,
+				stats.AttachmentsFound, stats.AttachmentsMissing, stats.Errors)
+		}
+		job.UpdateState(map[string]any{
+			"status_line": statusLine,
+		})
+		job.Broadcast("progress", job.GetState())
+	}
+
+	cancelledCheck := func() bool { return job.IsCancelled() }
+
+	stats, err := whatsappimport.ImportWhatsAppFromDirectory(ctx, storage, directoryPath, progressCallback, cancelledCheck)
+
+	if job.IsCancelled() {
+		job.UpdateState(map[string]any{"status": "cancelled", "status_line": "Import cancelled."})
+		job.Broadcast("cancelled", job.GetState())
+		return
+	}
+	if err != nil {
+		msg := fmt.Sprintf("import error: %s", err)
+		job.UpdateState(map[string]any{"status": "error", "status_line": msg, "error_message": msg})
+		job.Broadcast("error", job.GetState())
+		return
+	}
+
+	statusLine := fmt.Sprintf("Completed: %d conversations, %d messages (%d created, %d updated), %d attachments found, %d missing",
+		stats.ConversationsProcessed, stats.MessagesImported, stats.MessagesCreated, stats.MessagesUpdated,
+		stats.AttachmentsFound, stats.AttachmentsMissing)
+	job.UpdateState(map[string]any{
+		"status":      "completed",
+		"status_line": statusLine,
+	})
+	runThumbnailsAfterImportIfIdle(pool)
+	job.Broadcast("completed", job.GetState())
+}
+
+func runUploadIMessage(ctx context.Context, pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *appimporter.ImportJob, directoryPath string) {
+	defer job.Finish()
+
+	storage := importstorage.NewMessageStorage(ctx, pool, subjectRepo)
+
+	progressCallback := func(stats imessageimport.ImportStats) {
+		statusLine := ""
+		if stats.TotalConversations > 0 {
+			statusLine = fmt.Sprintf("Processing conversation %d of %d: %s | Messages: %d (%d created, %d updated) | Attachments: %d found, %d missing | Errors: %d",
+				stats.ConversationsProcessed, stats.TotalConversations, stats.CurrentConversation,
+				stats.MessagesImported, stats.MessagesCreated, stats.MessagesUpdated,
+				stats.AttachmentsFound, stats.AttachmentsMissing, stats.Errors)
+		}
+		job.UpdateState(map[string]any{
+			"status_line": statusLine,
+		})
+		job.Broadcast("progress", job.GetState())
+	}
+
+	cancelledCheck := func() bool { return job.IsCancelled() }
+
+	stats, err := imessageimport.ImportIMessagesFromDirectory(ctx, storage, directoryPath, progressCallback, cancelledCheck)
+
+	if job.IsCancelled() {
+		job.UpdateState(map[string]any{"status": "cancelled", "status_line": "Import cancelled."})
+		job.Broadcast("cancelled", job.GetState())
+		return
+	}
+	if err != nil {
+		msg := fmt.Sprintf("import error: %s", err)
+		job.UpdateState(map[string]any{"status": "error", "status_line": msg, "error_message": msg})
+		job.Broadcast("error", job.GetState())
+		return
+	}
+
+	statusLine := fmt.Sprintf("Completed: %d conversations, %d messages (%d created, %d updated), %d attachments found, %d missing",
+		stats.ConversationsProcessed, stats.MessagesImported, stats.MessagesCreated, stats.MessagesUpdated,
+		stats.AttachmentsFound, stats.AttachmentsMissing)
+	job.UpdateState(map[string]any{
+		"status":      "completed",
+		"status_line": statusLine,
+	})
+	runThumbnailsAfterImportIfIdle(pool)
+	job.Broadcast("completed", job.GetState())
+}
+
+func runUploadInstagram(ctx context.Context, pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *appimporter.ImportJob, directoryPath string) {
+	defer job.Finish()
+
+	storage := importstorage.NewMessageStorage(ctx, pool, subjectRepo)
+
+	progressCallback := func(stats instagramimport.ImportStats) {
+		statusLine := ""
+		if stats.TotalConversations > 0 {
+			statusLine = fmt.Sprintf("Processing conversation %d of %d: %s | Messages: %d (%d created, %d updated) | Attachments: %d found, %d missing | Errors: %d",
+				stats.ConversationsProcessed, stats.TotalConversations, stats.CurrentConversation,
+				stats.MessagesImported, stats.MessagesCreated, stats.MessagesUpdated,
+				stats.AttachmentsFound, stats.AttachmentsMissing, stats.Errors)
+		}
+		job.UpdateState(map[string]any{
+			"status_line": statusLine,
+		})
+		job.Broadcast("progress", job.GetState())
+	}
+
+	cancelledCheck := func() bool { return job.IsCancelled() }
+
+	stats, err := instagramimport.ImportInstagramFromDirectory(ctx, storage, directoryPath, progressCallback, cancelledCheck, "", "")
+
+	if job.IsCancelled() {
+		job.UpdateState(map[string]any{"status": "cancelled", "status_line": "Import cancelled."})
+		job.Broadcast("cancelled", job.GetState())
+		return
+	}
+	if err != nil {
+		msg := fmt.Sprintf("import error: %s", err)
+		job.UpdateState(map[string]any{"status": "error", "status_line": msg, "error_message": msg})
+		job.Broadcast("error", job.GetState())
+		return
+	}
+
+	statusLine := fmt.Sprintf("Completed: %d conversations, %d messages (%d created, %d updated)",
+		stats.ConversationsProcessed, stats.MessagesImported, stats.MessagesCreated, stats.MessagesUpdated)
+	job.UpdateState(map[string]any{
+		"status":      "completed",
+		"status_line": statusLine,
+	})
+	runThumbnailsAfterImportIfIdle(pool)
+	job.Broadcast("completed", job.GetState())
+}
+
+func runUploadFacebook(ctx context.Context, pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *appimporter.ImportJob, directoryPath string) {
+	defer job.Finish()
+
+	storage := importstorage.NewMessageStorage(ctx, pool, subjectRepo)
+	exportRoot := directoryPath
+	cancelledCheck := func() bool { return job.IsCancelled() }
+
+	// Messenger
+	job.UpdateState(map[string]any{"status_line": "Running Facebook Messenger import..."})
+	job.Broadcast("progress", job.GetState())
+
+	messengerProgress := func(stats facebookimport.ImportStats) {
+		job.UpdateState(map[string]any{
+			"status_line": fmt.Sprintf("Messenger: %d conversations, %d messages (%d created, %d updated)",
+				stats.ConversationsProcessed, stats.MessagesImported, stats.MessagesCreated, stats.MessagesUpdated),
+		})
+		job.Broadcast("progress", job.GetState())
+	}
+	messengerStats, messengerErr := facebookimport.ImportFacebookFromDirectory(
+		ctx, storage, directoryPath, messengerProgress, cancelledCheck, exportRoot, "",
+	)
+
+	if job.IsCancelled() {
+		job.UpdateState(map[string]any{"status": "cancelled", "status_line": "Import cancelled."})
+		job.Broadcast("cancelled", job.GetState())
+		return
+	}
+
+	// Albums
+	job.UpdateState(map[string]any{"status_line": "Running Facebook Albums import..."})
+	job.Broadcast("progress", job.GetState())
+
+	albumsProgress := func(stats facebookalbumsimport.ImportStats) {
+		job.UpdateState(map[string]any{
+			"status_line": fmt.Sprintf("Albums: %d processed, %d imported, %d images imported",
+				stats.AlbumsProcessed, stats.AlbumsImported, stats.ImagesImported),
+		})
+		job.Broadcast("progress", job.GetState())
+	}
+	albumsStats, albumsErr := facebookalbumsimport.ImportFacebookAlbumsFromDirectory(
+		ctx, pool, directoryPath, albumsProgress, cancelledCheck, exportRoot,
+	)
+
+	if job.IsCancelled() {
+		job.UpdateState(map[string]any{"status": "cancelled", "status_line": "Import cancelled."})
+		job.Broadcast("cancelled", job.GetState())
+		return
+	}
+
+	// Places
+	job.UpdateState(map[string]any{"status_line": "Running Facebook Places import..."})
+	job.Broadcast("progress", job.GetState())
+
+	placesProgress := func(stats facebookplacesimport.ImportStats) {
+		job.UpdateState(map[string]any{
+			"status_line": fmt.Sprintf("Places: %d imported (%d created, %d updated)",
+				stats.PlacesImported, stats.PlacesCreated, stats.PlacesUpdated),
+		})
+		job.Broadcast("progress", job.GetState())
+	}
+	placesStats, placesErr := facebookplacesimport.ImportFacebookPlacesFromDirectory(
+		ctx, pool, directoryPath, placesProgress, cancelledCheck,
+	)
+
+	if job.IsCancelled() {
+		job.UpdateState(map[string]any{"status": "cancelled", "status_line": "Import cancelled."})
+		job.Broadcast("cancelled", job.GetState())
+		return
+	}
+
+	// Posts
+	job.UpdateState(map[string]any{"status_line": "Running Facebook Posts import..."})
+	job.Broadcast("progress", job.GetState())
+
+	postsProgress := func(stats facebookpostsimport.ImportStats) {
+		job.UpdateState(map[string]any{
+			"status_line": fmt.Sprintf("Posts: %d processed, %d imported, %d updated",
+				stats.PostsProcessed, stats.PostsImported, stats.PostsUpdated),
+		})
+		job.Broadcast("progress", job.GetState())
+	}
+	postsStats, postsErr := facebookpostsimport.ImportFacebookPostsFromPath(
+		ctx, pool, directoryPath, exportRoot, postsProgress, cancelledCheck,
+	)
+
+	// Build summary
+	var parts []string
+	if messengerStats != nil {
+		parts = append(parts, fmt.Sprintf("Messenger: %d conversations, %d messages",
+			messengerStats.ConversationsProcessed, messengerStats.MessagesImported))
+	}
+	if albumsStats != nil {
+		parts = append(parts, fmt.Sprintf("Albums: %d imported, %d images",
+			albumsStats.AlbumsImported, albumsStats.ImagesImported))
+	}
+	if placesStats != nil {
+		parts = append(parts, fmt.Sprintf("Places: %d imported",
+			placesStats.PlacesImported))
+	}
+	if postsStats != nil {
+		parts = append(parts, fmt.Sprintf("Posts: %d imported",
+			postsStats.PostsImported))
+	}
+
+	anyErr := messengerErr != nil || albumsErr != nil || placesErr != nil || postsErr != nil
+	if anyErr {
+		var errMsgs []string
+		if messengerErr != nil {
+			errMsgs = append(errMsgs, fmt.Sprintf("Messenger: %v", messengerErr))
+		}
+		if albumsErr != nil {
+			errMsgs = append(errMsgs, fmt.Sprintf("Albums: %v", albumsErr))
+		}
+		if placesErr != nil {
+			errMsgs = append(errMsgs, fmt.Sprintf("Places: %v", placesErr))
+		}
+		if postsErr != nil {
+			errMsgs = append(errMsgs, fmt.Sprintf("Posts: %v", postsErr))
+		}
+		errSummary := strings.Join(errMsgs, "; ")
+		job.UpdateState(map[string]any{
+			"status":        "completed",
+			"status_line":   "Import completed with errors: " + errSummary,
+			"error_message": errSummary,
+		})
+	} else {
+		statusLine := "Completed: " + strings.Join(parts, " | ")
+		job.UpdateState(map[string]any{
+			"status":      "completed",
+			"status_line": statusLine,
+		})
+	}
+
+	runThumbnailsAfterImportIfIdle(pool)
+	job.Broadcast("completed", job.GetState())
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// randomJobID generates a random hex job ID.
+func randomJobID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// resolveImportRoot returns the actual data root inside an extracted ZIP directory.
+// Most platform export ZIPs contain a single top-level folder
+// (e.g. "facebook-export-2024-01-01/") wrapping all data. When extractDir holds
+// exactly one sub-directory and no loose files, that sub-directory is returned as
+// the import root. Otherwise extractDir itself is returned unchanged.
+func resolveImportRoot(extractDir string) string {
+	entries, err := os.ReadDir(extractDir)
+	if err != nil {
+		return extractDir
+	}
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, e.Name())
+		} else {
+			// A loose file at the root means this IS the root
+			return extractDir
+		}
+	}
+	if len(dirs) == 1 {
+		return filepath.Join(extractDir, dirs[0])
+	}
+	return extractDir
+}
+
+// extractZip extracts a ZIP archive to destDir, rejecting path-traversal entries.
+func extractZip(zipPath, destDir string) error {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	for _, f := range r.File {
+		name := filepath.Clean(f.Name)
+		if strings.HasPrefix(name, "..") {
+			continue
+		}
+		destPath := filepath.Join(destDir, name)
+		// Use filepath.Rel for OS-independent containment check (avoids the
+		// mixed-separator false-negative that breaks the slash-based check on Windows).
+		rel, err := filepath.Rel(destDir, destPath)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		if f.FileInfo().IsDir() {
+			_ = os.MkdirAll(destPath, 0755)
+			continue
+		}
+		if err := extractZipEntry(f, destPath); err != nil {
+			return fmt.Errorf("extract %s: %w", f.Name, err)
+		}
+	}
+	return nil
+}
+
+func extractZipEntry(f *zip.File, destPath string) error {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return err
+	}
+	rc, err := f.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	out, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, rc)
+	return err
+}

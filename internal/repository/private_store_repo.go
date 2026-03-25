@@ -32,8 +32,12 @@ func NewPrivateStoreRepo(pool *pgxpool.Pool) *PrivateStoreRepo {
 
 // GetAll returns all rows ordered by key.
 func (r *PrivateStoreRepo) GetAll(ctx context.Context) ([]privateStoreRow, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT id, key, encrypted_value, created_at, updated_at FROM private_store ORDER BY key`)
+	uid := uidFromCtx(ctx)
+	q := `SELECT id, key, encrypted_value, created_at, updated_at FROM private_store WHERE TRUE`
+	args := []any{}
+	q, args = addUIDFilter(q, args, uid)
+	q += " ORDER BY key"
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query private_store: %w", err)
 	}
@@ -52,10 +56,13 @@ func (r *PrivateStoreRepo) GetAll(ctx context.Context) ([]privateStoreRow, error
 
 // GetByKey returns a single row by key, or nil if not found.
 func (r *PrivateStoreRepo) GetByKey(ctx context.Context, key string) (*privateStoreRow, error) {
+	uid := uidFromCtx(ctx)
+	q := `SELECT id, key, encrypted_value, created_at, updated_at FROM private_store WHERE key = $1`
+	args := []any{key}
+	q, args = addUIDFilter(q, args, uid)
 	var row privateStoreRow
-	err := r.pool.QueryRow(ctx,
-		`SELECT id, key, encrypted_value, created_at, updated_at FROM private_store WHERE key = $1`, key,
-	).Scan(&row.ID, &row.Key, &row.EncryptedValue, &row.CreatedAt, &row.UpdatedAt)
+	err := r.pool.QueryRow(ctx, q, args...).
+		Scan(&row.ID, &row.Key, &row.EncryptedValue, &row.CreatedAt, &row.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -67,10 +74,11 @@ func (r *PrivateStoreRepo) GetByKey(ctx context.Context, key string) (*privateSt
 
 // Create inserts a new key-value pair. Returns an error if the key already exists.
 func (r *PrivateStoreRepo) Create(ctx context.Context, key string, encValue []byte) (int64, error) {
+	uid := uidFromCtx(ctx)
 	var id int64
 	err := r.pool.QueryRow(ctx,
-		`INSERT INTO private_store (key, encrypted_value) VALUES ($1, $2) RETURNING id`,
-		key, encValue,
+		`INSERT INTO private_store (key, encrypted_value, user_id) VALUES ($1, $2, $3) RETURNING id`,
+		key, encValue, uidVal(uid),
 	).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert private_store: %w", err)
@@ -80,10 +88,11 @@ func (r *PrivateStoreRepo) Create(ctx context.Context, key string, encValue []by
 
 // Upsert inserts or updates the encrypted value for key.
 func (r *PrivateStoreRepo) Upsert(ctx context.Context, key string, encValue []byte) error {
+	uid := uidFromCtx(ctx)
 	_, err := r.pool.Exec(ctx, `
-		INSERT INTO private_store (key, encrypted_value) VALUES ($1, $2)
+		INSERT INTO private_store (key, encrypted_value, user_id) VALUES ($1, $2, $3)
 		ON CONFLICT (key) DO UPDATE SET encrypted_value = EXCLUDED.encrypted_value, updated_at = NOW()`,
-		key, encValue)
+		key, encValue, uidVal(uid))
 	if err != nil {
 		return fmt.Errorf("upsert private_store: %w", err)
 	}
@@ -92,9 +101,11 @@ func (r *PrivateStoreRepo) Upsert(ctx context.Context, key string, encValue []by
 
 // Update replaces the encrypted value for an existing key.
 func (r *PrivateStoreRepo) Update(ctx context.Context, key string, encValue []byte) error {
-	tag, err := r.pool.Exec(ctx,
-		`UPDATE private_store SET encrypted_value = $1, updated_at = NOW() WHERE key = $2`,
-		encValue, key)
+	uid := uidFromCtx(ctx)
+	q := `UPDATE private_store SET encrypted_value = $1, updated_at = NOW() WHERE key = $2`
+	args := []any{encValue, key}
+	q, args = addUIDFilter(q, args, uid)
+	tag, err := r.pool.Exec(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("update private_store: %w", err)
 	}
@@ -106,7 +117,11 @@ func (r *PrivateStoreRepo) Update(ctx context.Context, key string, encValue []by
 
 // Delete removes a row by key.
 func (r *PrivateStoreRepo) Delete(ctx context.Context, key string) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM private_store WHERE key = $1`, key)
+	uid := uidFromCtx(ctx)
+	q := `DELETE FROM private_store WHERE key = $1`
+	args := []any{key}
+	q, args = addUIDFilter(q, args, uid)
+	tag, err := r.pool.Exec(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("delete from private_store: %w", err)
 	}

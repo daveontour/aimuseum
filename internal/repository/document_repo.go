@@ -38,6 +38,7 @@ func scanDocument(row interface{ Scan(...any) error }) (*model.ReferenceDocument
 
 // List returns documents with optional filters. Excludes sensitive records.
 func (r *DocumentRepo) List(ctx context.Context, search, category, tag, contentType string, availableForTask *bool) ([]*model.ReferenceDocument, error) {
+	uid := uidFromCtx(ctx)
 	q := `SELECT ` + documentCols + ` FROM reference_documents WHERE is_sensitive = FALSE`
 	var args []any
 	var conds []string
@@ -69,6 +70,7 @@ func (r *DocumentRepo) List(ctx context.Context, search, category, tag, contentT
 	if len(conds) > 0 {
 		q += " AND " + joinAnd(conds)
 	}
+	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY created_at DESC"
 
 	rows, err := r.pool.Query(ctx, q, args...)
@@ -90,8 +92,11 @@ func (r *DocumentRepo) List(ctx context.Context, search, category, tag, contentT
 
 // GetByID returns a document's metadata (no blob data). Returns nil if not found or is_sensitive.
 func (r *DocumentRepo) GetByID(ctx context.Context, id int64) (*model.ReferenceDocument, error) {
-	d, err := scanDocument(r.pool.QueryRow(ctx,
-		`SELECT `+documentCols+` FROM reference_documents WHERE id = $1 AND is_sensitive = FALSE`, id))
+	uid := uidFromCtx(ctx)
+	q := `SELECT ` + documentCols + ` FROM reference_documents WHERE id = $1 AND is_sensitive = FALSE`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	d, err := scanDocument(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -103,11 +108,13 @@ func (r *DocumentRepo) GetByID(ctx context.Context, id int64) (*model.ReferenceD
 
 // GetData returns the raw file bytes and whether the data is encrypted.
 func (r *DocumentRepo) GetData(ctx context.Context, id int64) ([]byte, bool, error) {
+	uid := uidFromCtx(ctx)
+	q := `SELECT data, is_encrypted FROM reference_documents WHERE id = $1`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
 	var data []byte
 	var isEncrypted bool
-	err := r.pool.QueryRow(ctx,
-		`SELECT data, is_encrypted FROM reference_documents WHERE id = $1`, id,
-	).Scan(&data, &isEncrypted)
+	err := r.pool.QueryRow(ctx, q, args...).Scan(&data, &isEncrypted)
 	if err != nil {
 		if isNoRows(err) {
 			return nil, false, nil
@@ -123,14 +130,15 @@ func (r *DocumentRepo) Create(ctx context.Context,
 	title, description, author, tags, categories, notes *string,
 	availableForTask, isPrivate, isSensitive, isEncrypted bool,
 ) (*model.ReferenceDocument, error) {
+	uid := uidFromCtx(ctx)
 	d, err := scanDocument(r.pool.QueryRow(ctx,
 		`INSERT INTO reference_documents
 		 (filename, title, description, author, content_type, size, data,
-		  tags, categories, notes, available_for_task, is_private, is_sensitive, is_encrypted)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		  tags, categories, notes, available_for_task, is_private, is_sensitive, is_encrypted, user_id)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		 RETURNING `+documentCols,
 		filename, title, description, author, contentType, size, data,
-		tags, categories, notes, availableForTask, isPrivate, isSensitive, isEncrypted,
+		tags, categories, notes, availableForTask, isPrivate, isSensitive, isEncrypted, uidVal(uid),
 	))
 	if err != nil {
 		return nil, fmt.Errorf("CreateDocument: %w", err)
@@ -143,20 +151,21 @@ func (r *DocumentRepo) Update(ctx context.Context, id int64,
 	title, description, author, tags, categories, notes *string,
 	availableForTask *bool,
 ) (*model.ReferenceDocument, error) {
-	d, err := scanDocument(r.pool.QueryRow(ctx,
-		`UPDATE reference_documents SET
-		 title            = COALESCE($1, title),
-		 description      = COALESCE($2, description),
-		 author           = COALESCE($3, author),
-		 tags             = COALESCE($4, tags),
-		 categories       = COALESCE($5, categories),
-		 notes            = COALESCE($6, notes),
-		 available_for_task = COALESCE($7, available_for_task),
-		 updated_at       = NOW()
-		 WHERE id = $8
-		 RETURNING `+documentCols,
-		title, description, author, tags, categories, notes, availableForTask, id,
-	))
+	uid := uidFromCtx(ctx)
+	q := `UPDATE reference_documents SET
+	      title            = COALESCE($1, title),
+	      description      = COALESCE($2, description),
+	      author           = COALESCE($3, author),
+	      tags             = COALESCE($4, tags),
+	      categories       = COALESCE($5, categories),
+	      notes            = COALESCE($6, notes),
+	      available_for_task = COALESCE($7, available_for_task),
+	      updated_at       = NOW()
+	      WHERE id = $8`
+	args := []any{title, description, author, tags, categories, notes, availableForTask, id}
+	q, args = addUIDFilter(q, args, uid)
+	q += ` RETURNING ` + documentCols
+	d, err := scanDocument(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -168,22 +177,32 @@ func (r *DocumentRepo) Update(ctx context.Context, id int64,
 
 // UpdateData replaces the binary content and encryption state of a document.
 func (r *DocumentRepo) UpdateData(ctx context.Context, id int64, data []byte, isEncrypted bool) error {
-	_, err := r.pool.Exec(ctx,
-		`UPDATE reference_documents SET data=$1, is_encrypted=$2, updated_at=NOW() WHERE id=$3`,
-		data, isEncrypted, id)
+	uid := uidFromCtx(ctx)
+	q := `UPDATE reference_documents SET data=$1, is_encrypted=$2, updated_at=NOW() WHERE id=$3`
+	args := []any{data, isEncrypted, id}
+	q, args = addUIDFilter(q, args, uid)
+	_, err := r.pool.Exec(ctx, q, args...)
 	return err
 }
 
 // Delete removes a reference document.
 func (r *DocumentRepo) Delete(ctx context.Context, id int64) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM reference_documents WHERE id = $1`, id)
+	uid := uidFromCtx(ctx)
+	q := `DELETE FROM reference_documents WHERE id = $1`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	_, err := r.pool.Exec(ctx, q, args...)
 	return err
 }
 
 // ListSensitive returns all rows where is_sensitive=TRUE (metadata only, no data blob).
 func (r *DocumentRepo) ListSensitive(ctx context.Context) ([]*model.ReferenceDocument, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT `+documentCols+` FROM reference_documents WHERE is_sensitive = TRUE ORDER BY created_at DESC`)
+	uid := uidFromCtx(ctx)
+	q := `SELECT ` + documentCols + ` FROM reference_documents WHERE is_sensitive = TRUE`
+	args := []any{}
+	q, args = addUIDFilter(q, args, uid)
+	q += " ORDER BY created_at DESC"
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListSensitive: %w", err)
 	}
@@ -201,8 +220,11 @@ func (r *DocumentRepo) ListSensitive(ctx context.Context) ([]*model.ReferenceDoc
 
 // GetSensitiveByID returns a single sensitive record by ID, or nil if not found / not sensitive.
 func (r *DocumentRepo) GetSensitiveByID(ctx context.Context, id int64) (*model.ReferenceDocument, error) {
-	d, err := scanDocument(r.pool.QueryRow(ctx,
-		`SELECT `+documentCols+` FROM reference_documents WHERE id = $1 AND is_sensitive = TRUE`, id))
+	uid := uidFromCtx(ctx)
+	q := `SELECT ` + documentCols + ` FROM reference_documents WHERE id = $1 AND is_sensitive = TRUE`
+	args := []any{id}
+	q, args = addUIDFilter(q, args, uid)
+	d, err := scanDocument(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -214,8 +236,12 @@ func (r *DocumentRepo) GetSensitiveByID(ctx context.Context, id int64) (*model.R
 
 // ListUnencrypted returns all non-sensitive rows where is_encrypted=FALSE.
 func (r *DocumentRepo) ListUnencrypted(ctx context.Context) ([]*model.ReferenceDocument, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT `+documentCols+` FROM reference_documents WHERE is_encrypted = FALSE AND is_sensitive = FALSE ORDER BY id`)
+	uid := uidFromCtx(ctx)
+	q := `SELECT ` + documentCols + ` FROM reference_documents WHERE is_encrypted = FALSE AND is_sensitive = FALSE`
+	args := []any{}
+	q, args = addUIDFilter(q, args, uid)
+	q += " ORDER BY id"
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListUnencrypted: %w", err)
 	}

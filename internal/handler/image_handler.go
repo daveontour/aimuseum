@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/model"
 	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/daveontour/aimuseum/internal/service"
@@ -15,12 +16,13 @@ import (
 
 // ImageHandler handles all /images/*, /getLocations, and /facebook/albums/* read endpoints.
 type ImageHandler struct {
-	svc *service.ImageService
+	svc          *service.ImageService
+	sessionStore *keystore.SessionMasterStore
 }
 
 // NewImageHandler creates an ImageHandler.
-func NewImageHandler(svc *service.ImageService) *ImageHandler {
-	return &ImageHandler{svc: svc}
+func NewImageHandler(svc *service.ImageService, sessionStore *keystore.SessionMasterStore) *ImageHandler {
+	return &ImageHandler{svc: svc, sessionStore: sessionStore}
 }
 
 // RegisterRoutes mounts all image routes onto r.
@@ -359,6 +361,9 @@ func (h *ImageHandler) GetFacebookPostMedia(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("error retrieving post media: %s", err))
 		return
 	}
+	if items == nil {
+		items = []model.FacebookPostMediaItem{}
+	}
 	writeJSON(w, items)
 }
 
@@ -411,6 +416,9 @@ func (h *ImageHandler) GetAlbumImageContent(w http.ResponseWriter, r *http.Reque
 // ── Write / delete ────────────────────────────────────────────────────────────
 
 func (h *ImageHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		ImageIDs []int64 `json:"image_ids"`
 		Tags     string  `json:"tags"`
@@ -431,6 +439,9 @@ func (h *ImageHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ImageHandler) BulkDelete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var req struct {
 		ImageIDs []int64 `json:"image_ids"`
 	}
@@ -450,6 +461,9 @@ func (h *ImageHandler) BulkDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ImageHandler) DeleteByRange(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	q := r.URL.Query()
 	all := strings.ToLower(q.Get("all")) == "true" || q.Get("all") == "1"
 	var startID, endID *int64
@@ -485,6 +499,9 @@ func (h *ImageHandler) DeleteByRange(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ImageHandler) UpdateMetadata(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseImageID(w, r, "image_id")
 	if !ok {
 		return
@@ -527,6 +544,9 @@ func (h *ImageHandler) UpdateMetadata(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseImageID(w, r, "image_id")
 	if !ok {
 		return

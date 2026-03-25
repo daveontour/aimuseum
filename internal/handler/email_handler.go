@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/model"
 	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
@@ -15,12 +16,13 @@ import (
 
 // EmailHandler handles all /emails/* read endpoints.
 type EmailHandler struct {
-	svc *service.EmailService
+	svc          *service.EmailService
+	sessionStore *keystore.SessionMasterStore
 }
 
 // NewEmailHandler creates an EmailHandler.
-func NewEmailHandler(svc *service.EmailService) *EmailHandler {
-	return &EmailHandler{svc: svc}
+func NewEmailHandler(svc *service.EmailService, sessionStore *keystore.SessionMasterStore) *EmailHandler {
+	return &EmailHandler{svc: svc, sessionStore: sessionStore}
 }
 
 // RegisterRoutes mounts all email routes onto r.
@@ -249,6 +251,9 @@ func (h *EmailHandler) GetMetadata(w http.ResponseWriter, r *http.Request) {
 // Update handles PUT /emails/{email_id}
 // Body: {"is_personal": bool, "is_business": bool, "is_important": bool, "use_by_ai": bool} (all optional)
 func (h *EmailHandler) Update(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseEmailID(w, r)
 	if !ok {
 		return
@@ -284,6 +289,9 @@ func (h *EmailHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /emails/{email_id}
 func (h *EmailHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	id, ok := parseEmailID(w, r)
 	if !ok {
 		return
@@ -304,6 +312,9 @@ func (h *EmailHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // BulkDelete handles DELETE /emails/bulk-delete
 // Body: {"email_ids": [1, 2, 3]}
 func (h *EmailHandler) BulkDelete(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
 	var body struct {
 		EmailIDs []int64 `json:"email_ids"`
 	}

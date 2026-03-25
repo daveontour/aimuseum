@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Museum — Sign In</title>
+    <link rel="stylesheet" href="/static/css/museum_of.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: #0f1922;
+            font-family: inherit;
+        }
+        .login-card {
+            background: #19264d;
+            border-radius: 12px;
+            padding: 48px;
+            max-width: 420px;
+            width: 100%;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+        .login-title {
+            color: #fff;
+            margin: 0 0 8px;
+            font-size: 1.8rem;
+        }
+        .login-subtitle {
+            color: #8fa4c8;
+            margin: 0 0 28px;
+            font-size: 0.95rem;
+        }
+        .tab-row {
+            display: flex;
+            margin-bottom: 28px;
+            border-bottom: 1px solid #2a3a6b;
+        }
+        .tab-btn {
+            background: none;
+            border: none;
+            color: #8fa4c8;
+            font-size: 1rem;
+            padding: 8px 20px 10px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            transition: color 0.15s, border-color 0.15s;
+        }
+        .tab-btn.active {
+            color: #fff;
+            border-bottom-color: #3b82f6;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            color: #cdd6e8;
+            margin-bottom: 6px;
+            font-size: 0.9rem;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 10px 14px;
+            border-radius: 6px;
+            border: 1px solid #2e4068;
+            background: #0f1922;
+            color: #fff;
+            font-size: 1rem;
+            box-sizing: border-box;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .form-group input:focus {
+            border-color: #3b82f6;
+        }
+        .submit-btn {
+            width: 100%;
+            padding: 12px;
+            border-radius: 6px;
+            border: none;
+            background: #3b82f6;
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 8px;
+            transition: background 0.15s;
+        }
+        .submit-btn:hover {
+            background: #2563eb;
+        }
+        .submit-btn:disabled {
+            background: #1e3a6b;
+            cursor: not-allowed;
+        }
+        .error-msg {
+            display: none;
+            color: #f87171;
+            margin-bottom: 16px;
+            font-size: 0.9rem;
+            padding: 10px 14px;
+            background: rgba(248,113,113,0.1);
+            border-radius: 6px;
+            border: 1px solid rgba(248,113,113,0.25);
+        }
+        .panel { display: none; }
+        .panel.active { display: block; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h1 class="login-title"><i class="fas fa-landmark" style="margin-right:10px; color:#3b82f6;"></i>Digital Museum</h1>
+        <p class="login-subtitle">Sign in to access the archive.</p>
+
+        <div class="tab-row">
+            <button class="tab-btn active" id="tab-login" type="button">Sign In</button>
+            <button class="tab-btn" id="tab-register" type="button">Register</button>
+            <button class="tab-btn" id="tab-visitor" type="button">Visitor</button>
+        </div>
+
+        <div id="error-msg" class="error-msg"></div>
+        <div id="success-msg" style="display:none; color:#4ade80; background:rgba(74,222,128,0.1); border:1px solid rgba(74,222,128,0.25); padding:10px 14px; border-radius:6px; margin-bottom:16px; font-size:0.9rem;"></div>
+
+        <!-- Login panel -->
+        <div class="panel active" id="panel-login">
+            <form id="login-form" autocomplete="on">
+                <div class="form-group">
+                    <label for="login-email">Email</label>
+                    <input id="login-email" type="email" name="email" required placeholder="you@example.com" autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <input id="login-password" type="password" name="password" required placeholder="Your password" autocomplete="current-password">
+                </div>
+                <button type="submit" class="submit-btn" id="login-btn">
+                    <i class="fas fa-sign-in-alt" style="margin-right:6px;"></i>Sign In
+                </button>
+            </form>
+        </div>
+
+        <!-- Register panel -->
+        <div class="panel" id="panel-register">
+            <form id="register-form" autocomplete="on">
+                <div class="form-group">
+                    <label for="reg-email">Email</label>
+                    <input id="reg-email" type="email" name="email" required placeholder="you@example.com" autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="reg-display-name">First Name</label>
+                    <input id="reg-display-name" type="text" name="display_name" required placeholder="e.g. Jane">
+                </div>
+                <div class="form-group">
+                    <label for="reg-family-name">Family Name</label>
+                    <input id="reg-family-name" type="text" name="family_name" placeholder="e.g. Smith">
+                </div>
+                <div class="form-group">
+                    <label for="reg-gender">Gender</label>
+                    <select id="reg-gender" name="gender" style="width:100%; padding:10px 14px; border-radius:6px; border:1px solid #2e4068; background:#0f1922; color:#fff; font-size:1rem; box-sizing:border-box;">
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="reg-password">Password</label>
+                    <input id="reg-password" type="password" name="password" required placeholder="Choose a password (min 12 characters)" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label for="reg-password-confirm">Confirm Password</label>
+                    <input id="reg-password-confirm" type="password" required placeholder="Re-enter your password" autocomplete="new-password">
+                </div>
+                <button type="submit" class="submit-btn" id="register-btn">
+                    <i class="fas fa-user-plus" style="margin-right:6px;"></i>Register
+                </button>
+            </form>
+        </div>
+
+        <!-- Visitor panel -->
+        <div class="panel" id="panel-visitor">
+            <div class="form-group">
+                <label for="visitor-identifier">Subject name or email address</label>
+                <div style="display:flex; gap:8px;">
+                    <input id="visitor-identifier" type="text" placeholder="e.g. Jane Smith or jane@example.com" style="flex:1;">
+                    <button type="button" id="visitor-hints-btn" style="padding:10px 14px; border-radius:6px; border:1px solid #2e4068; background:#0f1922; color:#8fa4c8; cursor:pointer; white-space:nowrap;">
+                        Get Hints
+                    </button>
+                </div>
+                <div id="visitor-hints-list" style="display:none; margin-top:10px; padding:10px 14px; background:#0f1922; border:1px solid #2e4068; border-radius:6px; color:#8fa4c8; font-size:0.88rem;"></div>
+            </div>
+            <div class="form-group">
+                <label for="visitor-key">Visitor Key</label>
+                <input id="visitor-key" type="password" placeholder="Enter your visitor key" autocomplete="current-password">
+            </div>
+            <button type="button" class="submit-btn" id="visitor-login-btn">
+                <i class="fas fa-door-open" style="margin-right:6px;"></i>Access Archive
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Tab switching
+        const tabLogin = document.getElementById('tab-login');
+        const tabRegister = document.getElementById('tab-register');
+        const tabVisitor = document.getElementById('tab-visitor');
+        const panelLogin = document.getElementById('panel-login');
+        const panelRegister = document.getElementById('panel-register');
+        const panelVisitor = document.getElementById('panel-visitor');
+        const errorMsg = document.getElementById('error-msg');
+
+        function showTab(tab) {
+            tabLogin.classList.toggle('active', tab === 'login');
+            tabRegister.classList.toggle('active', tab === 'register');
+            tabVisitor.classList.toggle('active', tab === 'visitor');
+            panelLogin.classList.toggle('active', tab === 'login');
+            panelRegister.classList.toggle('active', tab === 'register');
+            panelVisitor.classList.toggle('active', tab === 'visitor');
+            errorMsg.style.display = 'none';
+            document.getElementById('success-msg').style.display = 'none';
+        }
+
+        function showSuccess(msg) {
+            const el = document.getElementById('success-msg');
+            el.textContent = msg;
+            el.style.display = 'block';
+        }
+
+        tabLogin.addEventListener('click', () => showTab('login'));
+        tabRegister.addEventListener('click', () => showTab('register'));
+        tabVisitor.addEventListener('click', () => showTab('visitor'));
+
+        function showError(msg) {
+            errorMsg.textContent = msg;
+            errorMsg.style.display = 'block';
+        }
+
+        // Login form
+        document.getElementById('login-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const btn = document.getElementById('login-btn');
+            errorMsg.style.display = 'none';
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:6px;"></i>Signing in\u2026';
+            try {
+                const res = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        email: document.getElementById('login-email').value.trim(),
+                        password: document.getElementById('login-password').value
+                    })
+                });
+                if (res.ok) {
+                    window.location.href = '/';
+                } else {
+                    const data = await res.json().catch(() => ({}));
+                    showError(data.error || data.detail || 'Invalid email or password.');
+                }
+            } catch (err) {
+                showError('Network error. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-sign-in-alt" style="margin-right:6px;"></i>Sign In';
+            }
+        });
+
+        // Register form
+        document.getElementById('register-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const btn = document.getElementById('register-btn');
+            errorMsg.style.display = 'none';
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:6px;"></i>Registering\u2026';
+            try {
+                const password = document.getElementById('reg-password').value;
+                const passwordConfirm = document.getElementById('reg-password-confirm').value;
+                if (password !== passwordConfirm) {
+                    showError('Passwords do not match.');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-user-plus" style="margin-right:6px;"></i>Register';
+                    return;
+                }
+                const res = await fetch('/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        email: document.getElementById('reg-email').value.trim(),
+                        display_name: document.getElementById('reg-display-name').value.trim(),
+                        family_name: document.getElementById('reg-family-name').value.trim(),
+                        gender: document.getElementById('reg-gender').value,
+                        password: password
+                    })
+                });
+                if (res.ok) {
+                    const registeredEmail = document.getElementById('reg-email').value.trim();
+                    showTab('login');
+                    document.getElementById('login-email').value = registeredEmail;
+                    document.getElementById('login-password').focus();
+                    showSuccess('Registration successful! Please sign in with your new account.');
+                } else {
+                    const data = await res.json().catch(() => ({}));
+                    showError(data.error || data.detail || 'Registration failed. Please try again.');
+                }
+            } catch (err) {
+                showError('Network error. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-user-plus" style="margin-right:6px;"></i>Register';
+            }
+        });
+        // Visitor — Get Hints
+        document.getElementById('visitor-hints-btn').addEventListener('click', async function() {
+            const identifier = document.getElementById('visitor-identifier').value.trim();
+            const hintsList = document.getElementById('visitor-hints-list');
+            if (!identifier) { return; }
+            try {
+                const res = await fetch('/visitor/hints?identifier=' + encodeURIComponent(identifier), { credentials: 'same-origin' });
+                const data = await res.json().catch(() => ({}));
+                const hints = data.hints || [];
+                if (hints.length === 0) {
+                    hintsList.innerHTML = 'No hints available for this archive.';
+                } else {
+                    hintsList.innerHTML = '<strong style="color:#cdd6e8;">Key hints:</strong><ul style="margin:6px 0 0; padding-left:18px;">' +
+                        hints.map(h => '<li>' + h.replace(/</g, '&lt;') + '</li>').join('') + '</ul>';
+                }
+                hintsList.style.display = 'block';
+            } catch (err) {
+                hintsList.innerHTML = 'Could not retrieve hints.';
+                hintsList.style.display = 'block';
+            }
+        });
+
+        // Visitor — Access Archive
+        document.getElementById('visitor-login-btn').addEventListener('click', async function() {
+            const btn = this;
+            const identifier = document.getElementById('visitor-identifier').value.trim();
+            const key = document.getElementById('visitor-key').value;
+            errorMsg.style.display = 'none';
+            if (!identifier || !key) {
+                showError('Please enter a subject name or email and your visitor key.');
+                return;
+            }
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:6px;"></i>Checking\u2026';
+            try {
+                const res = await fetch('/visitor/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ identifier: identifier, key: key })
+                });
+                if (res.ok) {
+                    window.location.href = '/';
+                } else {
+                    const data = await res.json().catch(() => ({}));
+                    const status = res.status;
+                    if (status === 404) {
+                        showError('Archive not found. Check the subject name or email address.');
+                    } else if (status === 401) {
+                        showError('Invalid visitor key. Please try again.');
+                    } else {
+                        showError(data.error || data.detail || 'Access failed. Please try again.');
+                    }
+                }
+            } catch (err) {
+                showError('Network error. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-door-open" style="margin-right:6px;"></i>Access Archive';
+            }
+        });
+    </script>
+</body>
+</html>
