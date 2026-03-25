@@ -2,18 +2,23 @@ package model
 
 // HaveAChatTurn is a single turn in an autonomous LLM-to-LLM conversation.
 type HaveAChatTurn struct {
-	Speaker string `json:"speaker"` // "claude", "gemini", or "user"
+	Speaker string `json:"speaker"` // "a", "b", or "user"
 	Text    string `json:"text"`
 }
 
 // HaveAChatRequest is the body for POST /chat/have-a-chat/turn.
 type HaveAChatRequest struct {
-	SpeakingProvider string          `json:"speaking_provider"` // "claude" or "gemini"
-	ClaudeVoice      string          `json:"claude_voice"`
-	GeminiVoice      string          `json:"gemini_voice"`
-	Topic            string          `json:"topic"`
-	History          []HaveAChatTurn `json:"history"`
-	Temperature      float64         `json:"temperature"`
+	SpeakingSlot string `json:"speaking_slot"` // "a" or "b" — which voice speaks this turn
+
+	VoiceA    string `json:"voice_a"`     // voice personality key for slot A
+	VoiceB    string `json:"voice_b"`     // voice personality key for slot B
+	ProviderA string `json:"provider_a"`  // "claude" or "gemini" — LLM that powers voice A
+	ProviderB string `json:"provider_b"`  // "claude" or "gemini" — LLM that powers voice B
+
+	Topic      string          `json:"topic"`
+	History    []HaveAChatTurn `json:"history"`
+	Temperature float64        `json:"temperature"`
+	BanterMode  bool           `json:"banter_mode"`
 }
 
 // HaveAChatResponse is the JSON response for one LLM turn.

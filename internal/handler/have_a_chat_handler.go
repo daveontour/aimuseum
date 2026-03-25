@@ -33,8 +33,8 @@ func (h *HaveAChatHandler) Turn(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
-	if req.SpeakingProvider != "claude" && req.SpeakingProvider != "gemini" {
-		writeError(w, http.StatusBadRequest, "speaking_provider must be 'claude' or 'gemini'")
+	if req.SpeakingSlot != "a" && req.SpeakingSlot != "b" {
+		writeError(w, http.StatusBadRequest, "speaking_slot must be 'a' or 'b'")
 		return
 	}
 

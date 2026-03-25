@@ -216,6 +216,13 @@
                 <button id="have-a-chat-inject-btn"><i class="fas fa-comment-medical"></i> Inject Comment</button>
                 <button id="have-a-chat-stop-btn" class="stop-btn"><i class="fas fa-stop"></i> Stop</button>
             </div>
+            <!-- Have A Chat Round-End Prompt (replaces control bar after each full round) -->
+            <div id="have-a-chat-round-prompt" class="have-a-chat-round-prompt" style="display:none;">
+                <span class="have-a-chat-round-prompt-msg"><i class="fas fa-check-circle"></i> Round complete — continue the conversation?</span>
+                <button id="have-a-chat-continue-btn"><i class="fas fa-play"></i> Continue</button>
+                <button id="have-a-chat-inject-round-btn"><i class="fas fa-comment-medical"></i> Inject Comment</button>
+                <button id="have-a-chat-stop-round-btn" class="stop-btn"><i class="fas fa-stop"></i> Stop</button>
+            </div>
         </div>
 
         <!-- Right Sidebar -->
@@ -276,19 +283,34 @@
                         <label style="display:block; font-weight:bold; margin-bottom:4px;">Topic / Starter Prompt <span style="font-weight:normal;color:#777;">(optional)</span></label>
                         <textarea id="have-a-chat-topic" rows="3" style="width:100%; box-sizing:border-box; border-radius:6px; border:1px solid #bfc9da; padding:8px; font-size:1em;" placeholder="e.g. 'What do the messages reveal about relationships?' — or leave blank to let the AIs explore freely."></textarea>
                     </div>
-                    <div style="display:flex; gap:20px; flex-wrap:wrap;">
-                        <div style="flex:1; min-width:180px;">
-                            <label style="display:block; font-weight:bold; margin-bottom:4px; color:#1a73e8;"><i class="fas fa-robot"></i> Claude Voice</label>
-                            <select id="have-a-chat-claude-voice" style="width:100%; padding:6px; border-radius:4px; border:1px solid #bfc9da;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                        <div>
+                            <label style="display:block; font-weight:bold; margin-bottom:4px; color:#2d6bc4;"><i class="fas fa-comment-dots"></i> Voice A</label>
+                            <select id="have-a-chat-voice-a" class="form-control" style="margin-bottom:8px;">
                                 <option value="expert">Expert</option>
                             </select>
-                        </div>
-                        <div style="flex:1; min-width:180px;">
-                            <label style="display:block; font-weight:bold; margin-bottom:4px; color:#7c3aed;"><i class="fas fa-robot"></i> Gemini Voice</label>
-                            <select id="have-a-chat-gemini-voice" style="width:100%; padding:6px; border-radius:4px; border:1px solid #bfc9da;">
-                                <option value="expert">Expert</option>
+                            <label style="display:block; font-size:0.85em; color:var(--color-text-muted); margin-bottom:4px;">Powered by</label>
+                            <select id="have-a-chat-provider-a" class="form-control">
+                                <option value="claude">Claude</option>
+                                <option value="gemini">Gemini</option>
                             </select>
                         </div>
+                        <div>
+                            <label style="display:block; font-weight:bold; margin-bottom:4px; color:#7c3aed;"><i class="fas fa-comment-dots"></i> Voice B</label>
+                            <select id="have-a-chat-voice-b" class="form-control" style="margin-bottom:8px;">
+                                <option value="expert">Expert</option>
+                            </select>
+                            <label style="display:block; font-size:0.85em; color:var(--color-text-muted); margin-bottom:4px;">Powered by</label>
+                            <select id="have-a-chat-provider-b" class="form-control">
+                                <option value="claude">Claude</option>
+                                <option value="gemini" selected>Gemini</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; background:var(--color-bg-alt); border-radius:var(--radius-md); border:1px solid var(--color-border);">
+                        <input type="checkbox" id="have-a-chat-banter-mode" style="width:16px; height:16px; cursor:pointer; accent-color:var(--color-blue);">
+                        <label for="have-a-chat-banter-mode" style="cursor:pointer; margin:0; font-weight:bold;"><i class="fas fa-bolt" style="color:#f59e0b;"></i> Banter Mode</label>
+                        <span style="color:var(--color-text-muted); font-size:0.85em;">— shorter, sharper, more combative responses</span>
                     </div>
                     <div>
                         <label style="display:block; font-weight:bold; margin-bottom:4px;">Temperature: <span id="have-a-chat-temperature-display">0.7</span></label>

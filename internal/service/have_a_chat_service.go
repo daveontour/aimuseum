@@ -11,42 +11,49 @@ import (
 	"github.com/daveontour/aimuseum/internal/model"
 )
 
-// GenerateHaveAChatTurn generates one turn of an autonomous Claude↔Gemini conversation.
-// The speaking provider responds to the accumulated history in character, using tools to
-// find real data from the archive to support its points.
+// GenerateHaveAChatTurn generates one turn of an autonomous voice-to-voice conversation.
+// Either voice can be powered by Claude or Gemini independently; if both use the same
+// underlying model the system prompt instructs it to maintain the speaking voice's distinct
+// identity throughout.
 func (s *ChatService) GenerateHaveAChatTurn(
 	ctx context.Context,
 	r *http.Request,
 	req model.HaveAChatRequest,
 ) (*model.HaveAChatResponse, error) {
-	// Choose provider
-	provider := s.geminiProvider
+
+	// ── Resolve which slot is speaking ──────────────────────────────────────
+	isSlotA := req.SpeakingSlot == "a"
+
+	speakingVoiceKey := req.VoiceA
+	listeningVoiceKey := req.VoiceB
+	speakingProviderKey := req.ProviderA
+	listeningProviderKey := req.ProviderB
+	if !isSlotA {
+		speakingVoiceKey = req.VoiceB
+		listeningVoiceKey = req.VoiceA
+		speakingProviderKey = req.ProviderB
+		listeningProviderKey = req.ProviderA
+	}
+
+	if speakingVoiceKey == "" {
+		speakingVoiceKey = "expert"
+	}
+	if listeningVoiceKey == "" {
+		listeningVoiceKey = "expert"
+	}
+
+	// ── Pick the actual AI provider ──────────────────────────────────────────
+	var provider appai.ChatProvider
 	providerName := "gemini"
-	if req.SpeakingProvider == "claude" && s.claudeProvider != nil && s.claudeProvider.IsAvailable() {
+	if speakingProviderKey == "claude" && s.claudeProvider != nil && s.claudeProvider.IsAvailable() {
 		provider = s.claudeProvider
 		providerName = "claude"
+	} else {
+		provider = s.geminiProvider
+		providerName = "gemini"
 	}
 	if provider == nil || !provider.IsAvailable() {
-		return nil, fmt.Errorf("provider '%s' is not available — check API key", providerName)
-	}
-
-	// Resolve voice for the speaking provider
-	voice := req.GeminiVoice
-	if req.SpeakingProvider == "claude" {
-		voice = req.ClaudeVoice
-	}
-	if voice == "" {
-		voice = "expert"
-	}
-
-	// Identify the listening provider name for the system prompt
-	listeningName := "Gemini"
-	if req.SpeakingProvider == "gemini" {
-		listeningName = "Claude"
-	}
-	speakingName := "Claude"
-	if req.SpeakingProvider == "gemini" {
-		speakingName = "Gemini"
+		return nil, fmt.Errorf("provider '%s' is not available — check API key", speakingProviderKey)
 	}
 
 	temperature := req.Temperature
@@ -54,7 +61,7 @@ func (s *ChatService) GenerateHaveAChatTurn(
 		temperature = 0.7
 	}
 
-	// Load subject configuration
+	// ── Subject config ───────────────────────────────────────────────────────
 	cfg, _ := s.subjectRepo.GetFirst(ctx)
 	subjectName := "the subject"
 	subjectGender := "Male"
@@ -66,7 +73,6 @@ func (s *ChatService) GenerateHaveAChatTurn(
 		coreInstructions = cfg.CoreSystemInstructions
 	}
 
-	// Pronoun substitution
 	he, him, his := genderPronouns(subjectGender)
 	replacer := strings.NewReplacer(
 		"{SUBJECT_NAME}", subjectName,
@@ -75,42 +81,84 @@ func (s *ChatService) GenerateHaveAChatTurn(
 	sysInstructions = replacer.Replace(sysInstructions)
 	coreInstructions = replacer.Replace(coreInstructions)
 
-	// Load voice instructions for the speaking provider's chosen voice
+	// ── Voice display names & instructions ───────────────────────────────────
 	voiceMap := s.loadVoiceInstructions(ctx)
-	voiceEntry, ok := voiceMap[voice]
-	if !ok {
-		voiceEntry = voiceMap["expert"]
-		voice = "expert"
-	}
-	voiceText := replacer.Replace(voiceEntry.Instructions)
 
-	// Build system prompt
-	systemPrompt := fmt.Sprintf(`You are %s, an AI assistant, and you are having a lively intellectual conversation with %s (another AI) about the life and digital archive of %s.
+	speakingEntry, ok := voiceMap[speakingVoiceKey]
+	if !ok {
+		speakingEntry = voiceMap["expert"]
+		speakingVoiceKey = "expert"
+	}
+	listeningEntry, ok := voiceMap[listeningVoiceKey]
+	if !ok {
+		listeningEntry = voiceMap["expert"]
+		listeningVoiceKey = "expert"
+	}
+
+	speakingName := speakingEntry.Name
+	if speakingName == "" {
+		speakingName = speakingVoiceKey
+	}
+	listeningName := listeningEntry.Name
+	if listeningName == "" {
+		listeningName = listeningVoiceKey
+	}
+
+	voiceText := replacer.Replace(speakingEntry.Instructions)
+
+	// ── Response-length / tone instruction ──────────────────────────────────
+	var lengthToneInstruction string
+	if req.BanterMode {
+		lengthToneInstruction = `- Keep your response SHORT — one or two punchy paragraphs at most; wit and speed over depth
+- This is a sparring match: quick, sharp, direct. Agree with a single sentence when you agree; push back hard when you don't
+- Playful digs, quips, and comedic one-liners are encouraged — think debate club meets comedy roast`
+	} else {
+		lengthToneInstruction = `- Keep your response to 2–3 paragraphs; be conversational, analytical, and occasionally witty
+- Be respectful but enjoy playful, good-natured digs — this is a genuine intellectual debate between two AIs who enjoy sparring`
+	}
+
+	// ── Same-model identity reminder ─────────────────────────────────────────
+	sameLLM := req.ProviderA == req.ProviderB
+	var sameLLMReminder string
+	if sameLLM {
+		sameLLMReminder = fmt.Sprintf(`
+**Identity reminder:** You and %s are both running on the same underlying AI model for this conversation. You must maintain your distinct voice, perspective, and character — %s — at all times. Do not break character, do not acknowledge the shared model, and do not mirror %s's framing. You are %s.`,
+			listeningName, speakingName, listeningName, speakingName)
+	}
+
+	// ── System prompt ────────────────────────────────────────────────────────
+	conversationType := "lively intellectual conversation"
+	if req.BanterMode {
+		conversationType = "quick-fire sparring match"
+	}
+
+	systemPrompt := fmt.Sprintf(`You are %s and you are having a %s with %s about the life and digital archive of %s.
 
 Your goal is to:
 - Uncover interesting insights, hidden patterns, amusing observations, or blind spots in %s's data
-- Engage genuinely and thoughtfully with what %s just said — agree with strong points, push back on weak ones
+- Engage genuinely with what %s just said — agree with strong points, push back on weak ones
 - Use the available tools to look up actual emails, messages, Facebook posts, and other archive data to ground your comments in evidence
-- Keep your response to 2-3 paragraphs; be conversational, analytical, and occasionally witty
-- Be respectful of %s but you can have playful, good-natured digs — this is a genuine intellectual debate between two AIs who enjoy sparring
+%s
 
 **Your voice and personality:**
+%s
 %s
 
 **Archive context and subject background:**
 %s
 
 %s`,
-		speakingName, listeningName, subjectName,
+		speakingName, conversationType, listeningName, subjectName,
 		subjectName,
 		listeningName,
-		listeningName,
+		lengthToneInstruction,
 		voiceText,
+		sameLLMReminder,
 		coreInstructions,
 		sysInstructions,
 	)
 
-	// Build user prompt: format history as a narrative
+	// ── User prompt: history as narrative ────────────────────────────────────
 	var sb strings.Builder
 	topic := strings.TrimSpace(req.Topic)
 	if topic != "" {
@@ -127,25 +175,26 @@ Your goal is to:
 		sb.WriteString("**The conversation so far:**\n")
 		for _, turn := range req.History {
 			switch turn.Speaker {
-			case "claude":
-				sb.WriteString(fmt.Sprintf("[Claude]: %s\n\n", turn.Text))
-			case "gemini":
-				sb.WriteString(fmt.Sprintf("[Gemini]: %s\n\n", turn.Text))
+			case "a":
+				sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", req.VoiceA, turn.Text))
+			case "b":
+				sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", req.VoiceB, turn.Text))
 			case "user":
 				sb.WriteString(fmt.Sprintf("[User interjected]: %s\n\n", turn.Text))
 			}
 		}
+		_ = listeningProviderKey // referenced only for same-LLM detection above
 		sb.WriteString(fmt.Sprintf("\nNow it's your turn as %s. Respond to what was just said. You can use the available tools to look up real data from the archive to support or challenge a point.", speakingName))
 	}
 
 	userPrompt := sb.String()
 
-	// Build tool executor and generation request
+	// ── Generate ─────────────────────────────────────────────────────────────
 	executor, toolDecls := s.buildChatTools(ctx, r, subjectName)
 	genReq := appai.GenerateRequest{
 		UserInput:     userPrompt,
 		Temperature:   temperature,
-		Voice:         voice,
+		Voice:         speakingVoiceKey,
 		Mood:          "neutral",
 		CompanionMode: false,
 		WhosAsking:    "visitor",
@@ -153,24 +202,23 @@ Your goal is to:
 		SubjectGender: subjectGender,
 	}
 
-	// Pass nil for history — all context is encoded in the user prompt
 	result, err := provider.GenerateResponse(ctx, genReq, systemPrompt, nil, executor, toolDecls)
 	if err != nil {
 		return nil, err
 	}
 
-	// Enrich metadata
 	var embeddedJSON map[string]any
 	if err := json.Unmarshal([]byte(result.MetadataJSON), &embeddedJSON); err == nil {
 		embeddedJSON["temperature"] = temperature
-		embeddedJSON["voice"] = voice
+		embeddedJSON["voice"] = speakingVoiceKey
 		embeddedJSON["provider"] = providerName
+		embeddedJSON["banter_mode"] = req.BanterMode
 	}
 
 	return &model.HaveAChatResponse{
 		Response:     result.PlainText,
 		Provider:     providerName,
-		Voice:        voice,
+		Voice:        speakingVoiceKey,
 		EmbeddedJSON: embeddedJSON,
 	}, nil
 }

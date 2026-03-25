@@ -8624,6 +8624,30 @@ body {
     background: #7c3aed;
 }
 
+/* LLM badge — secondary indicator showing which model is powering the voice */
+.have-a-chat-llm-badge {
+    font-size: 0.68em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 1px 6px;
+    border-radius: var(--radius-pill);
+    opacity: 0.78;
+    flex-shrink: 0;
+}
+
+.have-a-chat-llm-claude {
+    background: #dbeafe;
+    color: #1d4ed8;
+    border: 1px solid #93c5fd;
+}
+
+.have-a-chat-llm-gemini {
+    background: #ede9fe;
+    color: #6d28d9;
+    border: 1px solid #c4b5fd;
+}
+
 .have-a-chat-content {
     font-size: var(--message-font-size, 16px);
     line-height: 1.6;
@@ -8675,6 +8699,56 @@ body {
 }
 
 .have-a-chat-controls button.stop-btn:hover {
+    background: rgba(244, 67, 54, 0.15);
+}
+
+/* Round-end prompt bar — replaces control bar after each complete round */
+.have-a-chat-round-prompt {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    background: #1a3a1a;
+    border-top: 2px solid #2d6a2d;
+    color: #fff;
+    font-size: 0.875em;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.have-a-chat-round-prompt-msg {
+    flex: 1;
+    font-weight: 600;
+    color: #a8e6a8;
+    min-width: 160px;
+}
+
+.have-a-chat-round-prompt-msg .fa-check-circle {
+    color: #4caf50;
+    margin-right: 4px;
+}
+
+.have-a-chat-round-prompt button {
+    padding: 5px 13px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    cursor: pointer;
+    font-size: 0.85em;
+    white-space: nowrap;
+}
+
+.have-a-chat-round-prompt button:hover {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.have-a-chat-round-prompt button.stop-btn {
+    border-color: #f44336;
+    color: #f44336;
+}
+
+.have-a-chat-round-prompt button.stop-btn:hover {
     background: rgba(244, 67, 54, 0.15);
 }
 

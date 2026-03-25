@@ -1,20 +1,26 @@
 'use strict';
 
 // --- Have A Chat Module ---
-// Orchestrates an autonomous Claude ↔ Gemini conversation in the main chat box.
+// Orchestrates an autonomous voice-to-voice conversation. Each voice can be powered
+// independently by Claude or Gemini, including both voices using the same LLM.
 const HaveAChat = (() => {
 
     // ── State ────────────────────────────────────────────────────────────────
     let _isRunning      = false;
     let _isPaused       = false;
     let _stopRequested  = false;
-    let _currentSpeaker = null;   // 'claude' or 'gemini'
-    let _chatHistory    = [];     // [{speaker, text}]
-    let _claudeVoice    = 'expert';
-    let _geminiVoice    = 'expert';
+    let _currentSlot    = null;   // 'a' or 'b'
+    let _chatHistory    = [];     // [{speaker: 'a'|'b'|'user', text}]
+    let _voiceA         = 'expert';
+    let _voiceB         = 'expert';
+    let _providerA      = 'claude';
+    let _providerB      = 'gemini';
+    let _banterMode     = false;
     let _topic          = '';
     let _temperature    = 0.7;
-    let _pendingInjection = null; // text injected by user mid-conversation
+    let _pendingInjection = null;
+    let _voiceNames     = {};  // { key: displayName } populated when voices load
+    let _turnCount      = 0;   // incremented after each completed turn; prompt shown every 2 turns
 
     // ── DOM helpers ──────────────────────────────────────────────────────────
     const _el = (id) => document.getElementById(id);
@@ -22,25 +28,26 @@ const HaveAChat = (() => {
     function _populateVoiceSelects() {
         ApiService.fetchVoices()
             .then(voices => {
-                const claudeSel = _el('have-a-chat-claude-voice');
-                const geminiSel = _el('have-a-chat-gemini-voice');
-                if (!claudeSel || !geminiSel || !voices || !voices.length) return;
-                claudeSel.innerHTML = '';
-                geminiSel.innerHTML = '';
+                const voiceASel = _el('have-a-chat-voice-a');
+                const voiceBSel = _el('have-a-chat-voice-b');
+                if (!voiceASel || !voiceBSel || !voices || !voices.length) return;
+                voiceASel.innerHTML = '';
+                voiceBSel.innerHTML = '';
                 voices.forEach(v => {
                     const key  = v.key  || v.value || '';
                     const name = v.name || key;
+                    _voiceNames[key] = name;
                     const o1 = document.createElement('option');
                     o1.value = key; o1.textContent = name;
-                    claudeSel.appendChild(o1);
+                    voiceASel.appendChild(o1);
                     const o2 = document.createElement('option');
                     o2.value = key; o2.textContent = name;
-                    geminiSel.appendChild(o2);
+                    voiceBSel.appendChild(o2);
                 });
-                // Default Gemini to a different voice to make them distinct
-                if (geminiSel.options.length > 1) geminiSel.selectedIndex = 1;
+                // Default voice B to a different voice to keep them distinct
+                if (voiceBSel.options.length > 1) voiceBSel.selectedIndex = 1;
             })
-            .catch(() => { /* leave the default 'expert' option */ });
+            .catch(() => { /* leave the default option */ });
     }
 
     // ── Setup modal ──────────────────────────────────────────────────────────
@@ -61,31 +68,38 @@ const HaveAChat = (() => {
     }
 
     // ── Message rendering ────────────────────────────────────────────────────
-    function _addHaveAChatMessage(provider, voice, text) {
+    // slot: 'a' or 'b'; provider: 'claude' or 'gemini' (actual LLM used);
+    // voiceKey: voice personality key; text: markdown string
+    function _addHaveAChatMessage(slot, provider, voiceKey, text) {
         const msgEl = document.createElement('div');
-        msgEl.classList.add('have-a-chat-message', `have-a-chat-${provider}`);
+        // Slot A always renders with blue styling, slot B with purple —
+        // regardless of which LLM is powering the voice.
+        const slotClass = slot === 'a' ? 'have-a-chat-claude' : 'have-a-chat-gemini';
+        msgEl.classList.add('have-a-chat-message', slotClass);
 
-        // Header row: voice image + LLM label
+        // Header: voice image + voice name + LLM badge
         const header = document.createElement('div');
         header.className = 'have-a-chat-header';
 
         const img = document.createElement('img');
         img.className = 'have-a-chat-voice-image';
-        img.src = `/static/images/${typeof VoiceSelector !== 'undefined' ? VoiceSelector.getVoiceImage(voice, true) : voice + '_sm.png'}`;
-        img.alt = voice;
+        img.src = `/static/images/${typeof VoiceSelector !== 'undefined' ? VoiceSelector.getVoiceImage(voiceKey, true) : voiceKey + '_sm.png'}`;
+        img.alt = voiceKey;
         img.onerror = () => { img.style.display = 'none'; };
 
-        const label = document.createElement('span');
-        label.className = 'have-a-chat-label';
-        label.textContent = provider === 'claude' ? 'Claude' : 'Gemini';
+        // Voice name (primary identity)
+        const nameLabel = document.createElement('span');
+        nameLabel.className = 'have-a-chat-label';
+        nameLabel.textContent = _voiceNames[voiceKey] || voiceKey;
 
-        const voiceLabel = document.createElement('span');
-        voiceLabel.style.cssText = 'font-size:0.75em; color:#666; margin-left:4px;';
-        voiceLabel.textContent = `(${voice})`;
+        // LLM badge (secondary — shows which model is speaking)
+        const llmBadge = document.createElement('span');
+        llmBadge.className = 'have-a-chat-llm-badge have-a-chat-llm-' + provider;
+        llmBadge.textContent = provider === 'claude' ? 'Claude' : 'Gemini';
 
         header.appendChild(img);
-        header.appendChild(label);
-        header.appendChild(voiceLabel);
+        header.appendChild(nameLabel);
+        header.appendChild(llmBadge);
         msgEl.appendChild(header);
 
         // Content with markdown render
@@ -126,6 +140,20 @@ const HaveAChat = (() => {
         if (bar) bar.style.display = 'none';
     }
 
+    function _showRoundPrompt() {
+        const bar    = _el('have-a-chat-control-bar');
+        const prompt = _el('have-a-chat-round-prompt');
+        if (bar)    bar.style.display    = 'none';
+        if (prompt) prompt.style.display = 'flex';
+    }
+
+    function _hideRoundPrompt() {
+        const bar    = _el('have-a-chat-control-bar');
+        const prompt = _el('have-a-chat-round-prompt');
+        if (prompt) prompt.style.display = 'none';
+        if (bar)    bar.style.display    = 'flex';
+    }
+
     function _setStatus(text) {
         const el = _el('have-a-chat-status-text');
         if (el) el.textContent = text;
@@ -158,12 +186,15 @@ const HaveAChat = (() => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                speaking_provider: _currentSpeaker,
-                claude_voice:      _claudeVoice,
-                gemini_voice:      _geminiVoice,
-                topic:             _topic,
-                history:           _chatHistory,
-                temperature:       _temperature,
+                speaking_slot: _currentSlot,
+                voice_a:       _voiceA,
+                voice_b:       _voiceB,
+                provider_a:    _providerA,
+                provider_b:    _providerB,
+                topic:         _topic,
+                history:       _chatHistory,
+                temperature:   _temperature,
+                banter_mode:   _banterMode,
             })
         });
 
@@ -195,23 +226,39 @@ const HaveAChat = (() => {
                 _chatHistory.push({ speaker: 'user', text: injected });
             }
 
-            const voice = _currentSpeaker === 'claude' ? _claudeVoice : _geminiVoice;
-            const speakerLabel = _currentSpeaker === 'claude' ? 'Claude' : 'Gemini';
-            _setStatus(`${speakerLabel} (${voice}) is thinking...`);
+            const voiceKey  = _currentSlot === 'a' ? _voiceA : _voiceB;
+            const provider  = _currentSlot === 'a' ? _providerA : _providerB;
+            const voiceName = _voiceNames[voiceKey] || voiceKey;
+            const llmLabel  = provider === 'claude' ? 'Claude' : 'Gemini';
+            _setStatus(`${voiceName} (${llmLabel}) is thinking…`);
 
             try {
                 const result = await _callTurnEndpoint();
                 if (_stopRequested) break;
 
-                _addHaveAChatMessage(_currentSpeaker, voice, result.response);
-                _chatHistory.push({ speaker: _currentSpeaker, text: result.response });
+                // Use provider from response (handles fallback cases)
+                const actualProvider = result.provider || provider;
+                _addHaveAChatMessage(_currentSlot, actualProvider, voiceKey, result.response);
+                _chatHistory.push({ speaker: _currentSlot, text: result.response });
 
-                // Alternate speaker
-                _currentSpeaker = _currentSpeaker === 'claude' ? 'gemini' : 'claude';
+                _turnCount++;
+
+                // Alternate slot
+                _currentSlot = _currentSlot === 'a' ? 'b' : 'a';
                 _setStatus('');
 
-                // Brief natural pause between turns (1.5 s)
-                await _sleep(1500);
+                // After every complete round (both voices have spoken), pause and prompt
+                if (_turnCount % 2 === 0) {
+                    _isPaused = true;
+                    _showRoundPrompt();
+                    while (_isPaused && !_stopRequested) {
+                        await _sleep(200);
+                    }
+                    if (_stopRequested) break;
+                } else {
+                    // Natural pause between turns within a round (shorter in banter mode)
+                    await _sleep(_banterMode ? 900 : 1500);
+                }
 
             } catch (err) {
                 _setStatus(`Error: ${err.message} — conversation paused.`);
@@ -221,30 +268,36 @@ const HaveAChat = (() => {
             }
         }
 
-        // Clean up when loop exits
         if (!_stopRequested) stop();
     }
 
     // ── Public controls ──────────────────────────────────────────────────────
     function start() {
-        _claudeVoice   = (_el('have-a-chat-claude-voice')?.value)  || 'expert';
-        _geminiVoice   = (_el('have-a-chat-gemini-voice')?.value)  || 'expert';
-        _topic         = (_el('have-a-chat-topic')?.value?.trim()) || '';
-        _temperature   = parseFloat(_el('have-a-chat-temperature')?.value || '0.7');
+        _voiceA      = (_el('have-a-chat-voice-a')?.value)     || 'expert';
+        _voiceB      = (_el('have-a-chat-voice-b')?.value)     || 'expert';
+        _providerA   = (_el('have-a-chat-provider-a')?.value)  || 'claude';
+        _providerB   = (_el('have-a-chat-provider-b')?.value)  || 'gemini';
+        _banterMode  = (_el('have-a-chat-banter-mode')?.checked) || false;
+        _topic       = (_el('have-a-chat-topic')?.value?.trim()) || '';
+        _temperature = parseFloat(_el('have-a-chat-temperature')?.value || '0.7');
         _chatHistory   = [];
+        _turnCount     = 0;
         _isRunning     = true;
         _isPaused      = false;
         _stopRequested = false;
         _pendingInjection = null;
 
         // Randomly decide who goes first
-        _currentSpeaker = Math.random() < 0.5 ? 'claude' : 'gemini';
+        _currentSlot = Math.random() < 0.5 ? 'a' : 'b';
 
         _closeSetupModal();
         _showControlBar();
         _disableChatForm(true);
         _setPauseButtonLabel(false);
-        _setStatus(`Starting — ${_currentSpeaker === 'claude' ? 'Claude' : 'Gemini'} goes first...`);
+
+        const firstVoice = _currentSlot === 'a' ? (_voiceNames[_voiceA] || _voiceA) : (_voiceNames[_voiceB] || _voiceB);
+        const firstLLM   = _currentSlot === 'a' ? _providerA : _providerB;
+        _setStatus(`Starting — ${firstVoice} (${firstLLM === 'claude' ? 'Claude' : 'Gemini'}) goes first…`);
 
         _loop();
     }
@@ -258,9 +311,10 @@ const HaveAChat = (() => {
 
     function resume() {
         if (!_isRunning || !_isPaused) return;
+        _hideRoundPrompt();
         _isPaused = false;
         _setPauseButtonLabel(false);
-        _setStatus('Resuming...');
+        _setStatus('Resuming…');
     }
 
     function stop() {
@@ -268,6 +322,8 @@ const HaveAChat = (() => {
         _isPaused      = false;
         _stopRequested = true;
         _hideControlBar();
+        const prompt = _el('have-a-chat-round-prompt');
+        if (prompt) prompt.style.display = 'none';
         _disableChatForm(false);
         _setStatus('');
     }
@@ -286,7 +342,6 @@ const HaveAChat = (() => {
         if (!text) return;
         _pendingInjection = text;
         _closeInjectModal();
-        // Auto-resume if paused so the injection is picked up
         if (_isPaused) resume();
     }
 
@@ -321,6 +376,20 @@ const HaveAChat = (() => {
         if (injectBtn) injectBtn.addEventListener('click', injectComment);
         if (stopBtn)   stopBtn.addEventListener('click', stop);
 
+        // Round-end prompt
+        const continueBtn       = _el('have-a-chat-continue-btn');
+        const injectRoundBtn    = _el('have-a-chat-inject-round-btn');
+        const stopRoundBtn      = _el('have-a-chat-stop-round-btn');
+        if (continueBtn)    continueBtn.addEventListener('click', () => {
+            _hideRoundPrompt();
+            resume();
+        });
+        if (injectRoundBtn) injectRoundBtn.addEventListener('click', () => {
+            injectComment();
+            // injectComment resumes automatically when the injection is submitted
+        });
+        if (stopRoundBtn)   stopRoundBtn.addEventListener('click', stop);
+
         // Inject comment modal
         const closeInject  = _el('close-have-a-chat-inject-modal');
         const injectCancel = _el('have-a-chat-inject-cancel-btn');
@@ -329,7 +398,6 @@ const HaveAChat = (() => {
         if (injectCancel) injectCancel.addEventListener('click', _closeInjectModal);
         if (injectSubmit) injectSubmit.addEventListener('click', _submitInjection);
 
-        // Allow Enter key in inject textarea to submit (Shift+Enter for newline)
         const injectText = _el('have-a-chat-inject-text');
         if (injectText) {
             injectText.addEventListener('keydown', (e) => {
