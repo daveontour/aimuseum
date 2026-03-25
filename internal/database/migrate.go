@@ -96,6 +96,11 @@ END$$`); err != nil {
 		}
 	}
 
+	// ── Multi-tenancy (Layer 1) ──────────────────────────────────────────────
+	if err := migrateMultitenancy(ctx, conn); err != nil {
+		return fmt.Errorf("multitenancy migration: %w", err)
+	}
+
 	slog.Info("database migration complete")
 	return nil
 }
