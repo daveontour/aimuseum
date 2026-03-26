@@ -207,6 +207,16 @@ func (r *UserRepo) PurgeExpiredSessions(ctx context.Context) error {
 	return err
 }
 
+// DeleteAllSessions removes every auth session row. Used on server startup so
+// cookies from a previous process cannot authenticate after a restart.
+func (r *UserRepo) DeleteAllSessions(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM sessions`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // ListAll returns every user ordered by created_at ascending.
 func (r *UserRepo) ListAll(ctx context.Context) ([]*User, error) {
 	rows, err := r.pool.Query(ctx,

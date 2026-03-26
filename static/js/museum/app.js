@@ -313,6 +313,10 @@ const App = (() => {
     }
 
     function initEventListeners() {
+        if (typeof CONSTANTS !== 'undefined' && CONSTANTS.DEPLOYMENT_NATURE_LOCAL !== 'True') {
+            document.body.classList.add('deployment-hide-path-import-tiles');
+        }
+
         function refreshSettingsDataImportModalLLM() {
             if (typeof Modals !== 'undefined' && Modals.UserLLMSettings && Modals.UserLLMSettings.load) {
                 void Modals.UserLLMSettings.load();
@@ -1572,6 +1576,16 @@ const App = (() => {
             'thumbnails'
         ];
 
+        /** Imports that ask for server filesystem paths (hidden unless DEPLOYMENT_NATURE=local). */
+        const MASTER_IMPORT_PATH_PROMPT_TYPES = new Set(['imessage', 'whatsapp', 'facebook_all', 'instagram', 'filesystem']);
+
+        function masterImportTypesForUI() {
+            if (typeof CONSTANTS !== 'undefined' && CONSTANTS.DEPLOYMENT_NATURE_LOCAL !== 'True') {
+                return MASTER_IMPORT_TYPES.filter((t) => !MASTER_IMPORT_PATH_PROMPT_TYPES.has(t));
+            }
+            return MASTER_IMPORT_TYPES;
+        }
+
         const MASTER_IMPORT_META = {
             email_processing: { title: 'Emails from Gmail', icon: 'fas fa-envelope' },
             imap_processing: { title: 'Emails from other IMAP', icon: 'fas fa-inbox' },
@@ -2328,7 +2342,7 @@ const App = (() => {
             const root = document.getElementById('master-import-sections');
             if (!root) return;
             root.innerHTML = '';
-            for (const importType of MASTER_IMPORT_TYPES) {
+            for (const importType of masterImportTypesForUI()) {
                 const meta = MASTER_IMPORT_META[importType];
                 const section = document.createElement('section');
                 section.className = 'master-import-section';
@@ -2447,7 +2461,7 @@ const App = (() => {
                 willRunEl.appendChild(label);
             });
             const runningTypes = new Set(jobs.map(j => j.type));
-            const notRunningTypes = MASTER_IMPORT_TYPES.filter(t => !runningTypes.has(t));
+            const notRunningTypes = masterImportTypesForUI().filter(t => !runningTypes.has(t));
             if (notRunningTypes.length === 0) {
                 const note = document.createElement('p');
                 note.className = 'master-import-confirm-empty-note';

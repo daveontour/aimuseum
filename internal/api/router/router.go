@@ -41,12 +41,6 @@ func New(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 	// ── Health check ───────────────────────────────────────────────────────────
 	r.Get("/health", healthHandler)
 
-	// ── Static files ───────────────────────────────────────────────────────────
-	// Serve /static/* from PYTHON_STATIC_DIR (../src/api/static by default).
-	// This covers css/, images/, js/ and any other assets the frontend requests.
-	fs := http.FileServer(http.Dir(cfg.App.AssetStaticDir))
-	r.Handle("/static/*", http.StripPrefix("/static/", fs))
-
 	sessionMasterStore := keystore.NewSessionMasterStore(cfg.Server.SessionCookieSecure)
 
 	// ── Emails ─────────────────────────────────────────────────────────────────
@@ -104,6 +98,11 @@ func New(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 	// ── Templated endpoints (GET /, suggestions, JS files) ───────────────────
 	templateHandler := handler.NewTemplateHandler(subjectConfigRepo, userRepo, cfg)
 	templateHandler.RegisterRoutes(r)
+
+	// ── Static files (must be after template routes so /static/js/museum/foundation.js
+	// and modals-people.js are served via TemplateHandler with {{ }} substitution)
+	staticFS := http.FileServer(http.Dir(cfg.App.AssetStaticDir))
+	r.Handle("/static/*", http.StripPrefix("/static/", staticFS))
 
 	// ── Reference documents & sensitive data (shared keyring) ────────────────
 	sensitiveHandler := handler.NewSensitiveHandler(sensitiveSvc, cfg.App.AssetStaticDir, sessionMasterStore)

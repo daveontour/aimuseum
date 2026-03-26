@@ -19,7 +19,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
 </head>
 
-<body>
+<body class="{{ deployment_nature_body_class }}">
     <div class="app-container">
         <!-- Top Bar -->
         <div class="top-bar" style="background-color: #19264d;">
@@ -46,7 +46,7 @@
             <div id="voice-settings-modal" class="modal voice-settings-modal" style="display: none;">
                 <div class="modal-content voice-settings-modal-content" onclick="event.stopPropagation()">
                     <div class="modal-header">
-                        <h2>Voice Settings</h2>
+                        <h2><i class="fas fa-microphone-alt"></i> Voice Settings</h2>
                         <button id="close-voice-settings" class="modal-close-btn">&times;</button>
                     </div>
                     <div class="modal-body voice-settings-modal-body">
@@ -156,7 +156,7 @@
                         <i class="fas fa-database"></i> Import Data
                     </button>
                     <button type="button" class="more-options-btn sidebar-settings-btn" id="settings-data-import-sidebar-btn">
-                        <i class="fas fa-cog"></i> Settings
+                        <i class="fas fa-cog"></i> Configuration
                     </button>
                 </div>
             </div>
@@ -291,6 +291,7 @@
                     <button class="modal-close-btn" id="close-have-a-chat-setup-modal">&times;</button>
                 </div>
                 <div class="modal-body" style="padding:20px; display:flex; flex-direction:column; gap:16px;">
+                    <p class="have-a-chat-setup-intro">Two archive <strong>voices</strong> reply in turn, each backed by either <strong>Claude</strong> or <strong>Gemini</strong> (you pick below). Add an optional topic to steer the thread, or leave it open so they explore freely. After you start, use the bar above the chat to <strong>pause</strong>, <strong>inject</strong> your own comment or question, or <strong>stop</strong> the run.</p>
                     <div>
                         <label style="display:block; font-weight:bold; margin-bottom:4px;">Topic / Starter Prompt <span style="font-weight:normal;color:#777;">(optional)</span></label>
                         <textarea id="have-a-chat-topic" rows="3" style="width:100%; box-sizing:border-box; border-radius:6px; border:1px solid #bfc9da; padding:8px; font-size:1em;" placeholder="e.g. 'What do the messages reveal about relationships?' — or leave blank to let the AIs explore freely."></textarea>
@@ -359,7 +360,7 @@
         <div class="config-modal-overlay" id="config-modal-overlay" style="display: none;">
             <div class="config-modal-content">
                 <div class="modal-header">
-                    <h2>Settings and Data Import</h2>
+                    <h2><i class="fas fa-cog"></i> Configuration</h2>
                     <button id="close-config" class="modal-close-btn">&times;</button>
                 </div>
                 <div class="config-modal-body">
@@ -627,7 +628,7 @@
                 <div id="custom-voice-edit-modal" class="modal" style="display: none; position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,0.5); align-items: center; justify-content: center;">
                     <div class="modal-content confirmation-modal-content" onclick="event.stopPropagation()">
                         <div class="confirmation-modal-header">
-                            <h2 id="custom-voice-edit-modal-title">New Custom Voice</h2>
+                            <h2><i class="fas fa-microphone-alt"></i> <span id="custom-voice-edit-modal-title">New Custom Voice</span></h2>
                             <button type="button" id="close-custom-voice-edit-modal" class="modal-close-btn" aria-label="Close">&times;</button>
                         </div>
                         <div class="confirmation-modal-body custom-voice-edit-modal-body">
@@ -923,7 +924,7 @@
         <div id="data-import-modal" class="modal" style="display: none; position: fixed; z-index: 4000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
             <div class="modal-content" style="max-width: 85vw; width: 85vw; height: 95vh; max-height: 95vh; padding: 0; display: flex; flex-direction: column; overflow: hidden;" onclick="event.stopPropagation()">
                 <div class="modal-header">
-                    <h2>Data Import</h2>
+                    <h2><i class="fas fa-database"></i> Data Import</h2>
                     <button class="modal-close-btn" id="close-data-import-modal">&times;</button>
                 </div>
                 <div style="padding: 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column;">
@@ -1013,7 +1014,7 @@
         <div id="master-import-modal" class="modal" style="display: none; position: fixed; z-index: 4100; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
             <div class="modal-content master-import-modal-content" style="max-width: 720px; width: 92vw; max-height: 90vh; padding: 0; display: flex; flex-direction: column; overflow: hidden;" onclick="event.stopPropagation()">
                 <div class="modal-header">
-                    <h2>Master Import</h2>
+                    <h2><i class="fas fa-layer-group"></i> Master Import</h2>
                     <button type="button" class="modal-close-btn" id="close-master-import-modal" aria-label="Close">&times;</button>
                 </div>
                 <div class="master-import-modal-body" style="padding: 16px 20px; overflow-y: auto; flex: 1; min-height: 0;">
@@ -1035,7 +1036,7 @@
         <div id="master-import-confirm-modal" class="modal" style="display: none; position: fixed; z-index: 4200; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.55); justify-content: center; align-items: center;">
             <div class="modal-content master-import-confirm-modal-content" style="max-width: 480px; width: 92vw; max-height: 85vh; padding: 0; display: flex; flex-direction: column; overflow: hidden;" onclick="event.stopPropagation()">
                 <div class="modal-header">
-                    <h2>Confirm Imports</h2>
+                    <h2><i class="fas fa-layer-group"></i> Confirm Imports</h2>
                     <button type="button" class="modal-close-btn" id="close-master-import-confirm-modal" aria-label="Close">&times;</button>
                 </div>
                 <div style="padding: 16px 20px; overflow-y: auto; flex: 1; min-height: 0;">
@@ -1056,7 +1057,7 @@
         <div id="reference-documents-manage-modal" class="modal" style="display: none; position: fixed; z-index: 4100; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
             <div class="modal-content" style="max-width: 90vw; width: 90vw; max-height: 90vh; height: 90vh; padding: 0; display: flex; flex-direction: column; overflow: hidden;" onclick="event.stopPropagation()">
                 <div class="modal-header">
-                    <h2>Reference Documents</h2>
+                    <h2><i class="fas fa-book"></i> Reference Documents</h2>
                     <button type="button" class="modal-close-btn" id="close-reference-documents-manage-modal" aria-label="Close">&times;</button>
                 </div>
                 <div style="padding: 20px; overflow-y: auto; flex: 1;">
@@ -1100,7 +1101,7 @@
         <div id="import-input-modal" class="modal" style="display: none; position: fixed; z-index: 4000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
             <div class="modal-content" style="max-width: 500px; padding: 0;" onclick="event.stopPropagation()">
                 <div class="modal-header">
-                    <h3 id="import-input-modal-title">Import Parameters</h3>
+                    <h3><i class="fas fa-database"></i> <span id="import-input-modal-title">Import Parameters</span></h3>
                 </div>
                 <div class="modal-body">
                     <div id="import-input-modal-body"></div>
@@ -1118,7 +1119,7 @@
         <div id="statistics-modal" class="modal" style="display: none; position: fixed; z-index: 4000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
             <div class="modal-content" style="max-width: 90vw; width: 90vw; max-height: 90vh; padding: 0; display: flex; flex-direction: column; overflow: hidden;" onclick="event.stopPropagation()">
                 <div class="modal-header">
-                    <h2>Statistics</h2>
+                    <h2><i class="fas fa-chart-bar"></i> Statistics</h2>
                     <button class="modal-close-btn" id="close-statistics-modal">&times;</button>
                 </div>
                 <div style="padding: 20px; overflow-y: auto; flex: 1;">
@@ -1150,7 +1151,7 @@
         <div id="email-editor-modal" class="modal" style="display: none; position: fixed; z-index: 4100; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
             <div class="modal-content email-gallery-modal-content" style="overflow: hidden;" onclick="event.stopPropagation()">
                 <div class="modal-header email-gallery-modal-header">
-                    <h2>Email Manager</h2>
+                    <h2><i class="fas fa-envelope"></i> Email Manager</h2>
                     <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
                         <button type="button" id="email-editor-open-emails-gallery-btn" class="modal-btn modal-btn-secondary">
                             <i class="fas fa-envelope-open"></i> View Emails
@@ -1254,7 +1255,7 @@
         <div id="email-attachments-modal" class="modal" style="display: none; position: fixed; z-index: 4100; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
             <div class="modal-content email-gallery-modal-content" style="overflow: hidden;" onclick="event.stopPropagation()">
                 <div class="modal-header email-gallery-modal-header">
-                    <h2>Email Attachments</h2>
+                    <h2><i class="fas fa-images"></i> Email Attachments</h2>
                     <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
                         <button type="button" id="email-attachments-open-email-manager-btn" class="modal-btn modal-btn-secondary">
                             <i class="fas fa-envelope"></i> Email Manager
@@ -1358,7 +1359,7 @@
         <div id="fb-albums-modal" class="modal">
             <div class="modal-content" style="max-width: 1400px; width: 95vw; padding: 0; display: flex; flex-direction: column; height: 90vh;">
                 <div class="modal-header">
-                    <h2>Facebook Albums</h2>
+                    <h2><i class="fas fa-images"></i> Facebook Albums</h2>
                     <button class="modal-close-btn" id="close-fb-albums-modal">&times;</button>
                 </div>
                 <div style="display: flex; flex: 1; overflow: hidden;">
@@ -1393,7 +1394,7 @@
         <div id="fb-posts-modal" class="modal">
             <div class="modal-content" style="max-width: 1400px; width: 95vw; padding: 0; display: flex; flex-direction: column; height: 90vh;">
                 <div class="modal-header">
-                    <h2>Facebook Posts</h2>
+                    <h2><i class="fas fa-newspaper"></i> Facebook Posts</h2>
                     <button class="modal-close-btn" id="close-fb-posts-modal">&times;</button>
                 </div>
                 <div style="display: flex; flex: 1; overflow: hidden;">
@@ -1430,7 +1431,7 @@
         <div id="tile-suggestions-modal" class="modal">
             <div class="modal-content tile-suggestions-modal-content">
                 <div class="modal-suggestions-header">
-                    <h2 id="tile-suggestions-modal-title">Suggestions</h2>
+                    <h2 id="tile-suggestions-modal-title"><i class="fas fa-lightbulb"></i> Suggestions</h2>
                     <button id="modal-suggestions-close-btn">&times;</button>
                 </div>
                 <p id="tile-suggestions-modal-description">Choose a suggestion from one of the categories below</p>
@@ -1449,7 +1450,7 @@
             <div class="modal-content" style="max-width: 500px; width: 90%; padding: 0;">
                 <div class="modal-header">
                     <div style="flex: 1; min-width: 0;">
-                        <h2>Ask the AI</h2>
+                        <h2><i class="fas fa-robot"></i> Ask the AI</h2>
                         <p id="sms-ask-ai-conversation-title" style="margin: 2px 0 0 0; color: rgba(255,255,255,0.7); font-size: 0.85em;"></p>
                     </div>
                     <button class="modal-close-btn" id="sms-ask-ai-close">&times;</button>
@@ -1484,7 +1485,7 @@
         <div id="previous-responses-modal" class="modal" style="display: none; position: fixed; z-index: 4000 !important; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
             <div class="modal-content" style="max-width: 800px; width: 90vw; max-height: 85vh; padding: 0; display: flex; flex-direction: column;" onclick="event.stopPropagation()">
                 <div class="modal-header">
-                    <h2>Previous Responses</h2>
+                    <h2><i class="fas fa-history"></i> Previous Responses</h2>
                     <button class="modal-close-btn" id="close-previous-responses-modal">&times;</button>
                 </div>
                 <div class="modal-body" style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
@@ -1511,7 +1512,7 @@
         <div id="conversation-summary-modal" class="modal" style="display: none; position: fixed; z-index: 4000 !important; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
             <div class="modal-content" style="max-width: 800px; width: 90vw; padding: 0;">
                 <div class="modal-header">
-                    <h2>Conversation Summary</h2>
+                    <h2><i class="fas fa-file-lines"></i> Conversation Summary</h2>
                     <button class="modal-close-btn" id="close-conversation-summary-modal">&times;</button>
                 </div>
                 <div class="modal-body">
@@ -1536,7 +1537,7 @@
             <div class="modal-content" style="max-width: 500px; width: 90%; padding: 0;">
                 <div class="modal-header">
                     <div style="flex: 1; min-width: 0;">
-                        <h2>Ask the AI</h2>
+                        <h2><i class="fas fa-robot"></i> Ask the AI</h2>
                         <p id="email-ask-ai-email-subject" style="margin: 2px 0 0 0; color: rgba(255,255,255,0.7); font-size: 0.85em;"></p>
                     </div>
                     <button class="modal-close-btn" id="email-ask-ai-close">&times;</button>
@@ -1578,7 +1579,7 @@
                     <button id="refresh-locations-btn" class="modal-btn" style="background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); padding: 0.4em 0.9em; font-size: 0.9em; flex-shrink: 0;">
                         <i class="fas fa-sync-alt" style="margin-right: 0.4em;"></i>Refresh
                     </button>
-                    <h2 style="text-align: center;">Locations Map</h2>
+                    <h2 style="text-align: center;"><i class="fas fa-map-marker-alt"></i> Locations Map</h2>
                     <button id="close-geo-metadata-modal" class="modal-close-btn">&times;</button>
                 </div>
                 <div class="geo-metadata-tab-content geo-tab-images" style="flex: 1; height: auto; position: relative;">
@@ -1734,7 +1735,7 @@
         <div id="email-gallery-modal" class="modal">
            <div class="modal-content email-gallery-modal-content">
                 <div class="modal-header email-gallery-modal-header">
-                    <h2>Emails</h2>
+                    <h2><i class="fas fa-envelope"></i> Emails</h2>
                     <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
                         <button type="button" id="email-gallery-manage-emails-btn" class="modal-btn modal-btn-secondary">Manage Emails</button>
                         <button id="close-email-gallery-modal" class="modal-close-btn">&times;</button>
@@ -1851,7 +1852,7 @@
         <div id="new-image-gallery-modal" class="modal">
            <div class="modal-content new-image-gallery-modal-content">
                 <div class="modal-header">
-                    <h2>Images</h2>
+                    <h2><i class="fas fa-images"></i> Images</h2>
                     <button id="close-new-image-gallery-modal" class="modal-close-btn">&times;</button>
                 </div>
                 <div class="new-image-gallery-modal-body">
@@ -1965,7 +1966,7 @@
         <div id="new-image-gallery-detail-modal" class="modal">
             <div class="modal-content new-image-gallery-detail-modal-content">
                 <div class="modal-header">
-                    <h2>Image Details</h2>
+                    <h2><i class="fas fa-image"></i> Image Details</h2>
                     <button id="close-new-image-gallery-detail-modal" class="modal-close-btn">&times;</button>
                 </div>
                 <div class="new-image-gallery-detail-modal-body">
@@ -2075,7 +2076,7 @@
         <div id="reference-documents-notification-modal" class="modal" style="display: none; position: fixed; z-index: 4000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
             <div class="modal-content" style="max-width: 700px; width: 90vw; padding: 0;">
                 <div class="modal-header">
-                    <h2>Reference Documents</h2>
+                    <h2><i class="fas fa-book"></i> Reference Documents</h2>
                     <button class="modal-close-btn" id="close-reference-documents-notification-modal">&times;</button>
                 </div>
                 <div class="modal-body">
@@ -2095,7 +2096,7 @@
         <div id="conversation-list-modal" class="modal" style="display: none; position: fixed; z-index: 4000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
             <div class="modal-content" style="max-width: 800px; width: 90vw; padding: 0; max-height: 80vh; display: flex; flex-direction: column;">
                 <div class="modal-header">
-                    <h2>Conversations</h2>
+                    <h2><i class="fas fa-comments"></i> Conversations</h2>
                     <button type="button" id="new-conversation-btn" class="modal-btn" style="background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;">
                         <i class="fas fa-plus"></i> New
                     </button>
@@ -2111,7 +2112,7 @@
         <div id="new-conversation-modal" class="modal" style="display: none; position: fixed; z-index: 4001; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
             <div class="modal-content" style="max-width: 500px; width: 90vw; padding: 0;">
                 <div class="modal-header">
-                    <h2>New Conversation</h2>
+                    <h2><i class="fas fa-plus"></i> New Conversation</h2>
                     <button class="modal-close-btn" id="close-new-conversation-modal">&times;</button>
                 </div>
                 <div class="modal-body">
@@ -2138,7 +2139,7 @@
         <div id="relationships-modal" class="modal">
             <div class="modal-content relationships-modal-content">
                 <div class="modal-header">
-                    <h2>Relationships</h2>
+                    <h2><i class="fas fa-project-diagram"></i> Relationships</h2>
                     <button id="close-relationships-modal" class="modal-close-btn">&times;</button>
                 </div>
                 <div class="rel-dashboard">
@@ -2210,7 +2211,7 @@
         <div id="contacts-modal" class="modal">
             <div class="modal-content contacts-modal-content" style="max-width: 90vw;">
                 <div class="modal-header">
-                    <h2>Contacts</h2>
+                    <h2><i class="fas fa-address-book"></i> Contacts</h2>
                     <button id="close-contacts-modal" class="modal-close-btn">&times;</button>
                 </div>
                 <!-- <div style="margin-bottom: 1em;">
@@ -2292,7 +2293,7 @@
         <div id="profiles-modal" class="modal" style="display: none;">
             <div class="modal-content" style="max-width: 600px;">
                 <div class="modal-header">
-                    <h2>Profiles</h2>
+                    <h2><i class="fas fa-id-card"></i> Profiles</h2>
                     <button class="modal-close-btn" id="close-profiles-modal">&times;</button>
                 </div>
                 <div class="modal-body">
@@ -2339,7 +2340,7 @@
         <div id="complete-profile-modal" class="modal" style="display: none;">
             <div class="modal-content" style="max-width: 700px; max-height: 85vh;">
                 <div class="modal-header">
-                    <h3 id="complete-profile-modal-title">Complete Profile</h3>
+                    <h3><i class="fas fa-id-card"></i> <span id="complete-profile-modal-title">Complete Profile</span></h3>
                     <button class="modal-close-btn" id="close-complete-profile-modal">&times;</button>
                 </div>
                 <div class="modal-body" style="overflow-y: auto; max-height: 70vh;">
@@ -2446,7 +2447,7 @@
         <div id="reference-documents-upload-modal" class="modal" style="z-index: 4200;">
             <div class="modal-content reference-documents-upload-content">
                 <div class="modal-header">
-                    <h2>Upload Reference Document</h2>
+                    <h2><i class="fas fa-upload"></i> Upload Reference Document</h2>
                     <button id="close-reference-documents-upload-modal" class="modal-close-btn">&times;</button>
                 </div>
                 <form id="reference-documents-upload-form" class="reference-documents-upload-form">
@@ -2496,7 +2497,7 @@
         <div id="reference-documents-edit-modal" class="modal" style="z-index: 4200;">
             <div class="modal-content reference-documents-upload-content">
                 <div class="modal-header">
-                    <h2>Edit Document Metadata</h2>
+                    <h2><i class="fas fa-pen"></i> Edit Document Metadata</h2>
                     <button id="close-reference-documents-edit-modal" class="modal-close-btn">&times;</button>
                 </div>
                 <form id="reference-documents-edit-form" class="reference-documents-upload-form">
@@ -2545,7 +2546,7 @@
         <div id="email-match-modal" class="modal" style="display: none;">
             <div class="modal-content" style="max-width: 450px; padding: 0;">
                 <div class="modal-header">
-                    <h2 id="email-match-modal-title">Add Email Match</h2>
+                    <h2><i class="fas fa-plus"></i> <span id="email-match-modal-title">Add Email Match</span></h2>
                     <button class="modal-close-btn" id="close-email-match-modal">&times;</button>
                 </div>
                 <div class="modal-body">
@@ -2570,7 +2571,7 @@
         <div id="interest-modal" class="modal" style="display: none;">
             <div class="modal-content" style="max-width: 450px; padding: 0;">
                 <div class="modal-header">
-                    <h2 id="interest-modal-title">Add Interest</h2>
+                    <h2><i class="fas fa-plus"></i> <span id="interest-modal-title">Add Interest</span></h2>
                     <button class="modal-close-btn" id="close-interest-modal">&times;</button>
                 </div>
                 <div class="modal-body">
@@ -2591,7 +2592,7 @@
         <div id="email-classification-modal" class="modal" style="display: none;">
             <div class="modal-content" style="max-width: 450px; padding: 0;">
                 <div class="modal-header">
-                    <h2 id="email-classification-modal-title">Add Classification</h2>
+                    <h2><i class="fas fa-plus"></i> <span id="email-classification-modal-title">Add Classification</span></h2>
                     <button class="modal-close-btn" id="close-email-classification-modal">&times;</button>
                 </div>
                 <div class="modal-body">
@@ -2618,7 +2619,7 @@
         <div id="email-exclusion-modal" class="modal" style="display: none;">
             <div class="modal-content" style="max-width: 450px; padding: 0;">
                 <div class="modal-header">
-                    <h2 id="email-exclusion-modal-title">Add Email Exclusion</h2>
+                    <h2><i class="fas fa-plus"></i> <span id="email-exclusion-modal-title">Add Email Exclusion</span></h2>
                     <button class="modal-close-btn" id="close-email-exclusion-modal">&times;</button>
                 </div>
                 <div class="modal-body">
@@ -2651,7 +2652,7 @@
         <div id="guide-modal" class="modal" style="display: none;">
             <div class="modal-content guide-modal-content" style="max-width: 500px; padding: 0;" onclick="event.stopPropagation()">
                 <div class="modal-header">
-                    <h2>Guide</h2>
+                    <h2><i class="fas fa-question-circle"></i> Guide</h2>
                     <button class="modal-close-btn" id="close-guide-modal">&times;</button>
                 </div>
                 <div class="modal-body">
@@ -2706,8 +2707,8 @@
                 </section>
 
                 <section class="getting-started-section">
-                    <h2><i class="fas fa-cog"></i> Settings &amp; Data Import</h2>
-                    <p>Use <strong>Settings and Data Import</strong> in the left sidebar to configure the app, import emails, Facebook, Instagram, or WhatsApp data, and manage your interests.</p>
+                    <h2><i class="fas fa-cog"></i> Configuration</h2>
+                    <p>Use <strong>Configuration</strong> in the left sidebar to configure the app, import emails, Facebook, Instagram, or WhatsApp data, and manage your interests.</p>
                 </section>
 
                 <p class="getting-started-footer">Select any topic in the Guide for step-by-step help.</p>
@@ -2748,7 +2749,7 @@
         <div id="master-key-unlock-modal" class="modal" style="display:none; z-index:4200; align-items:center; justify-content:center;">
             <div class="modal-content confirmation-modal-content" style="max-width:600px;" onclick="event.stopPropagation()">
                 <div class="confirmation-modal-header">
-                    <h2>Unlock Encryption</h2>
+                    <h2><i class="fas fa-lock"></i> Unlock Encryption</h2>
                 </div>
                 <div class="confirmation-modal-body">
                     <p style="color:#555; margin-bottom:12px; font-size:0.95rem; line-height:1.45;">
@@ -2780,7 +2781,7 @@
         <div id="visitor-key-hints-modal" class="modal" style="display:none; z-index:4300; align-items:center; justify-content:center;">
             <div class="modal-content confirmation-modal-content" style="max-width:480px;" onclick="event.stopPropagation()">
                 <div class="confirmation-modal-header">
-                    <h2>Visitor key hints</h2>
+                    <h2><i class="fas fa-key"></i> Visitor key hints</h2>
                 </div>
                 <div class="confirmation-modal-body">
                     <p style="color:#555; margin-bottom:12px; font-size:0.9rem;">These are reminders the owner entered when creating visitor keys. They are not the keys themselves.</p>
@@ -2799,7 +2800,7 @@
         <div id="todays-thing-add-interest-modal" class="modal" style="display: none;">
             <div class="modal-content" style="max-width: 450px; padding: 0;" onclick="event.stopPropagation()">
                 <div class="modal-header">
-                    <h2>Add an interest</h2>
+                    <h2><i class="fas fa-star"></i> Add an interest</h2>
                     <button class="modal-close-btn" id="close-todays-thing-add-interest-modal">&times;</button>
                 </div>
                 <div class="modal-body">
@@ -2821,7 +2822,7 @@
         <div id="save-response-title-modal" class="modal" style="display: none; position: fixed; z-index: 4100; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); justify-content: center; align-items: center;">
             <div class="modal-content confirmation-modal-content" style="max-width: 450px;" onclick="event.stopPropagation()">
                 <div class="confirmation-modal-header">
-                    <h2>Save Response</h2>
+                    <h2><i class="fa-regular fa-floppy-disk"></i> Save Response</h2>
                     <button class="modal-close-btn" id="close-save-response-title-modal">&times;</button>
                 </div>
                 <div class="confirmation-modal-body">
@@ -2877,7 +2878,7 @@
         <div id="sms-messages-modal" class="modal">
             <div class="modal-content" style="max-width: 1400px; width: 95vw; background: #fff; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.18); padding: 0; position: relative; display: flex; flex-direction: column; height: 90vh;">
                 <div class="modal-header">
-                    <h2>Messages &amp; Chats</h2>
+                    <h2><i class="fas fa-comment-dots"></i> Messages &amp; Chats</h2>
                     <button class="modal-close-btn" id="close-sms-messages-modal" title="Close">&times;</button>
                 </div>
                 <div style="display: flex; flex: 1; min-height: 0; overflow: hidden;">
@@ -2992,7 +2993,7 @@
     <div id="sensitive-data-modal" class="modal">
         <div class="modal-content sensitive-data-modal-content">
             <div class="sensitive-data-modal-header">
-                <h2>Sensitive &amp; Private Information</h2>
+                <h2><i class="fas fa-lock"></i> Sensitive &amp; Private Information</h2>
                 <button class="modal-close-btn" id="close-sensitive-data-modal">&times;</button>
             </div>
             <div class="sensitive-data-toolbar">
@@ -3030,7 +3031,7 @@
     <div id="sensitive-data-hints-modal" class="modal">
         <div class="modal-content sensitive-data-hints-content">
             <div class="sensitive-data-hints-header">
-                <h3>Password Hints</h3>
+                <h3><i class="fas fa-lightbulb"></i> Password Hints</h3>
                 <button class="modal-close-btn" id="close-sensitive-data-hints">&times;</button>
             </div>
             <div class="sensitive-data-hints-body">
@@ -3043,7 +3044,7 @@
     <div id="sensitive-data-no-master-key-modal" class="modal" style="display: none;">
         <div class="modal-content sensitive-data-hints-content" style="max-width: 400px;">
             <div class="sensitive-data-hints-header">
-                <h3>No Master Key Set</h3>
+                <h3><i class="fas fa-lock"></i> No Master Key Set</h3>
                 <button class="modal-close-btn" id="close-sensitive-data-no-master-key">&times;</button>
             </div>
             <div class="sensitive-data-hints-body">
@@ -3079,7 +3080,7 @@
     <div id="create-new-master-key-modal" class="modal" style="display: none;">
         <div class="modal-content sensitive-data-hints-content" style="max-width: 480px;">
             <div class="sensitive-data-hints-header">
-                <h3 style="color: #dc3545;">Create New Master Key</h3>
+                <h3 style="color: #dc3545;"><i class="fas fa-key"></i> Create New Master Key</h3>
                 <button class="modal-close-btn" id="close-create-new-master-key-modal">&times;</button>
             </div>
             <div class="sensitive-data-hints-body">
@@ -3139,7 +3140,7 @@
     <div id="create-trusted-key-modal" class="modal" style="display: none;">
         <div class="modal-content sensitive-data-hints-content" style="max-width: 400px;">
             <div class="sensitive-data-hints-header">
-                <h3>Create Trusted Key</h3>
+                <h3><i class="fas fa-plus"></i> Create Trusted Key</h3>
                 <button class="modal-close-btn" id="close-create-trusted-key-modal">&times;</button>
             </div>
             <div class="sensitive-data-hints-body">
@@ -3169,7 +3170,7 @@
     <div id="delete-trusted-key-modal" class="modal" style="display: none;">
         <div class="modal-content sensitive-data-hints-content" style="max-width: 400px;">
             <div class="sensitive-data-hints-header">
-                <h3>Delete Trusted Key</h3>
+                <h3><i class="fas fa-minus"></i> Delete Trusted Key</h3>
                 <button class="modal-close-btn" id="close-delete-trusted-key-modal">&times;</button>
             </div>
             <div class="sensitive-data-hints-body">
@@ -3195,7 +3196,7 @@
     <div id="add-doc-key-modal" class="modal" style="display: none;">
         <div class="modal-content sensitive-data-hints-content" style="max-width: 400px;">
             <div class="sensitive-data-hints-header">
-                <h3>Add Document Key</h3>
+                <h3><i class="fas fa-plus"></i> Add Document Key</h3>
                 <button class="modal-close-btn" id="close-add-doc-key-modal">&times;</button>
             </div>
             <div class="sensitive-data-hints-body">
@@ -3225,7 +3226,7 @@
     <div id="remove-doc-key-modal" class="modal" style="display: none;">
         <div class="modal-content sensitive-data-hints-content" style="max-width: 400px;">
             <div class="sensitive-data-hints-header">
-                <h3>Remove Document Key</h3>
+                <h3><i class="fas fa-minus"></i> Remove Document Key</h3>
                 <button class="modal-close-btn" id="close-remove-doc-key-modal">&times;</button>
             </div>
             <div class="sensitive-data-hints-body">
@@ -3251,7 +3252,7 @@
     <div id="edit-visitor-key-hint-modal" class="modal" style="display: none;">
         <div class="modal-content sensitive-data-hints-content" style="max-width: 440px;">
             <div class="sensitive-data-hints-header">
-                <h3>Edit visitor hint</h3>
+                <h3><i class="fas fa-pen"></i> Edit visitor hint</h3>
                 <button type="button" class="modal-close-btn" id="close-edit-visitor-key-hint-modal">&times;</button>
             </div>
             <div class="sensitive-data-hints-body">
@@ -3272,7 +3273,7 @@
     <div id="create-visitor-key-hint-modal" class="modal" style="display: none;">
         <div class="modal-content sensitive-data-hints-content" style="max-width: 440px;">
             <div class="sensitive-data-hints-header">
-                <h3>Add hint for existing seat</h3>
+                <h3><i class="fas fa-plus"></i> Add hint for existing seat</h3>
                 <button type="button" class="modal-close-btn" id="close-create-visitor-key-hint-modal">&times;</button>
             </div>
             <div class="sensitive-data-hints-body">
@@ -3329,7 +3330,7 @@
         <div class="modal-content artefacts-modal-content">
             <div class="artefacts-modal-header">
                 <div class="artefacts-header-title-row">
-                    <h2 style="margin:0;">Artefact Gallery</h2>
+                    <h2 style="margin:0;"><i class="fas fa-box-open"></i> Artefact Gallery</h2>
                     <div style="display:flex; gap:6px; align-items:center;">
                         <button id="artefacts-export-btn" class="modal-btn modal-btn-secondary" title="Download all artefacts as JSON">
                             <i class="fas fa-download"></i> Export
@@ -3400,7 +3401,7 @@
     <div id="artefact-document-view-modal" class="modal artefact-document-view-modal" style="display: none; z-index: 4500;">
         <div class="modal-content artefact-document-view-content" onclick="event.stopPropagation()">
             <div class="modal-header">
-                <h2 id="artefact-document-view-title">Document</h2>
+                <h2><i class="fas fa-file"></i> <span id="artefact-document-view-title">Document</span></h2>
                 <button type="button" class="modal-close-btn" id="close-artefact-document-view" aria-label="Close">&times;</button>
             </div>
             <div id="artefact-document-view-body" class="artefact-document-view-body">

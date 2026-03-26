@@ -2380,6 +2380,19 @@ body {
     outline: none !important;
 }
 
+/*
+ * When DEPLOYMENT_NATURE is not "local", hide imports that prompt for server filesystem paths.
+ * Set DEPLOYMENT_NATURE=local for dev machines with disk access to those paths.
+ */
+body.deployment-hide-path-import-tiles .import-control-tile[data-import="imessage"],
+body.deployment-hide-path-import-tiles .import-control-tile[data-import="whatsapp"],
+body.deployment-hide-path-import-tiles .import-control-tile[data-import="facebook_all"],
+body.deployment-hide-path-import-tiles .import-control-tile[data-import="instagram"],
+body.deployment-hide-path-import-tiles .import-control-tile[data-import="filesystem"],
+body.deployment-hide-path-import-tiles .import-control-tile[data-import="image_export"] {
+    display: none !important;
+}
+
 /* Compact import tiles: Data Import modal + Settings → Manage Imported Data */
 .data-import-tiles {
     display: grid;
@@ -8694,6 +8707,17 @@ body {
 
 
 /* ===== Have A Chat Feature ===== */
+
+.have-a-chat-setup-intro {
+    margin: 0;
+    font-size: 0.92rem;
+    line-height: 1.45;
+    color: var(--color-text-muted, #64748b);
+    padding: 12px 14px;
+    background: var(--color-bg-alt, #f4f7fb);
+    border-radius: var(--radius-md, 8px);
+    border: 1px solid var(--color-border, #dfe6ef);
+}
 
 .have-a-chat-message {
     display: flex;

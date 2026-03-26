@@ -15,6 +15,7 @@ import (
 	"github.com/daveontour/aimuseum/internal/api/router"
 	"github.com/daveontour/aimuseum/internal/config"
 	"github.com/daveontour/aimuseum/internal/database"
+	"github.com/daveontour/aimuseum/internal/repository"
 )
 
 func main() {
@@ -55,6 +56,13 @@ func run() error {
 
 	if err := database.Migrate(migrateCtx, db.Pool); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
+	}
+
+	userRepo := repository.NewUserRepo(db.Pool)
+	if n, err := userRepo.DeleteAllSessions(migrateCtx); err != nil {
+		return fmt.Errorf("clear sessions on startup: %w", err)
+	} else if n > 0 {
+		slog.Info("cleared auth sessions after restart", "deleted", n)
 	}
 
 	if err := database.SeedEmailExclusionsFromJSON(migrateCtx, db.Pool, "static/data/exclusions.json"); err != nil {

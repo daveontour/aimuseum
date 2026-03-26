@@ -71,9 +71,10 @@ type CryptoConfig struct {
 
 // AppConfig holds application-level settings.
 type AppConfig struct {
-	PageTitle      string
-	TemplatesDir   string // path to Jinja2 HTML templates
-	AssetStaticDir string // path to Python static directory (JS/data files for templating)
+	PageTitle          string
+	TemplatesDir       string // path to Jinja2 HTML templates
+	AssetStaticDir     string // path to Python static directory (JS/data files for templating)
+	DeploymentNature   string // "local" = show filesystem path import tiles; unset/other = hide them
 }
 
 // DefaultsConfig holds default values shown in the control panel UI.
@@ -175,9 +176,10 @@ func Load() (*Config, error) {
 			AdminPassword:       os.Getenv("ADMIN_PASSWORD"),
 		},
 		App: AppConfig{
-			PageTitle:      getenv("PAGE_TITLE", "Digital Museum of SUBJECT_NAME"),
-			TemplatesDir:   getenv("TEMPLATES_DIR", "../src/api/templates"),
-			AssetStaticDir: getenv("ASSET_STATIC_DIR", "../src/api/static"),
+			PageTitle:        getenv("PAGE_TITLE", "Digital Museum of SUBJECT_NAME"),
+			TemplatesDir:     getenv("TEMPLATES_DIR", "../src/api/templates"),
+			AssetStaticDir:   getenv("ASSET_STATIC_DIR", "../src/api/static"),
+			DeploymentNature: strings.TrimSpace(os.Getenv("DEPLOYMENT_NATURE")),
 		},
 		Crypto:      cryptoCfg,
 		Defaults:    loadDefaultsConfig(),

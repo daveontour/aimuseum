@@ -21,30 +21,33 @@ import (
 //   - GET /static/js/museum/foundation.js
 //   - GET /static/js/museum/modals-people.js
 type TemplateHandler struct {
-	subjectRepo       *repository.SubjectConfigRepo
-	userRepo          *repository.UserRepo
-	templatesDir      string
-	pythonStaticDir   string
-	defaultGeminiOK   bool
-	defaultClaudeOK   bool
-	pageTitle         string
+	subjectRepo             *repository.SubjectConfigRepo
+	userRepo                *repository.UserRepo
+	templatesDir            string
+	pythonStaticDir         string
+	defaultGeminiOK         bool
+	defaultClaudeOK         bool
+	pageTitle               string
+	deploymentNatureLocal   bool
 }
 
 // NewTemplateHandler creates a TemplateHandler.
 func NewTemplateHandler(subjectRepo *repository.SubjectConfigRepo, userRepo *repository.UserRepo, cfg *config.Config) *TemplateHandler {
 	return &TemplateHandler{
-		subjectRepo:     subjectRepo,
-		userRepo:        userRepo,
-		templatesDir:    cfg.App.TemplatesDir,
-		pythonStaticDir: cfg.App.AssetStaticDir,
-		defaultGeminiOK: cfg.AI.GeminiAPIKey != "",
-		defaultClaudeOK: cfg.AI.AnthropicAPIKey != "",
-		pageTitle:       cfg.App.PageTitle,
+		subjectRepo:           subjectRepo,
+		userRepo:              userRepo,
+		templatesDir:          cfg.App.TemplatesDir,
+		pythonStaticDir:       cfg.App.AssetStaticDir,
+		defaultGeminiOK:       cfg.AI.GeminiAPIKey != "",
+		defaultClaudeOK:       cfg.AI.AnthropicAPIKey != "",
+		pageTitle:             cfg.App.PageTitle,
+		deploymentNatureLocal: strings.EqualFold(strings.TrimSpace(cfg.App.DeploymentNature), "local"),
 	}
 }
 
 // RegisterRoutes mounts the templated routes.
-// The specific JS paths are registered before /static/* so chi matches them first.
+// Router must call this before r.Handle("/static/*", ...) so /static/js/museum/foundation.js
+// is served here (with {{ }} substitution) instead of the raw file from disk.
 func (h *TemplateHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/", h.GetRoot)
 	r.Get("/api/suggestions", h.GetSuggestions)
@@ -99,6 +102,12 @@ func (h *TemplateHandler) GetRoot(w http.ResponseWriter, r *http.Request) {
 
 	extras := map[string]string{
 		"page_title": pageTitle,
+	}
+	// Non-local deployments hide server filesystem path import tiles; local shows them.
+	if h.deploymentNatureLocal {
+		extras["deployment_nature_body_class"] = ""
+	} else {
+		extras["deployment_nature_body_class"] = "deployment-hide-path-import-tiles"
 	}
 	rendered := renderJinja(content, ctx, extras)
 
@@ -227,6 +236,11 @@ func (h *TemplateHandler) buildContext(r *http.Request) map[string]string {
 
 	fullName := strings.TrimSpace(subjectName + " " + familyName)
 
+	depLocal := "False"
+	if h.deploymentNatureLocal {
+		depLocal = "True"
+	}
+
 	return map[string]string{
 		"owner":               subjectName,
 		"owners":              subjectName + "'s",
@@ -242,6 +256,7 @@ func (h *TemplateHandler) buildContext(r *http.Request) map[string]string {
 		// Undefined in Python context too — render as empty string.
 		"owner_gender":        gender,
 		"todays_thing_prompt": "",
+		"deployment_nature_local": depLocal,
 	}
 }
 
