@@ -91,6 +91,17 @@ func multitenancyDDL() []string {
 	// ── Step 1: new identity / session / audit tables ─────────────────────────
 	stmts = append(stmts, identityTablesDDL()...)
 
+	// Users: first_name / family_name (idempotent for DBs created before these columns)
+	stmts = append(stmts,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(255)`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS family_name VARCHAR(255)`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS user_gemini_api_key TEXT`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS user_anthropic_api_key TEXT`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS user_gemini_model TEXT`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS user_claude_model TEXT`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS user_tavily_api_key TEXT`,
+	)
+
 	// ── Step 2: add nullable user_id + index to every data table ─────────────
 	for _, t := range dataTables {
 		stmts = append(stmts, addUserIDColumnDDL(t))
@@ -118,6 +129,7 @@ func multitenancyDDL() []string {
 	// ── Step 6: sessions.is_visitor — marks sessions created via visitor key login ──
 	stmts = append(stmts,
 		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_visitor BOOLEAN NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS visitor_llm_overrides JSONB`,
 	)
 
 	return stmts
@@ -133,6 +145,8 @@ func identityTablesDDL() []string {
 			email         VARCHAR(255) NOT NULL UNIQUE,
 			password_hash VARCHAR(255) NOT NULL,
 			display_name  VARCHAR(255),
+			first_name    VARCHAR(255),
+			family_name   VARCHAR(255),
 			created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 			last_login_at TIMESTAMPTZ,
 			is_active     BOOLEAN      NOT NULL DEFAULT TRUE

@@ -45,11 +45,15 @@ func (s *ChatService) GenerateHaveAChatTurn(
 	// ── Pick the actual AI provider ──────────────────────────────────────────
 	var provider appai.ChatProvider
 	providerName := "gemini"
-	if speakingProviderKey == "claude" && s.claudeProvider != nil && s.claudeProvider.IsAvailable() {
-		provider = s.claudeProvider
-		providerName = "claude"
-	} else {
-		provider = s.geminiProvider
+	if speakingProviderKey == "claude" {
+		cp := s.effectiveClaudeProvider(ctx, r, "")
+		if cp != nil && cp.IsAvailable() {
+			provider = cp
+			providerName = "claude"
+		}
+	}
+	if provider == nil {
+		provider = s.effectiveGeminiProvider(ctx, r, "")
 		providerName = "gemini"
 	}
 	if provider == nil || !provider.IsAvailable() {

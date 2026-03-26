@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/daveontour/aimuseum/internal/appctx"
 	contactsimport "github.com/daveontour/aimuseum/internal/import/contacts"
 	facebookimport "github.com/daveontour/aimuseum/internal/import/facebook"
 	facebookalbumsimport "github.com/daveontour/aimuseum/internal/import/facebookalbums"
@@ -24,7 +25,6 @@ import (
 	instagramimport "github.com/daveontour/aimuseum/internal/import/instagram"
 	thumbnailsimport "github.com/daveontour/aimuseum/internal/import/thumbnails"
 	whatsappimport "github.com/daveontour/aimuseum/internal/import/whatsapp"
-	"github.com/daveontour/aimuseum/internal/appctx"
 	"github.com/daveontour/aimuseum/internal/importer"
 	"github.com/daveontour/aimuseum/internal/importstorage"
 	"github.com/daveontour/aimuseum/internal/keystore"

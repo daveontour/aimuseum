@@ -5,5 +5,5 @@ const Modals = {
     _openModal: (modalElement) => { modalElement.style.display = 'flex'; },
     _closeModal: (modalElement) => { modalElement.style.display = 'none'; },
 };
-// Inline onclick handlers resolve identifiers on window — expose Modals for AppConfig row buttons.
+// Inline onclick handlers resolve identifiers on window.
 window.Modals = Modals;

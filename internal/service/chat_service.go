@@ -10,11 +10,26 @@ import (
 	"strings"
 
 	appai "github.com/daveontour/aimuseum/internal/ai"
+	"github.com/daveontour/aimuseum/internal/appctx"
 	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/model"
 	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func readAuthSessionID(r *http.Request, override string) string {
+	if strings.TrimSpace(override) != "" {
+		return strings.TrimSpace(override)
+	}
+	if r == nil {
+		return ""
+	}
+	c, err := r.Cookie(AuthSessionCookieName)
+	if err != nil || c == nil {
+		return ""
+	}
+	return c.Value
+}
 
 // voiceEntry holds one entry from voice_instructions.json.
 type voiceEntry struct {
@@ -25,46 +40,119 @@ type voiceEntry struct {
 
 // ChatService orchestrates AI generation, tool calling, and conversation persistence.
 type ChatService struct {
-	chatRepo        *repository.ChatRepo
-	subjectRepo     *repository.SubjectConfigRepo
-	cpRepo          *repository.CompleteProfileRepo
-	pool            *pgxpool.Pool
-	geminiProvider  appai.ChatProvider
-	claudeProvider  appai.ChatProvider
-	pythonStaticDir string
-	tavilyKey       string
-	pepper          string
-	sessionStore    *keystore.SessionMasterStore
-	privateStore    *PrivateStoreService
+	chatRepo             *repository.ChatRepo
+	subjectRepo          *repository.SubjectConfigRepo
+	cpRepo               *repository.CompleteProfileRepo
+	pool                 *pgxpool.Pool
+	userRepo             *repository.UserRepo
+	defaultGeminiKey     string
+	defaultGeminiModel   string
+	defaultAnthropicKey  string
+	defaultClaudeModel   string
+	defaultTavilyKey     string
+	pythonStaticDir      string
+	pepper               string
+	sessionStore         *keystore.SessionMasterStore
+	privateStore         *PrivateStoreService
 }
 
-// NewChatService creates a ChatService.
+// NewChatService creates a ChatService. Server defaults come from cfg/env; authenticated
+// users may override keys and models in the users table.
 func NewChatService(
 	chatRepo *repository.ChatRepo,
 	subjectRepo *repository.SubjectConfigRepo,
 	cpRepo *repository.CompleteProfileRepo,
 	pool *pgxpool.Pool,
-	geminiProvider appai.ChatProvider,
-	claudeProvider appai.ChatProvider,
+	userRepo *repository.UserRepo,
+	defaultGeminiKey, defaultGeminiModel, defaultAnthropicKey, defaultClaudeModel, defaultTavilyKey string,
 	pythonStaticDir string,
-	tavilyKey string,
 	pepper string,
 	sessionStore *keystore.SessionMasterStore,
 	privateStore *PrivateStoreService,
 ) *ChatService {
 	return &ChatService{
-		chatRepo:        chatRepo,
-		subjectRepo:     subjectRepo,
-		cpRepo:          cpRepo,
-		pool:            pool,
-		geminiProvider:  geminiProvider,
-		claudeProvider:  claudeProvider,
-		pythonStaticDir: pythonStaticDir,
-		tavilyKey:       tavilyKey,
-		pepper:          pepper,
-		sessionStore:    sessionStore,
-		privateStore:    privateStore,
+		chatRepo:            chatRepo,
+		subjectRepo:         subjectRepo,
+		cpRepo:              cpRepo,
+		pool:                pool,
+		userRepo:            userRepo,
+		defaultGeminiKey:    defaultGeminiKey,
+		defaultGeminiModel:  defaultGeminiModel,
+		defaultAnthropicKey: defaultAnthropicKey,
+		defaultClaudeModel:  defaultClaudeModel,
+		defaultTavilyKey:    defaultTavilyKey,
+		pythonStaticDir:     pythonStaticDir,
+		pepper:              pepper,
+		sessionStore:        sessionStore,
+		privateStore:        privateStore,
 	}
+}
+
+// effectiveAIConfig merges server defaults, the archive owner's saved overrides (users row), then
+// visitor session overrides (sessions.visitor_llm_overrides) when the request is a visitor session.
+// authSessionID is used when r is nil (e.g. background jobs); otherwise the cookie on r is read.
+func (s *ChatService) effectiveAIConfig(ctx context.Context, r *http.Request, authSessionID string) (geminiKey, geminiModel, anthropicKey, claudeModel, tavilyKey string) {
+	geminiKey = s.defaultGeminiKey
+	geminiModel = s.defaultGeminiModel
+	anthropicKey = s.defaultAnthropicKey
+	claudeModel = s.defaultClaudeModel
+	tavilyKey = s.defaultTavilyKey
+	uid := appctx.UserIDFromCtx(ctx)
+	if uid != 0 && s.userRepo != nil {
+		if stored, err := s.userRepo.GetUserLLMStored(ctx, uid); err == nil && stored != nil {
+			if strings.TrimSpace(stored.GeminiAPIKey) != "" {
+				geminiKey = strings.TrimSpace(stored.GeminiAPIKey)
+			}
+			if strings.TrimSpace(stored.GeminiModel) != "" {
+				geminiModel = strings.TrimSpace(stored.GeminiModel)
+			}
+			if strings.TrimSpace(stored.AnthropicAPIKey) != "" {
+				anthropicKey = strings.TrimSpace(stored.AnthropicAPIKey)
+			}
+			if strings.TrimSpace(stored.ClaudeModel) != "" {
+				claudeModel = strings.TrimSpace(stored.ClaudeModel)
+			}
+			if strings.TrimSpace(stored.TavilyAPIKey) != "" {
+				tavilyKey = strings.TrimSpace(stored.TavilyAPIKey)
+			}
+		}
+	}
+	if appctx.IsVisitorFromCtx(ctx) && s.userRepo != nil {
+		sid := readAuthSessionID(r, authSessionID)
+		if sid == "" {
+			return
+		}
+		vis, err := s.userRepo.GetSessionVisitorLLM(ctx, sid)
+		if err != nil || vis == nil {
+			return
+		}
+		if strings.TrimSpace(vis.GeminiAPIKey) != "" {
+			geminiKey = strings.TrimSpace(vis.GeminiAPIKey)
+		}
+		if strings.TrimSpace(vis.GeminiModel) != "" {
+			geminiModel = strings.TrimSpace(vis.GeminiModel)
+		}
+		if strings.TrimSpace(vis.AnthropicAPIKey) != "" {
+			anthropicKey = strings.TrimSpace(vis.AnthropicAPIKey)
+		}
+		if strings.TrimSpace(vis.ClaudeModel) != "" {
+			claudeModel = strings.TrimSpace(vis.ClaudeModel)
+		}
+		if strings.TrimSpace(vis.TavilyAPIKey) != "" {
+			tavilyKey = strings.TrimSpace(vis.TavilyAPIKey)
+		}
+	}
+	return
+}
+
+func (s *ChatService) effectiveGeminiProvider(ctx context.Context, r *http.Request, authSessionID string) appai.ChatProvider {
+	k, m, _, _, _ := s.effectiveAIConfig(ctx, r, authSessionID)
+	return appai.NewGeminiProvider(k, m)
+}
+
+func (s *ChatService) effectiveClaudeProvider(ctx context.Context, r *http.Request, authSessionID string) appai.ChatProvider {
+	_, _, k, m, _ := s.effectiveAIConfig(ctx, r, authSessionID)
+	return appai.NewClaudeProvider(k, m)
 }
 
 func (s *ChatService) perRequestGetRAM(r *http.Request) appai.RAMMasterGetter {
@@ -101,29 +189,35 @@ func (s *ChatService) buildChatTools(ctx context.Context, r *http.Request, subje
 		policy = s.loadToolAccessPolicy(ctx, pw)
 	}
 	filtered := appai.FilterToolDefinitionsForTier(policy, tier)
-	base := appai.NewToolExecutor(s.pool, subjectName, s.tavilyKey, s.pepper, getRAM)
+	_, _, _, _, tavily := s.effectiveAIConfig(ctx, r, "")
+	base := appai.NewToolExecutor(s.pool, subjectName, tavily, s.pepper, getRAM)
 	wrapped := appai.WrapToolExecutorWithPolicy(base, policy, tier)
 	return wrapped, &filtered
 }
 
-// GeminiAvailable reports whether the Gemini provider is configured.
-func (s *ChatService) GeminiAvailable() bool {
-	return s.geminiProvider != nil && s.geminiProvider.IsAvailable()
+// GeminiAvailable reports whether the Gemini provider is configured for this request's user (and visitor session overrides).
+func (s *ChatService) GeminiAvailable(ctx context.Context, r *http.Request) bool {
+	p := s.effectiveGeminiProvider(ctx, r, "")
+	return p != nil && p.IsAvailable()
 }
 
-// ClaudeAvailable reports whether the Claude provider is configured.
-func (s *ChatService) ClaudeAvailable() bool {
-	return s.claudeProvider != nil && s.claudeProvider.IsAvailable()
+// ClaudeAvailable reports whether the Claude provider is configured for this request's user (and visitor session overrides).
+func (s *ChatService) ClaudeAvailable(ctx context.Context, r *http.Request) bool {
+	p := s.effectiveClaudeProvider(ctx, r, "")
+	return p != nil && p.IsAvailable()
 }
 
 // GenerateResponse runs a full chat generation cycle.
 func (s *ChatService) GenerateResponse(ctx context.Context, r *http.Request, req model.ChatRequest) (*model.ChatResponse, error) {
 	// Choose provider
-	provider := s.geminiProvider
+	provider := s.effectiveGeminiProvider(ctx, r, "")
 	providerName := "gemini"
-	if req.Provider == "claude" && s.claudeProvider != nil && s.claudeProvider.IsAvailable() {
-		provider = s.claudeProvider
-		providerName = "claude"
+	if req.Provider == "claude" {
+		cp := s.effectiveClaudeProvider(ctx, r, "")
+		if cp != nil && cp.IsAvailable() {
+			provider = cp
+			providerName = "claude"
+		}
 	}
 	if provider == nil || !provider.IsAvailable() {
 		return nil, fmt.Errorf("provider '%s' is not available — check API key", providerName)
@@ -262,11 +356,14 @@ func (s *ChatService) GenerateResponse(ctx context.Context, r *http.Request, req
 // Generate A Random Question
 func (s *ChatService) GenerateRandomQuestion(ctx context.Context, r *http.Request, req model.ChatRequest) (*model.ChatResponse, error) {
 	// Choose provider
-	provider := s.geminiProvider
+	provider := s.effectiveGeminiProvider(ctx, r, "")
 	providerName := "gemini"
-	if req.Provider == "claude" && s.claudeProvider != nil && s.claudeProvider.IsAvailable() {
-		provider = s.claudeProvider
-		providerName = "claude"
+	if req.Provider == "claude" {
+		cp := s.effectiveClaudeProvider(ctx, r, "")
+		if cp != nil && cp.IsAvailable() {
+			provider = cp
+			providerName = "claude"
+		}
 	}
 	if provider == nil || !provider.IsAvailable() {
 		return nil, fmt.Errorf("provider '%s' is not available — check API key", providerName)
@@ -502,14 +599,15 @@ func (s *ChatService) TurnCountsBatch(ctx context.Context, ids []int64) (map[int
 // GenerateCompleteProfile builds a multi-step relationship profile for a contact
 // from messages and emails, using the specified AI provider (gemini or claude) to summarize,
 // and saves it to complete_profiles. Mirrors the Python base_chat_service.get_complete_profile_by_name.
-func (s *ChatService) GenerateCompleteProfile(ctx context.Context, name string, provider string, getRAM appai.RAMMasterGetter) error {
+func (s *ChatService) GenerateCompleteProfile(ctx context.Context, name string, provider string, getRAM appai.RAMMasterGetter, authSessionID string) error {
 	if getRAM == nil {
 		getRAM = func() (string, bool) { return "", false }
 	}
 	// Use the raw tool executor here, not WrapToolExecutorWithPolicy. The LLM Tools Access policy
 	// applies to in-chat tool calls; when policy is unset it denies every tool, which left profile
 	// generation with no messages/emails. Reading DB rows for an explicit profile job is not gated by that policy.
-	base := appai.NewToolExecutor(s.pool, "", s.tavilyKey, s.pepper, getRAM)
+	_, _, _, _, tavily := s.effectiveAIConfig(ctx, nil, authSessionID)
+	base := appai.NewToolExecutor(s.pool, "", tavily, s.pepper, getRAM)
 	msgsRaw, err := base(ctx, "get_imessages_by_chat_session", map[string]any{"chat_session": name})
 	if err != nil {
 		return fmt.Errorf("get messages: %w", err)
@@ -598,10 +696,12 @@ func (s *ChatService) GenerateCompleteProfile(ctx context.Context, name string, 
 	if provider == "" {
 		provider = "gemini"
 	}
-	if provider == "claude" && (s.claudeProvider == nil || !s.claudeProvider.IsAvailable()) {
+	claudeP := s.effectiveClaudeProvider(ctx, nil, authSessionID)
+	geminiP := s.effectiveGeminiProvider(ctx, nil, authSessionID)
+	if provider == "claude" && (claudeP == nil || !claudeP.IsAvailable()) {
 		provider = "gemini" // fallback
 	}
-	if provider == "gemini" && (s.geminiProvider == nil || !s.geminiProvider.IsAvailable()) {
+	if provider == "gemini" && (geminiP == nil || !geminiP.IsAvailable()) {
 		provider = "claude" // fallback
 	}
 
@@ -611,11 +711,11 @@ func (s *ChatService) GenerateCompleteProfile(ctx context.Context, name string, 
 	var ai simpleGen
 	switch provider {
 	case "claude":
-		if cp, ok := s.claudeProvider.(*appai.ClaudeProvider); ok && cp != nil {
+		if cp, ok := claudeP.(*appai.ClaudeProvider); ok && cp != nil {
 			ai = cp
 		}
 	case "gemini":
-		if gp, ok := s.geminiProvider.(*appai.GeminiProvider); ok && gp != nil {
+		if gp, ok := geminiP.(*appai.GeminiProvider); ok && gp != nil {
 			ai = gp
 		}
 	}

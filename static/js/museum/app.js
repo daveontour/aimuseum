@@ -313,6 +313,14 @@ const App = (() => {
     }
 
     function initEventListeners() {
+        function refreshSettingsDataImportModalLLM() {
+            if (typeof Modals !== 'undefined' && Modals.UserLLMSettings && Modals.UserLLMSettings.load) {
+                void Modals.UserLLMSettings.load();
+            }
+            void loadLLMProviderAvailability();
+        }
+        window.refreshSettingsDataImportModalLLM = refreshSettingsDataImportModalLLM;
+
         DOM.chatForm.addEventListener('submit', (event) => {
             event.preventDefault();
             const userPrompt = DOM.userInput.value.trim();
@@ -345,7 +353,7 @@ const App = (() => {
             DOM.hamburgerMenu.addEventListener('click', () => {
                 DOM.configPage.style.display = 'flex';
                 loadControlDefaults();
-                if (Modals.AppConfig && Modals.AppConfig.load) void Modals.AppConfig.load();
+                refreshSettingsDataImportModalLLM();
             });
         }
         if (DOM.closeConfigBtn && DOM.configPage) {
@@ -711,10 +719,6 @@ const App = (() => {
                     if (Modals.EmailClassifications && Modals.EmailClassifications.load) Modals.EmailClassifications.load();
                     if (Modals.EmailExclusions && Modals.EmailExclusions.load) Modals.EmailExclusions.load();
                 }
-                // Load configuration when Settings tab is opened (Application Configuration is in Settings)
-                if (targetTab === 'settings') {
-                    if (Modals.AppConfig && Modals.AppConfig.load) Modals.AppConfig.load();
-                }
                 // Load subject configuration when Subject Configuration tab is opened
                 if (targetTab === 'subject-configuration') {
                     if (Modals.SubjectConfiguration && Modals.SubjectConfiguration.loadAndPopulateForm) {
@@ -729,6 +733,10 @@ const App = (() => {
                 }
                 if (targetTab === 'tools-access') {
                     if (Modals.LLMToolsAccess && Modals.LLMToolsAccess.load) void Modals.LLMToolsAccess.load();
+                }
+                if (targetTab === 'settings') {
+                    if (Modals.UserLLMSettings && Modals.UserLLMSettings.load) void Modals.UserLLMSettings.load();
+                    void loadLLMProviderAvailability();
                 }
             });
         });
@@ -751,6 +759,7 @@ const App = (() => {
         // Dashboard: load stats and render. prefix: '' for config modal, 'stats-' for Statistics modal
         async function loadDashboard(prefix) {
             prefix = prefix || '';
+            const includeCharts = prefix !== 'overview-';
             const container = document.getElementById(prefix + 'dashboard-stats');
             const loadingEl = document.getElementById(prefix + 'dashboard-loading');
             const errorEl = document.getElementById(prefix + 'dashboard-load-error');
@@ -758,16 +767,18 @@ const App = (() => {
             if (loadingEl) loadingEl.style.display = 'inline';
             if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
             try {
-                const response = await fetch('/api/dashboard');
+                const response = await fetch('/api/dashboard', { credentials: 'same-origin' });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
                 if (loadingEl) loadingEl.style.display = 'none';
                 renderDashboardStats(container, data);
-                renderDashboardMessagesByYearChart(data, prefix);
-                renderDashboardEmailsByYearChart(data, prefix);
-                renderDashboardContactsByCategoryChart(data, prefix);
-                renderDashboardImagesByRegionChart(data, prefix);
-                renderDashboardMessagesByContactChart(data, prefix);
+                if (includeCharts) {
+                    renderDashboardMessagesByYearChart(data, prefix);
+                    renderDashboardEmailsByYearChart(data, prefix);
+                    renderDashboardContactsByCategoryChart(data, prefix);
+                    renderDashboardImagesByRegionChart(data, prefix);
+                    renderDashboardMessagesByContactChart(data, prefix);
+                }
             } catch (err) {
                 if (loadingEl) loadingEl.style.display = 'none';
                 if (errorEl) {
@@ -775,16 +786,18 @@ const App = (() => {
                     errorEl.textContent = err.message || 'Failed to load dashboard';
                 }
                 container.innerHTML = '';
-                const yearChart = document.getElementById(prefix + 'dashboard-messages-by-year-chart');
-                const emailsYearChart = document.getElementById(prefix + 'dashboard-emails-by-year-chart');
-                const contactsCatChart = document.getElementById(prefix + 'dashboard-contacts-by-category-chart');
-                const imagesRegionChart = document.getElementById(prefix + 'dashboard-images-by-region-chart');
-                const contactChart = document.getElementById(prefix + 'dashboard-messages-by-contact-chart');
-                if (yearChart) yearChart.innerHTML = '';
-                if (emailsYearChart) emailsYearChart.innerHTML = '';
-                if (contactsCatChart) contactsCatChart.innerHTML = '';
-                if (imagesRegionChart) imagesRegionChart.innerHTML = '';
-                if (contactChart) contactChart.innerHTML = '';
+                if (includeCharts) {
+                    const yearChart = document.getElementById(prefix + 'dashboard-messages-by-year-chart');
+                    const emailsYearChart = document.getElementById(prefix + 'dashboard-emails-by-year-chart');
+                    const contactsCatChart = document.getElementById(prefix + 'dashboard-contacts-by-category-chart');
+                    const imagesRegionChart = document.getElementById(prefix + 'dashboard-images-by-region-chart');
+                    const contactChart = document.getElementById(prefix + 'dashboard-messages-by-contact-chart');
+                    if (yearChart) yearChart.innerHTML = '';
+                    if (emailsYearChart) emailsYearChart.innerHTML = '';
+                    if (contactsCatChart) contactsCatChart.innerHTML = '';
+                    if (imagesRegionChart) imagesRegionChart.innerHTML = '';
+                    if (contactChart) contactChart.innerHTML = '';
+                }
             }
         }
 
@@ -991,6 +1004,66 @@ const App = (() => {
                     <div style="font-size:18px; font-weight:600; color:#1e293b; margin-top:4px;">${displayVal}</div>
                 </div>`;
             }).join('');
+        }
+
+        async function loadArchiveOverviewLLMStatus() {
+            const body = document.getElementById('overview-llm-status-body');
+            if (!body) return;
+            function esc(s) {
+                return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+            function row2(leftHtml, rightHtml) {
+                return `<div style="display:grid;grid-template-columns:minmax(160px,auto) 1fr;gap:8px 16px;margin-bottom:8px;align-items:start;">${leftHtml}${rightHtml}</div>`;
+            }
+            body.innerHTML = '<span style="color:#64748b;">Loading…</span>';
+            try {
+                const [avRes, meRes] = await Promise.all([
+                    fetch('/chat/availability', { credentials: 'same-origin' }),
+                    fetch('/auth/me', { credentials: 'same-origin' })
+                ]);
+                let av = {};
+                if (avRes.ok) {
+                    try { av = await avRes.json(); } catch (_) { /* ignore */ }
+                }
+                let me = null;
+                if (meRes.ok) {
+                    try { me = await meRes.json(); } catch (_) { /* ignore */ }
+                }
+                const gOk = !!av.gemini_available;
+                const cOk = !!av.claude_available;
+                const gemVal = gOk
+                    ? '<strong style="color:#15803d;">Ready</strong> — Gemini can be selected as AI Provider'
+                    : '<strong style="color:#b91c1c;">Not available</strong> — configure a Gemini API key';
+                const claVal = cOk
+                    ? '<strong style="color:#15803d;">Ready</strong> — Claude can be selected as AI Provider'
+                    : '<strong style="color:#b91c1c;">Not available</strong> — configure an Anthropic API key';
+                const parts = [];
+                parts.push(row2('<span style="color:#64748b;">Gemini</span>', `<span>${gemVal}</span>`));
+                parts.push(row2('<span style="color:#64748b;">Claude</span>', `<span>${claVal}</span>`));
+                if (me && me.llm_settings) {
+                    const ls = me.llm_settings;
+                    const sess = !!ls.session_scoped;
+                    const scope = sess ? '<span style="color:#64748b;font-weight:normal;"> — session</span>' : '<span style="color:#64748b;font-weight:normal;"> — saved on account</span>';
+                    if (ls.gemini_model) {
+                        parts.push(row2(`<span style="color:#64748b;">Gemini model${scope}</span>`, `<code style="background:#e2e8f0;padding:2px 6px;border-radius:4px;font-size:0.85rem;">${esc(ls.gemini_model)}</code>`));
+                    }
+                    if (ls.claude_model) {
+                        parts.push(row2(`<span style="color:#64748b;">Claude model${scope}</span>`, `<code style="background:#e2e8f0;padding:2px 6px;border-radius:4px;font-size:0.85rem;">${esc(ls.claude_model)}</code>`));
+                    }
+                    const tavVal = ls.tavily_api_key_set
+                        ? '<strong style="color:#15803d;">Key set</strong> — search tool can use your Tavily key' + (sess ? ' <span style="color:#64748b;font-weight:normal;">(this session)</span>' : '')
+                        : '<span style="color:#64748b;">No personal Tavily key in Settings — server default or none</span>';
+                    parts.push(row2('<span style="color:#64748b;">Tavily (web search)</span>', `<span>${tavVal}</span>`));
+                    // if (sess) {
+                    //     parts.push('<div style="margin-top:10px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:0.85rem;color:#64748b;">Visitor session: keys you leave blank use the archive owner’s saved keys when available, then server defaults.</div>');
+                    // }
+                } else if (meRes.status === 401 || !meRes.ok) {
+                    parts.push('<p style="margin:12px 0 0;font-size:0.85rem;color:#64748b;">Sign in to save personal API keys under <strong>Settings → Your API keys &amp; models</strong>.</p>');
+                }
+                body.innerHTML = parts.join('');
+            } catch (e) {
+                body.textContent = 'Could not load AI configuration status.';
+            }
         }
 
 
@@ -2697,9 +2770,7 @@ const App = (() => {
                         if (tabBtn) {
                             tabBtn.click();
                         }
-                        if (openTab === 'settings' && Modals.AppConfig && Modals.AppConfig.load) {
-                            void Modals.AppConfig.load();
-                        }
+                        refreshSettingsDataImportModalLLM();
                     }
                     return;
                 }
@@ -2904,7 +2975,7 @@ const App = (() => {
             settingsDataImportSidebarBtn.addEventListener('click', () => {
                 DOM.configPage.style.display = 'flex';
                 loadControlDefaults();
-                if (Modals.AppConfig && Modals.AppConfig.load) Modals.AppConfig.load();
+                refreshSettingsDataImportModalLLM();
             });
         }
 
@@ -3146,13 +3217,21 @@ const App = (() => {
             });
         }
 
+        (function setupWelcomeArchiveOverviewSection() {
+            const welcomeModal = document.getElementById('info-box-modal');
+            if (!welcomeModal || welcomeModal.classList.contains('info-box-modal-closed')) return;
+            if (!document.getElementById('overview-llm-status-body')) return;
+            void loadArchiveOverviewLLMStatus();
+            void loadDashboard('overview-');
+        })();
+
     }
 
     async function loadLLMProviderAvailability() {
         const select = DOM.llmProviderSelect;
         if (!select) return;
         try {
-            const res = await fetch('/chat/availability');
+            const res = await fetch('/chat/availability', { credentials: 'same-origin' });
             if (!res.ok) return;
             const { gemini_available, claude_available } = await res.json();
             const geminiOpt = select.querySelector('option[value="gemini"]');
@@ -3229,7 +3308,7 @@ const App = (() => {
             if (!geminiOk && !claudeOk && Modals.ConfirmationModal) {
                 Modals.ConfirmationModal.open(
                     'No AI Provider Available',
-                    'No LLM provider is available. AI functions will not be available until at least one API key (Gemini or Anthropic) is configured in the Application Configuration.',
+                    'No LLM provider is available. AI functions will not be available until at least one API key (Gemini or Anthropic) is set in the server environment (for example in the .env file).',
                     undefined
                 );
             }
@@ -3268,11 +3347,6 @@ const App = (() => {
             obs.observe(el, { attributes: true, attributeFilter: ['style'] });
         })();
         loadLLMProviderAvailability();
-        try {
-            if (Modals.AppConfig && Modals.AppConfig.load) void Modals.AppConfig.load();
-        } catch (e) {
-            console.warn('Application configuration preload failed:', e);
-        }
 
         const mkSkip = document.getElementById('master-key-unlock-skip');
         const mkSubmit = document.getElementById('master-key-unlock-submit');

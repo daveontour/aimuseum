@@ -71,16 +71,25 @@ func (s *VisitorService) ResolveUserID(ctx context.Context, identifier string) (
 }
 
 // GetHintsByEmail returns the plain-text hint strings for the archive owner
-// identified by email. Returns an empty slice (never nil) when the email is
-// unknown — deliberately avoids confirming or denying the email's existence.
+// identified by email (case-insensitive) or, if no user matches that email,
+// by full name as parsed by UserRepo.FindByFullName (first token = first name,
+// rest = family name). Returns an empty slice (never nil) when unknown —
+// deliberately avoids confirming or denying existence except on ambiguous name match.
 func (s *VisitorService) GetHintsByEmail(ctx context.Context, email string) ([]string, error) {
-	email = strings.ToLower(strings.TrimSpace(email))
-	u, err := s.users.FindByEmail(ctx, email)
+	trimmed := strings.TrimSpace(email)
+	normEmail := strings.ToLower(trimmed)
+	u, err := s.users.FindByEmail(ctx, normEmail)
 	if err != nil {
 		return []string{}, err
 	}
 	if u == nil {
-		return []string{}, nil
+		u, err = s.users.FindByFullName(ctx, trimmed)
+		if err != nil {
+			return []string{}, err
+		}
+		if u == nil {
+			return []string{}, nil
+		}
 	}
 
 	dCtx := context.WithValue(ctx, appctx.ContextKeyUserID, u.ID)

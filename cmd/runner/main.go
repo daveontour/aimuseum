@@ -24,6 +24,9 @@ import (
 	"syscall"
 	"time"
 
+	"mime"
+	"path/filepath"
+
 	"github.com/daveontour/aimuseum/internal/config"
 	"github.com/daveontour/aimuseum/internal/database"
 	contactsimport "github.com/daveontour/aimuseum/internal/import/contacts"
@@ -40,8 +43,6 @@ import (
 	whatsappimport "github.com/daveontour/aimuseum/internal/import/whatsapp"
 	"github.com/daveontour/aimuseum/internal/importstorage"
 	"github.com/daveontour/aimuseum/internal/repository"
-	"mime"
-	"path/filepath"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -114,11 +115,11 @@ type JobConfig struct {
 	Files []ReferenceFileEntry `json:"files"`
 
 	// ── IMAP ────────────────────────────────────────────────────────────────
-	IMAPHost       string   `json:"imap_host"`
-	IMAPPort       int      `json:"imap_port"`
-	IMAPUsername   string   `json:"imap_username"`
-	IMAPPassword   string   `json:"imap_password"`
-	IMAPUseSSL     bool     `json:"imap_use_ssl"`
+	IMAPHost           string   `json:"imap_host"`
+	IMAPPort           int      `json:"imap_port"`
+	IMAPUsername       string   `json:"imap_username"`
+	IMAPPassword       string   `json:"imap_password"`
+	IMAPUseSSL         bool     `json:"imap_use_ssl"`
 	IMAPFolders        []string `json:"imap_folders"`
 	IMAPAllFolders     bool     `json:"imap_all_folders"`
 	IMAPExcludeFolders []string `json:"imap_exclude_folders"`

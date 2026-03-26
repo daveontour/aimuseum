@@ -1216,10 +1216,108 @@ body {
     max-height: 90vh;
     overflow-y: auto;
 }
+
+/* Welcome + archive overview: 30% wider than former 1000px, fixed 80vh; bottom section scrolls */
+.info-box.info-box-welcome-extended {
+    width: 1300px;
+    max-width: min(1300px, 96vw);
+    height: 80vh;
+    max-height: 80vh;
+    min-width: 0;
+    align-items: stretch;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+.info-box-modal .info-box.info-box-welcome-extended {
+    max-height: 80vh;
+}
+.info-box-welcome-top {
+    flex-shrink: 0;
+    max-height: 42vh;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    width: 100%;
+    box-sizing: border-box;
+}
+.info-box-archive-overview {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden;
+    overflow-y: auto;
+    width: 100%;
+    margin-top: 0.5rem;
+    padding-top: 1rem;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+.info-box-archive-overview-title {
+    margin: 0 0 0.75rem 0;
+    font-size: 1.15rem;
+    color: #1e293b;
+    text-align: center;
+    width: 100%;
+}
+.info-box-overview-llm {
+    margin-bottom: 1rem;
+    padding: 14px 16px;
+    background: #f8fafc;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+}
+.info-box-overview-llm-heading {
+    margin: 0 0 10px 0;
+    font-size: 1rem;
+    color: #1e293b;
+}
+.info-box-overview-llm-body {
+    font-size: 0.9rem;
+    color: #334155;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+.info-box-archive-overview code {
+    word-break: break-all;
+}
+.info-box-archive-metrics-heading {
+    font-size: 1rem;
+    margin: 0 0 10px;
+    color: #1e293b;
+}
+.info-box-archive-metrics-intro {
+    margin: 0 0 12px;
+    font-size: 0.85rem;
+    color: #64748b;
+}
+.info-box-dashboard-loading {
+    color: #64748b;
+    font-size: 0.9rem;
+    display: none;
+}
+.info-box-dashboard-load-error {
+    padding: 10px;
+    background: #fee;
+    color: #c00;
+    border-radius: 4px;
+    margin-bottom: 12px;
+}
+.info-box-dashboard-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
+    gap: 12px;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
 .info-box-close-btn {
     position: absolute;
-    top: 12px;
-    right: 18px;
+    top: 8px;
+    right: 12px;
     font-size: 1.7rem;
     background: none;
     border: none;
@@ -1265,6 +1363,24 @@ body {
     margin-bottom: 1.5rem;
     text-align: center;
     width: 100%;
+}
+
+/* Welcome dialog: museum icon + title (matches login page landmark) */
+.info-box h2.info-box-welcome-main-heading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    text-align: center;
+}
+.info-box .info-box-welcome-museum-icon {
+    color: #3b82f6;
+    font-size: 1.2em;
+    line-height: 1;
+}
+.info-box .info-box-welcome-title-text {
+    text-align: center;
 }
 
 .info-box-content-wrapper {
@@ -1760,6 +1876,15 @@ body {
 .config-header h2 {
     margin: 0;
     color: var(--color-text);
+}
+
+.config-tabs-sidebar .config-tab-label {
+    display: block;
+    margin-left: 10px;
+    margin-top: 10px;
+    font-weight: bold;
+    font-size: 14px;
+    color: var(--color-text-muted);
 }
 
 .config-tab-button {

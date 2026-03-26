@@ -10,6 +10,7 @@ import (
 	"time"
 
 	appai "github.com/daveontour/aimuseum/internal/ai"
+	"github.com/daveontour/aimuseum/internal/appctx"
 	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/model"
 	"github.com/daveontour/aimuseum/internal/repository"
@@ -52,8 +53,8 @@ func (h *ChatHandler) RegisterRoutes(r chi.Router) {
 // GET /chat/availability
 func (h *ChatHandler) GetAvailability(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]bool{
-		"gemini_available": h.svc.GeminiAvailable(),
-		"claude_available": h.svc.ClaudeAvailable(),
+		"gemini_available": h.svc.GeminiAvailable(r.Context(), r),
+		"claude_available": h.svc.ClaudeAvailable(r.Context(), r),
 	})
 }
 
@@ -421,10 +422,21 @@ func (h *ChatHandler) CompleteProfileStart(w http.ResponseWriter, r *http.Reques
 			getRAM = func() (string, bool) { return pw, true }
 		}
 	}
+	authSid := ""
+	if c, err := r.Cookie(service.AuthSessionCookieName); err == nil && c != nil {
+		authSid = c.Value
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		base := context.Background()
+		if uid := appctx.UserIDFromCtx(r.Context()); uid != 0 {
+			base = context.WithValue(base, appctx.ContextKeyUserID, uid)
+		}
+		if appctx.IsVisitorFromCtx(r.Context()) {
+			base = context.WithValue(base, appctx.ContextKeyIsVisitor, true)
+		}
+		ctx, cancel := context.WithTimeout(base, 10*time.Minute)
 		defer cancel()
-		if err := h.svc.GenerateCompleteProfile(ctx, name, provider, getRAM); err != nil {
+		if err := h.svc.GenerateCompleteProfile(ctx, name, provider, getRAM, authSid); err != nil {
 			slog.Error("complete_profile failed", "name", name, "err", err)
 		}
 	}()

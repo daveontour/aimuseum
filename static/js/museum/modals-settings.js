@@ -1273,6 +1273,9 @@ Modals.SubjectConfiguration = (() => {
                     DOM.configPage.style.display = 'flex';
                     const subjectTabBtn = document.querySelector('.config-tab-button[data-tab="subject-configuration"]');
                     if (subjectTabBtn) subjectTabBtn.click();
+                    if (typeof window.refreshSettingsDataImportModalLLM === 'function') {
+                        window.refreshSettingsDataImportModalLLM();
+                    }
                 }
             }
         }
@@ -2303,6 +2306,7 @@ Modals.initAll = () => {
         if (Modals.EmailExclusions && Modals.EmailExclusions.init) Modals.EmailExclusions.init();
         if (Modals.PreviousResponses && Modals.PreviousResponses.init) Modals.PreviousResponses.init();
         if (Modals.SaveResponseTitle && Modals.SaveResponseTitle.init) Modals.SaveResponseTitle.init();
+        if (Modals.UserLLMSettings && Modals.UserLLMSettings.init) Modals.UserLLMSettings.init();
         if (typeof HaveAChat !== 'undefined' && HaveAChat.init) HaveAChat.init();
 };
 
@@ -3585,6 +3589,8 @@ Modals.AppConfig = (() => {
     }
 
     async function load() {
+        const tbody = document.getElementById('cfg-table-body');
+        if (!tbody) return;
         try {
             setStatus('Loading…');
             const res = await fetch('/api/configuration');
@@ -3608,11 +3614,6 @@ Modals.AppConfig = (() => {
                 throw new Error('Server returned non-array JSON');
             }
             rows.sort((a, b) => (b.is_mandatory ? 1 : 0) - (a.is_mandatory ? 1 : 0));
-            const tbody = document.getElementById('cfg-table-body');
-            if (!tbody) {
-                setStatus('Configuration table not found in page.', '#c00');
-                return;
-            }
             tbody.innerHTML = '';
             rows.forEach(cfg => tbody.appendChild(_renderRow(cfg)));
             if (rows.length === 0) {
@@ -3706,8 +3707,171 @@ Modals.AppConfig = (() => {
     };
 })();
 
-// Inline onclick in index.template.html uses AppConfig.* — must be on window.
+// Expose for console / future UI if Application Configuration is re-added.
 window.AppConfig = Modals.AppConfig;
+
+// --- Per-user LLM / Tavily overrides (Settings tab) ---
+Modals.UserLLMSettings = (() => {
+    function getEl(id) {
+        return document.getElementById(id);
+    }
+
+    function setHint(elId, saved, sessionScoped) {
+        const el = getEl(elId);
+        if (!el) return;
+        if (!saved) {
+            el.textContent = '';
+            return;
+        }
+        el.textContent = sessionScoped ? '(set for this visit only)' : '(saved on your account)';
+    }
+
+    function setStatus(msg, color) {
+        const el = getEl('user-llm-status');
+        if (el) {
+            el.textContent = msg || '';
+            el.style.color = color || '#666';
+        }
+    }
+
+    async function patchLLM(body) {
+        const res = await fetch('/auth/me/llm-settings', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+            let detail = await res.text();
+            try {
+                const j = JSON.parse(detail);
+                if (j && j.error) detail = j.error;
+                else if (j && j.detail) detail = j.detail;
+            } catch (_) { /* keep text */ }
+            throw new Error(detail || res.statusText);
+        }
+    }
+
+    async function load() {
+        const section = getEl('user-llm-settings-section');
+        if (!section) return;
+        setStatus('', '#666');
+        try {
+            const res = await fetch('/auth/me', { credentials: 'same-origin' });
+            if (!res.ok) {
+                section.style.display = 'none';
+                return;
+            }
+            const data = await res.json();
+            section.style.display = 'block';
+            const llm = data.llm_settings || {};
+            const sessionScoped = !!llm.session_scoped;
+            const intro = getEl('user-llm-intro');
+            if (intro) {
+                if (sessionScoped) {
+                    intro.textContent = 'Optional overrides for this visit only. Values are stored on your session and cleared when you sign out or the session expires. Leave a field blank to use the archive owner’s saved keys and models where available, then server defaults.';
+                } else {
+                    intro.textContent = 'Optional overrides for chat and web search tools. When set, your values replace server defaults (for example from .env on the server). Keys are stored on your account and are not shown again after saving — leave a key field blank to keep your current saved key, or use Clear to remove your override.';
+                }
+            }
+            const subEl = getEl('user-llm-subject-hints');
+            if (subEl) {
+                if (sessionScoped) {
+                    const parts = [];
+                    if (llm.subject_gemini_api_key_set) parts.push('Gemini API key');
+                    if (llm.subject_anthropic_key_set) parts.push('Anthropic API key');
+                    if (llm.subject_tavily_key_set) parts.push('Tavily API key');
+                    if (llm.subject_gemini_model) parts.push('Gemini model "' + llm.subject_gemini_model + '"');
+                    if (llm.subject_claude_model) parts.push('Claude model "' + llm.subject_claude_model + '"');
+                    subEl.textContent = parts.length
+                        ? ('When you leave a field blank, the owner’s saved settings apply where available, then server defaults. Owner has: ' + parts.join('; ') + '.')
+                        : 'The archive owner has not saved personal API keys or models in Settings — blank fields use server defaults only.';
+                    subEl.style.display = 'block';
+                } else {
+                    subEl.textContent = '';
+                    subEl.style.display = 'none';
+                }
+            }
+            setHint('user-llm-gemini-key-hint', !!llm.gemini_api_key_set, sessionScoped);
+            setHint('user-llm-anthropic-key-hint', !!llm.anthropic_api_key_set, sessionScoped);
+            setHint('user-llm-tavily-key-hint', !!llm.tavily_api_key_set, sessionScoped);
+            const gm = getEl('user-llm-gemini-model');
+            const cm = getEl('user-llm-claude-model');
+            if (gm) {
+                gm.value = llm.gemini_model || '';
+                gm.placeholder = sessionScoped ? 'Empty = owner’s model, then server default' : 'e.g. gemini-2.5-flash (empty = server default)';
+            }
+            if (cm) {
+                cm.value = llm.claude_model || '';
+                cm.placeholder = sessionScoped ? 'Empty = owner’s model, then server default' : 'e.g. claude-sonnet-4-6 (empty = server default)';
+            }
+            const gk = getEl('user-llm-gemini-key');
+            const ak = getEl('user-llm-anthropic-key');
+            const tk = getEl('user-llm-tavily-key');
+            const keyPh = sessionScoped ? 'Leave blank to use the owner’s key or server default' : 'Leave blank to keep your saved key';
+            if (gk) {
+                gk.value = '';
+                gk.placeholder = keyPh;
+            }
+            if (ak) {
+                ak.value = '';
+                ak.placeholder = keyPh;
+            }
+            if (tk) {
+                tk.value = '';
+                tk.placeholder = keyPh;
+            }
+            const saveBtn = getEl('user-llm-save-btn');
+            if (saveBtn) saveBtn.textContent = sessionScoped ? 'Save for this session' : 'Save LLM settings';
+        } catch (e) {
+            section.style.display = 'none';
+        }
+    }
+
+    async function save() {
+        setStatus('Saving…', '#666');
+        const body = {};
+        const gk = (getEl('user-llm-gemini-key') && getEl('user-llm-gemini-key').value) || '';
+        const ak = (getEl('user-llm-anthropic-key') && getEl('user-llm-anthropic-key').value) || '';
+        const tk = (getEl('user-llm-tavily-key') && getEl('user-llm-tavily-key').value) || '';
+        if (gk.trim()) body.gemini_api_key = gk.trim();
+        if (ak.trim()) body.anthropic_api_key = ak.trim();
+        if (tk.trim()) body.tavily_api_key = tk.trim();
+        body.gemini_model = (getEl('user-llm-gemini-model') && getEl('user-llm-gemini-model').value.trim()) || '';
+        body.claude_model = (getEl('user-llm-claude-model') && getEl('user-llm-claude-model').value.trim()) || '';
+        try {
+            await patchLLM(body);
+            setStatus('Saved.', '#2a7a2a');
+            await load();
+        } catch (e) {
+            setStatus(e.message || 'Save failed', '#c00');
+        }
+    }
+
+    async function clearField(apiField) {
+        setStatus('Clearing…', '#666');
+        try {
+            await patchLLM({ [apiField]: '' });
+            setStatus('Cleared.', '#2a7a2a');
+            await load();
+        } catch (e) {
+            setStatus(e.message || 'Clear failed', '#c00');
+        }
+    }
+
+    function init() {
+        const saveBtn = getEl('user-llm-save-btn');
+        if (saveBtn) saveBtn.addEventListener('click', () => void save());
+        const cg = getEl('user-llm-clear-gemini');
+        if (cg) cg.addEventListener('click', () => void clearField('gemini_api_key'));
+        const ca = getEl('user-llm-clear-anthropic');
+        if (ca) ca.addEventListener('click', () => void clearField('anthropic_api_key'));
+        const ct = getEl('user-llm-clear-tavily');
+        if (ct) ct.addEventListener('click', () => void clearField('tavily_api_key'));
+    }
+
+    return { load, init };
+})();
 
 // --- Custom Voices (Settings Tab) ---
 Modals.CustomVoices = (() => {

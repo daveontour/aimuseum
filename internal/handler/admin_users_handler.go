@@ -142,6 +142,8 @@ func (h *AdminUsersHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		ID          int64  `json:"id"`
 		Email       string `json:"email"`
 		DisplayName string `json:"display_name"`
+		FirstName   string `json:"first_name"`
+		FamilyName  string `json:"family_name"`
 		IsActive    bool   `json:"is_active"`
 		CreatedAt   string `json:"created_at"`
 	}
@@ -151,6 +153,8 @@ func (h *AdminUsersHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 			ID:          u.ID,
 			Email:       u.Email,
 			DisplayName: u.DisplayName,
+			FirstName:   u.FirstName,
+			FamilyName:  u.FamilyName,
 			IsActive:    u.IsActive,
 			CreatedAt:   u.CreatedAt.Format(time.RFC3339),
 		})
@@ -210,7 +214,8 @@ func (h *AdminUsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to hash password")
 		return
 	}
-	user, err := h.userRepo.Create(r.Context(), req.Email, hash, req.DisplayName)
+	familyName := strings.TrimSpace(req.FamilyName)
+	user, err := h.userRepo.Create(r.Context(), req.Email, hash, req.DisplayName, req.DisplayName, familyName)
 	if err != nil {
 		writeError(w, http.StatusConflict, "could not create user — email may already be registered")
 		return
@@ -224,7 +229,6 @@ func (h *AdminUsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create the subject configuration.
-	familyName := strings.TrimSpace(req.FamilyName)
 	gender := req.Gender
 	if _, err := h.subjectConfigSvc.CreateOrUpdate(userCtx, service.SubjectConfigUpdateParams{
 		SubjectName: req.DisplayName,
@@ -239,6 +243,8 @@ func (h *AdminUsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		"id":           user.ID,
 		"email":        user.Email,
 		"display_name": user.DisplayName,
+		"first_name":   user.FirstName,
+		"family_name":  user.FamilyName,
 	})
 }
 

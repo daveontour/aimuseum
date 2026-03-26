@@ -364,7 +364,7 @@
                 </div>
                 <div class="config-modal-body">
                     <div class="config-tabs-sidebar">
-                        <label class="config-tab-label" style="margin-left: 10px; font-weight: bold; margin-top: 10px; color: cadetblue;">App & Subject Settings</label>
+                        <label class="config-tab-label">App & Subject Settings</label>
                         <button type="button" class="config-tab-button active" data-tab="settings">
                             <i class="fas fa-cog"></i> Settings
                         </button>
@@ -377,14 +377,14 @@
                         <button type="button" class="config-tab-button config-sidebar-requires-master" data-tab="manage-contacts">
                             <i class="fas fa-address-book"></i> Manage Contacts
                         </button>
-                        <label class="config-tab-label config-sidebar-requires-master" style="margin-left: 10px; font-weight: bold; margin-top: 10px; color: cadetblue;">Personal Data</label>
+                        <label class="config-tab-label config-sidebar-requires-master">Personal Data</label>
                         <button type="button" class="config-tab-button config-sidebar-requires-master" data-tab="manage-imported-data">
                             <i class="fas fa-database"></i> Manage Imported Data
                         </button>
                         <button type="button" class="config-tab-button config-sidebar-requires-master" data-tab="interests">
                             <i class="fas fa-star"></i> Interests
                         </button>
-                        <label class="config-tab-label config-sidebar-requires-master" style="margin-left: 10px; font-weight: bold; margin-top: 10px; color: cadetblue;">Manage Secure Data Access</label>
+                        <label class="config-tab-label config-sidebar-requires-master">Manage Secure Data Access</label>
                         <button type="button" class="config-tab-button config-sidebar-requires-master" data-tab="manage-keys">
                             <i class="fas fa-key"></i> Manage Keys
                         </button>
@@ -431,37 +431,37 @@
                         </div>
                     </section>
                     </div>
-                    <section class="config-section">
-                        <h3>Application Configuration</h3>
-                        <p style="color:#666; margin-bottom:16px">
-                            Key-value pairs stored in the database. Values here override the <code>.env</code> file.
-                            Delete a key to revert to the <code>.env</code> value.
-                        </p>
-                        <div style="display:flex; gap:8px; margin-bottom:16px; align-items:flex-end; flex-wrap:wrap">
-                            <input id="cfg-new-key" class="modal-input" placeholder="Key" style="flex:1; min-width:180px">
-                            <input id="cfg-new-value" class="modal-input" placeholder="Value" style="flex:2; min-width:200px">
-                            <label style="display:flex;align-items:center;gap:4px;font-size:13px">
-                                <input type="checkbox" id="cfg-new-mandatory"> Mandatory
-                            </label>
-                            <button class="modal-btn modal-btn-primary" onclick="Modals.AppConfig.save()">Save</button>
-                            <button class="modal-btn modal-btn-secondary" onclick="Modals.AppConfig.seed()">Seed from .env</button>
+                    <section class="config-section" id="user-llm-settings-section" style="display:none;">
+                        <h3>Your API keys &amp; models</h3>
+                        <p id="user-llm-intro" style="color:#666; font-size:0.9rem; margin-bottom:8px; max-width:52rem;"></p>
+                        <p id="user-llm-subject-hints" style="color:#555; font-size:0.85rem; margin-bottom:12px; max-width:52rem;"></p>
+                        <div class="setting-group">
+                            <label for="user-llm-gemini-key">Gemini API key <span id="user-llm-gemini-key-hint" style="color:#888;font-weight:normal;"></span></label>
+                            <input type="password" id="user-llm-gemini-key" class="modal-input" style="width:100%;max-width:32rem;" autocomplete="off">
+                            <button type="button" class="modal-btn modal-btn-secondary" id="user-llm-clear-gemini" style="margin-top:6px;">Clear Gemini key override</button>
                         </div>
-                        <table id="cfg-table" style="width:100%; border-collapse:collapse; font-size:13px">
-                            <thead>
-                                <tr style="background:#e9ecef; text-align:left">
-                                    <th style="padding:8px">Key</th>
-                                    <th style="padding:8px">Value</th>
-                                    <th style="padding:8px; text-align:center">Mandatory</th>
-                                    <th style="padding:8px">Description</th>
-                                    <th style="padding:8px">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="cfg-table-body"></tbody>
-                        </table>
-                        <p id="cfg-status" style="margin-top:10px; font-size:13px; color:#666"></p>
-                        <p style="margin-top:16px; font-size:12px; color:#666; font-style:italic">
-                            Note: Either the Gemini API key or the Anthropic API key, or both, must be set to use the AI features of the system.
-                        </p>
+                        <div class="setting-group">
+                            <label for="user-llm-gemini-model">Gemini model name</label>
+                            <input type="text" id="user-llm-gemini-model" class="modal-input" style="width:100%;max-width:32rem;">
+                        </div>
+                        <div class="setting-group">
+                            <label for="user-llm-anthropic-key">Anthropic API key <span id="user-llm-anthropic-key-hint" style="color:#888;font-weight:normal;"></span></label>
+                            <input type="password" id="user-llm-anthropic-key" class="modal-input" style="width:100%;max-width:32rem;" autocomplete="off">
+                            <button type="button" class="modal-btn modal-btn-secondary" id="user-llm-clear-anthropic" style="margin-top:6px;">Clear Anthropic key override</button>
+                        </div>
+                        <div class="setting-group">
+                            <label for="user-llm-claude-model">Claude model name</label>
+                            <input type="text" id="user-llm-claude-model" class="modal-input" style="width:100%;max-width:32rem;">
+                        </div>
+                        <div class="setting-group">
+                            <label for="user-llm-tavily-key">Tavily API key <span id="user-llm-tavily-key-hint" style="color:#888;font-weight:normal;"></span></label>
+                            <input type="password" id="user-llm-tavily-key" class="modal-input" style="width:100%;max-width:32rem;" autocomplete="off">
+                            <button type="button" class="modal-btn modal-btn-secondary" id="user-llm-clear-tavily" style="margin-top:6px;">Clear Tavily key override</button>
+                        </div>
+                        <div class="setting-group" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                            <button type="button" class="modal-btn modal-btn-primary" id="user-llm-save-btn">Save LLM settings</button>
+                            <span id="user-llm-status" style="font-size:0.9rem;color:#666;"></span>
+                        </div>
                     </section>
                     <!-- <section class="config-section">
                         <h3>Database Maintenance</h3>
@@ -753,7 +753,7 @@
                         <div class="manage-contacts-tabs" style="display: flex; flex-direction: row; border-bottom: 2px solid #bfc9da; margin-bottom: 0.5em; flex-shrink: 0;">
                             <button type="button" class="manage-contacts-tab-btn active" data-manage-contacts-tab="email-matches">Email Matches</button>
                             <button type="button" class="manage-contacts-tab-btn" data-manage-contacts-tab="email-exclusions">Email Exclusions</button>
-                            <button type="button" class="manage-contacts-tab-btn" data-manage-contacts-tab="email-classifications">Email Classifications</button>
+                            <button type="button" class="manage-contacts-tab-btn" data-manage-contacts-tab="email-classifications">Contact Classifications</button>
                         </div>
                         <div id="email-matches-tab-content" class="manage-contacts-tab-content active" style="flex-direction: column; flex: 1; min-height: 0; overflow: hidden;">
                             <div class="setting-group" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
@@ -3413,69 +3413,82 @@
     </div>
 
     <!-- Info box modal at body level for reliable overlay and event handling -->
-    <div id="info-box-modal" class="modal info-box-modal"  onclick="if(event.target===this) window.closeInfoBoxModal && window.closeInfoBoxModal()">
-        <div id="info-box" class="info-box modal-content" style="width:1000px;padding-left: 2rem;" onclick="event.stopPropagation()">
+    <div id="info-box-modal" class="modal info-box-modal" style="border-color: aliceblue;" onclick="if(event.target===this) window.closeInfoBoxModal && window.closeInfoBoxModal()">
+        <div id="info-box" class="info-box modal-content info-box-welcome-extended" onclick="event.stopPropagation()">
             <button type="button" id="info-box-close-btn" class="info-box-close-btn" title="Close" onclick="window.closeInfoBoxModal && window.closeInfoBoxModal()">&times;</button>
-            <div class="info-box-content-wrapper" style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 2rem;height:280px">
-                <div class="info-content" style="width: 50%;">
-                    <h2>{{ page_title }}</h2>
+            <div class="info-box-welcome-top">
+            <div class="info-box-content-wrapper" style="display: flex; flex-direction: row; justify-content: space-between; align-items: flex-start; gap: 2rem;">
+                <div class="info-content" style="width: 45%;">
+                    <h2 class="info-box-welcome-main-heading"><i class="fas fa-landmark info-box-welcome-museum-icon" aria-hidden="true" style="color: black;"></i><span class="info-box-welcome-title-text">{{ page_title }}</span></h2>
                     <ul>
-                        <li>Select a voice from the sidebar to get responses from different perspectives</li>
+                        <li>Select a voice from the top toolbar to get responses from different perspectives</li>
                         <li>If you choose "{{owner}}'s own voice", you can also select his current mood</li>
                         <li>Type your questions about {{owner}} in the chat box below</li>
-                        <li>Click "Suggestions" for some useful, provocative or fun suggestions</li>
+                        <li>Explore the archive by using the tools on the side bars</li>
+                        <li>Use the "Have a Chat" button and "Random Question" to prompt the AI to answer questions about {{owner}}</li>
                     </ul>
                 </div>
-                <div id="voice-preview" class="voice-preview" style="width: 50%;display: inline;">
+                <div id="voice-preview" class="voice-preview" style="width: 20%;display: inline;">
                     <p style="font-weight: bold; color: #2c3e50; margin-bottom: 0.5rem; font-size: 1.1em;">Current Voice</p>
                     <img src="/static/images/expert.png" alt="expert character" class="preview-image">
                     <p class="preview-description">A knowledgeable expert who provides accurate, factual information</p>
                 </div>
-            </div>
+            
 
-            <div class="voice-flow-container" style="display: grid; grid-template-rows: repeat(2, 1fr); grid-template-columns: repeat(7, 1fr); gap: 15px;">
-                <div class="voice-icon-wrapper" data-voice="owner" data-description="{{owner}}'s own voice">
-                    <img src="/static/images/{{owner_image_small}}" alt="owner" class="voice-icon">
+                <div class="voice-flow-container" style="width:35%;display: grid; grid-template-rows: repeat(3, 1fr); grid-template-columns: repeat(5, 1fr); gap: 2px;">
+                    <div class="voice-icon-wrapper" data-voice="owner" data-description="{{owner}}'s own voice">
+                        <img src="/static/images/{{owner_image_small}}" alt="owner" class="voice-icon">
+                    </div>
+                    <div class="voice-icon-wrapper" data-voice="expert" data-description="Expert analysis of {{owner}}'s situation">
+                        <img src="/static/images/expert_sm.png" alt="expert" class="voice-icon">
+                    </div>
+                    <div class="voice-icon-wrapper" data-voice="male_friend" data-description="A close male friend's view of {{owner}}">
+                        <img src="/static/images/male-friend_sm.png" alt="male-friend" class="voice-icon">
+                    </div>
+                    <div class="voice-icon-wrapper" data-voice="female_friend" data-description="A female friend's perspective on {{owner}}">
+                        <img src="/static/images/female-friend_sm.png" alt="female-friend" class="voice-icon">
+                    </div>
+                    <div class="voice-icon-wrapper" data-voice="psychologist" data-description="A professional psychological analysis">
+                        <img src="/static/images/psychologist_sm.png" alt="psychologist" class="voice-icon">
+                    </div>
+                    <div class="voice-icon-wrapper" data-voice="after_death" data-description="{{owner}}'s story from beyond">
+                        <img src="/static/images/after-death_sm.png" alt="after-death" class="voice-icon">
+                    </div>
+                    <div class="voice-icon-wrapper" data-voice="irish" data-description="An Irish perspective on {{owner}}">
+                        <img src="/static/images/irish_sm.png" alt="irish" class="voice-icon">
+                    </div>
+                    <div class="voice-icon-wrapper" data-voice="secret_admirer" data-description="A secret admirer's loving perspective">
+                        <img src="/static/images/{{admirer_image_small}}" alt="secret-admirer" class="voice-icon">
+                    </div>
+                    <div class="voice-icon-wrapper" data-voice="haiku" data-description="{{owner}}'s story in Haiku form">
+                        <img src="/static/images/haiku_sm.png" alt="haiku" class="voice-icon">
+                    </div>
+                    <div class="voice-icon-wrapper" data-voice="insult" data-description="A critical view of {{owner}}">
+                        <img src="/static/images/insult_sm.png" alt="insult" class="voice-icon">
+                    </div>
+                    <div class="voice-icon-wrapper" data-voice="earthchild" data-description="A nature-connected perspective">
+                        <img src="/static/images/earthchild_sm.png" alt="earthchild" class="voice-icon">
+                    </div>
+                    <div class="voice-icon-wrapper" data-voice="bar_girl" data-description="A bar girl's unique observations">
+                        <img src="/static/images/bar-girl_sm.png" alt="bar-girl" class="voice-icon">
+                    </div>
+                    <div class="voice-icon-wrapper" data-voice="parents" data-description="{{owner}}'s parents' perspective">
+                        <img src="/static/images/parents_sm.png" alt="parents" class="voice-icon">
+                    </div>
+                    <div class="voice-icon-wrapper" data-voice="preacher" data-description="A spiritual interpretation">
+                        <img src="/static/images/preacher_sm.png" alt="preacher" class="voice-icon">
+                    </div>
                 </div>
-                <div class="voice-icon-wrapper" data-voice="expert" data-description="Expert analysis of {{owner}}'s situation">
-                    <img src="/static/images/expert_sm.png" alt="expert" class="voice-icon">
-                </div>
-                <div class="voice-icon-wrapper" data-voice="male_friend" data-description="A close male friend's view of {{owner}}">
-                    <img src="/static/images/male-friend_sm.png" alt="male-friend" class="voice-icon">
-                </div>
-                <div class="voice-icon-wrapper" data-voice="female_friend" data-description="A female friend's perspective on {{owner}}">
-                    <img src="/static/images/female-friend_sm.png" alt="female-friend" class="voice-icon">
-                </div>
-                <div class="voice-icon-wrapper" data-voice="psychologist" data-description="A professional psychological analysis">
-                    <img src="/static/images/psychologist_sm.png" alt="psychologist" class="voice-icon">
-                </div>
-                <div class="voice-icon-wrapper" data-voice="after_death" data-description="{{owner}}'s story from beyond">
-                    <img src="/static/images/after-death_sm.png" alt="after-death" class="voice-icon">
-                </div>
-                <div class="voice-icon-wrapper" data-voice="irish" data-description="An Irish perspective on {{owner}}">
-                    <img src="/static/images/irish_sm.png" alt="irish" class="voice-icon">
-                </div>
-                <div class="voice-icon-wrapper" data-voice="secret_admirer" data-description="A secret admirer's loving perspective">
-                    <img src="/static/images/{{admirer_image_small}}" alt="secret-admirer" class="voice-icon">
-                </div>
-                <div class="voice-icon-wrapper" data-voice="haiku" data-description="{{owner}}'s story in Haiku form">
-                    <img src="/static/images/haiku_sm.png" alt="haiku" class="voice-icon">
-                </div>
-                <div class="voice-icon-wrapper" data-voice="insult" data-description="A critical view of {{owner}}">
-                    <img src="/static/images/insult_sm.png" alt="insult" class="voice-icon">
-                </div>
-                <div class="voice-icon-wrapper" data-voice="earthchild" data-description="A nature-connected perspective">
-                    <img src="/static/images/earthchild_sm.png" alt="earthchild" class="voice-icon">
-                </div>
-                <div class="voice-icon-wrapper" data-voice="bar_girl" data-description="A bar girl's unique observations">
-                    <img src="/static/images/bar-girl_sm.png" alt="bar-girl" class="voice-icon">
-                </div>
-                <div class="voice-icon-wrapper" data-voice="parents" data-description="{{owner}}'s parents' perspective">
-                    <img src="/static/images/parents_sm.png" alt="parents" class="voice-icon">
-                </div>
-                <div class="voice-icon-wrapper" data-voice="preacher" data-description="A spiritual interpretation">
-                    <img src="/static/images/preacher_sm.png" alt="preacher" class="voice-icon">
-                </div>
+            </div>
+            </div>
+            <div class="info-box-archive-overview" aria-label="Archive overview" style="padding:10px;">
+                <span id="overview-dashboard-loading" class="info-box-dashboard-loading">Loading metrics…</span>
+                <div id="overview-dashboard-load-error" class="info-box-dashboard-load-error" style="display: none;"></div>
+                <div id="overview-dashboard-stats" class="info-box-dashboard-stats"></div>
+                <section id="overview-llm-section" class="info-box-overview-llm" style="margin-top:10px;">
+                    <h4 class="info-box-overview-llm-heading">AI &amp; API configuration</h4>
+                    <div id="overview-llm-status-body" class="info-box-overview-llm-body">Loading…</div>
+                </section>
             </div>
         </div>
     </div>

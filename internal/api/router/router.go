@@ -102,7 +102,7 @@ func New(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 	dashboardHandler.RegisterRoutes(r)
 
 	// ── Templated endpoints (GET /, suggestions, JS files) ───────────────────
-	templateHandler := handler.NewTemplateHandler(subjectConfigRepo, cfg)
+	templateHandler := handler.NewTemplateHandler(subjectConfigRepo, userRepo, cfg)
 	templateHandler.RegisterRoutes(r)
 
 	// ── Reference documents & sensitive data (shared keyring) ────────────────
@@ -187,7 +187,6 @@ func New(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 	// ── Admin user management ──────────────────────────────────────────────────
 	adminUsersHandler := handler.NewAdminUsersHandler(userRepo, sensitiveSvc, subjectConfigSvc, dashboardSvc, cfg.Server.AdminPassword, cfg.Server.SessionCookieSecure)
 	adminUsersHandler.RegisterRoutes(r)
-	claudeProvider := appai.NewClaudeProvider(cfg.AI.AnthropicAPIKey, cfg.AI.ClaudeModelName)
 	chatRepo := repository.NewChatRepo(pool)
 	completeProfileRepo := repository.NewCompleteProfileRepo(pool)
 	chatSvc := service.NewChatService(
@@ -195,10 +194,13 @@ func New(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 		subjectConfigRepo,
 		completeProfileRepo,
 		pool,
-		geminiProvider,
-		claudeProvider,
-		cfg.App.AssetStaticDir,
+		userRepo,
+		cfg.AI.GeminiAPIKey,
+		cfg.AI.GeminiModelName,
+		cfg.AI.AnthropicAPIKey,
+		cfg.AI.ClaudeModelName,
 		cfg.AI.TavilyAPIKey,
+		cfg.App.AssetStaticDir,
 		cfg.Crypto.KeyringPepper,
 		sessionMasterStore,
 		privateStoreSvc,

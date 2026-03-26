@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/daveontour/aimuseum/internal/appctx"
 	"github.com/daveontour/aimuseum/internal/keystore"
+	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 )
@@ -46,6 +48,7 @@ func (h *AuthHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/auth/login", h.Login)
 	r.Post("/auth/logout", h.Logout)
 	r.Get("/auth/me", h.Me)
+	r.Patch("/auth/me/llm-settings", h.PatchLLMSettings)
 	r.Post("/auth/change-password", h.ChangePassword)
 }
 
@@ -82,7 +85,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		req.Gender = "Male"
 	}
 
-	user, err := h.svc.Register(r.Context(), req.Email, req.Password, req.DisplayName)
+	user, err := h.svc.Register(r.Context(), req.Email, req.Password, req.DisplayName, req.FamilyName)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrEmailTaken):
@@ -120,6 +123,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		"id":           user.ID,
 		"email":        user.Email,
 		"display_name": user.DisplayName,
+		"first_name":   user.FirstName,
+		"family_name":  user.FamilyName,
 	})
 }
 
@@ -195,12 +200,124 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
-	writeJSON(w, map[string]any{
+	out := map[string]any{
 		"id":           user.ID,
 		"email":        user.Email,
 		"display_name": user.DisplayName,
+		"first_name":   user.FirstName,
+		"family_name":  user.FamilyName,
 		"is_visitor":   isVisitor,
-	})
+	}
+	owner, _ := h.svc.GetUserLLMStored(r.Context(), user.ID)
+	if owner == nil {
+		owner = &repository.UserLLMStored{}
+	}
+	if isVisitor {
+		sid := h.readSessionCookie(r)
+		vis, _ := h.svc.GetSessionVisitorLLM(r.Context(), sid)
+		if vis == nil {
+			vis = &repository.UserLLMStored{}
+		}
+		out["llm_settings"] = map[string]any{
+			"session_scoped":             true,
+			"gemini_api_key_set":         vis.GeminiAPIKey != "",
+			"anthropic_api_key_set":      vis.AnthropicAPIKey != "",
+			"tavily_api_key_set":         vis.TavilyAPIKey != "",
+			"gemini_model":               vis.GeminiModel,
+			"claude_model":               vis.ClaudeModel,
+			"subject_gemini_api_key_set": owner.GeminiAPIKey != "",
+			"subject_anthropic_key_set":  owner.AnthropicAPIKey != "",
+			"subject_tavily_key_set":     owner.TavilyAPIKey != "",
+			"subject_gemini_model":       owner.GeminiModel,
+			"subject_claude_model":       owner.ClaudeModel,
+		}
+	} else {
+		out["llm_settings"] = map[string]any{
+			"session_scoped":        false,
+			"gemini_api_key_set":    owner.GeminiAPIKey != "",
+			"anthropic_api_key_set": owner.AnthropicAPIKey != "",
+			"tavily_api_key_set":    owner.TavilyAPIKey != "",
+			"gemini_model":          owner.GeminiModel,
+			"claude_model":          owner.ClaudeModel,
+		}
+	}
+	writeJSON(w, out)
+}
+
+// PatchLLMSettings PATCH /auth/me/llm-settings
+// JSON keys are optional. Present keys update overrides; empty string clears that override.
+// Owners persist to users; visitors persist to the current session only (sessions.visitor_llm_overrides).
+// API keys are never returned from GET /auth/me (only *_set flags).
+func (h *AuthHandler) PatchLLMSettings(w http.ResponseWriter, r *http.Request) {
+	user, isVisitor, err := h.svc.Authenticate(r.Context(), h.readSessionCookie(r))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "session lookup failed")
+		return
+	}
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "could not read body")
+		return
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	patch := repository.UserLLMPatch{}
+	if ptr, ok := decodeLLMJSONString(raw, "gemini_api_key"); ok {
+		patch.GeminiAPIKey = ptr
+	}
+	if ptr, ok := decodeLLMJSONString(raw, "anthropic_api_key"); ok {
+		patch.AnthropicAPIKey = ptr
+	}
+	if ptr, ok := decodeLLMJSONString(raw, "gemini_model"); ok {
+		patch.GeminiModel = ptr
+	}
+	if ptr, ok := decodeLLMJSONString(raw, "claude_model"); ok {
+		patch.ClaudeModel = ptr
+	}
+	if ptr, ok := decodeLLMJSONString(raw, "tavily_api_key"); ok {
+		patch.TavilyAPIKey = ptr
+	}
+	if isVisitor {
+		sid := h.readSessionCookie(r)
+		if err := h.svc.PatchSessionVisitorLLM(r.Context(), sid, patch); err != nil {
+			if errors.Is(err, repository.ErrVisitorSessionLLMNotUpdated) {
+				writeError(w, http.StatusBadRequest, "could not save session LLM settings (invalid or expired session)")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to save session settings")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err := h.svc.PatchUserLLMSettings(r.Context(), user.ID, patch); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save settings")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func decodeLLMJSONString(raw map[string]json.RawMessage, key string) (*string, bool) {
+	b, ok := raw[key]
+	if !ok {
+		return nil, false
+	}
+	if len(b) == 0 || string(b) == "null" {
+		empty := ""
+		return &empty, true
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return nil, true
+	}
+	return &s, true
 }
 
 // POST /auth/change-password

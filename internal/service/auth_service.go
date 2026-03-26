@@ -56,9 +56,11 @@ func NewAuthService(users *repository.UserRepo, secure bool) *AuthService {
 
 // Register creates a new user account.  Returns ErrEmailTaken if the email is
 // already in use, ErrWeakPassword if the password is too short.
-func (s *AuthService) Register(ctx context.Context, email, password, displayName string) (*repository.User, error) {
+// displayName is stored as display_name (and first_name); familyName is stored as family_name.
+func (s *AuthService) Register(ctx context.Context, email, password, displayName, familyName string) (*repository.User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	displayName = strings.TrimSpace(displayName)
+	familyName = strings.TrimSpace(familyName)
 
 	if len(password) < minPasswordLength {
 		return nil, ErrWeakPassword
@@ -77,7 +79,7 @@ func (s *AuthService) Register(ctx context.Context, email, password, displayName
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	user, err := s.users.Create(ctx, email, hash, displayName)
+	user, err := s.users.Create(ctx, email, hash, displayName, displayName, familyName)
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
@@ -199,6 +201,26 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, currentP
 		return fmt.Errorf("hash new password: %w", err)
 	}
 	return s.users.UpdatePasswordHash(ctx, userID, newHash)
+}
+
+// GetUserLLMStored returns persisted per-user LLM/API overrides.
+func (s *AuthService) GetUserLLMStored(ctx context.Context, userID int64) (*repository.UserLLMStored, error) {
+	return s.users.GetUserLLMStored(ctx, userID)
+}
+
+// PatchUserLLMSettings merges patch into the user's stored LLM/API overrides.
+func (s *AuthService) PatchUserLLMSettings(ctx context.Context, userID int64, p repository.UserLLMPatch) error {
+	return s.users.PatchUserLLMSettings(ctx, userID, p)
+}
+
+// GetSessionVisitorLLM returns LLM overrides stored on the visitor session row (session-scoped only).
+func (s *AuthService) GetSessionVisitorLLM(ctx context.Context, sessionID string) (*repository.UserLLMStored, error) {
+	return s.users.GetSessionVisitorLLM(ctx, sessionID)
+}
+
+// PatchSessionVisitorLLM updates session-scoped LLM overrides (visitor sessions only).
+func (s *AuthService) PatchSessionVisitorLLM(ctx context.Context, sessionID string, p repository.UserLLMPatch) error {
+	return s.users.PatchSessionVisitorLLM(ctx, sessionID, p)
 }
 
 // ── Share sessions ───────────────────────────────────────────────────────────

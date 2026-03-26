@@ -124,7 +124,7 @@ func getMessagesByChatSession(ctx context.Context, pool *pgxpool.Pool, chatSessi
 	q, args := toolsUIDFilter(ctx,
 		`SELECT id, message_date, sender_name, sender_id, type, text, service, subject
 		 FROM messages WHERE chat_session ILIKE $1 ORDER BY message_date ASC LIMIT 500`,
-		[]any{"%"+chatSession+"%"})
+		[]any{"%" + chatSession + "%"})
 	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "chat_session": chatSession, "message_count": 0, "messages": []any{}}, nil

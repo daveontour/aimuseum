@@ -159,13 +159,6 @@
                     <input id="reg-family-name" type="text" name="family_name" placeholder="e.g. Smith">
                 </div>
                 <div class="form-group">
-                    <label for="reg-gender">Gender</label>
-                    <select id="reg-gender" name="gender" style="width:100%; padding:10px 14px; border-radius:6px; border:1px solid #2e4068; background:#0f1922; color:#fff; font-size:1rem; box-sizing:border-box;">
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                    </select>
-                </div>
-                <div class="form-group">
                     <label for="reg-password">Password</label>
                     <input id="reg-password" type="password" name="password" required placeholder="Choose a password (min 12 characters)" autocomplete="new-password">
                 </div>
@@ -182,6 +175,8 @@
         <!-- Visitor panel -->
         <div class="panel" id="panel-visitor">
             <div class="form-group">
+                <label>Access the archive of a registered user by entering their email or full name and the visitor key they gave you. Hints for the key can be provided if you enter their email address or name.</label>
+                <br/>
                 <label for="visitor-identifier">Subject name or email address</label>
                 <div style="display:flex; gap:8px;">
                     <input id="visitor-identifier" type="text" placeholder="e.g. Jane Smith or jane@example.com" style="flex:1;">
@@ -292,7 +287,6 @@
                         email: document.getElementById('reg-email').value.trim(),
                         display_name: document.getElementById('reg-display-name').value.trim(),
                         family_name: document.getElementById('reg-family-name').value.trim(),
-                        gender: document.getElementById('reg-gender').value,
                         password: password
                     })
                 });

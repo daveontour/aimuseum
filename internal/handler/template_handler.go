@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/daveontour/aimuseum/internal/appctx"
 	"github.com/daveontour/aimuseum/internal/config"
 	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/go-chi/chi/v5"
@@ -20,22 +21,24 @@ import (
 //   - GET /static/js/museum/foundation.js
 //   - GET /static/js/museum/modals-people.js
 type TemplateHandler struct {
-	subjectRepo     *repository.SubjectConfigRepo
-	templatesDir    string
-	pythonStaticDir string
-	geminiAvail     bool
-	claudeAvail     bool
-	pageTitle       string
+	subjectRepo       *repository.SubjectConfigRepo
+	userRepo          *repository.UserRepo
+	templatesDir      string
+	pythonStaticDir   string
+	defaultGeminiOK   bool
+	defaultClaudeOK   bool
+	pageTitle         string
 }
 
 // NewTemplateHandler creates a TemplateHandler.
-func NewTemplateHandler(subjectRepo *repository.SubjectConfigRepo, cfg *config.Config) *TemplateHandler {
+func NewTemplateHandler(subjectRepo *repository.SubjectConfigRepo, userRepo *repository.UserRepo, cfg *config.Config) *TemplateHandler {
 	return &TemplateHandler{
 		subjectRepo:     subjectRepo,
+		userRepo:        userRepo,
 		templatesDir:    cfg.App.TemplatesDir,
 		pythonStaticDir: cfg.App.AssetStaticDir,
-		geminiAvail:     cfg.AI.GeminiAPIKey != "",
-		claudeAvail:     cfg.AI.AnthropicAPIKey != "",
+		defaultGeminiOK: cfg.AI.GeminiAPIKey != "",
+		defaultClaudeOK: cfg.AI.AnthropicAPIKey != "",
 		pageTitle:       cfg.App.PageTitle,
 	}
 }
@@ -130,12 +133,24 @@ func (h *TemplateHandler) GetSuggestions(w http.ResponseWriter, r *http.Request)
 // GetFoundationJS handles GET /static/js/museum/foundation.js.
 func (h *TemplateHandler) GetFoundationJS(w http.ResponseWriter, r *http.Request) {
 	ctx := h.buildContext(r)
-	if h.geminiAvail {
+	geminiOK := h.defaultGeminiOK
+	claudeOK := h.defaultClaudeOK
+	if uid := appctx.UserIDFromCtx(r.Context()); uid != 0 && h.userRepo != nil {
+		if stored, err := h.userRepo.GetUserLLMStored(r.Context(), uid); err == nil && stored != nil {
+			if strings.TrimSpace(stored.GeminiAPIKey) != "" {
+				geminiOK = true
+			}
+			if strings.TrimSpace(stored.AnthropicAPIKey) != "" {
+				claudeOK = true
+			}
+		}
+	}
+	if geminiOK {
 		ctx["gemini_configured"] = "True"
 	} else {
 		ctx["gemini_configured"] = "False"
 	}
-	if h.claudeAvail {
+	if claudeOK {
 		ctx["claude_configured"] = "True"
 	} else {
 		ctx["claude_configured"] = "False"

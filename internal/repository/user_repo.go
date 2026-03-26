@@ -3,11 +3,15 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrAmbiguousUserFullName is returned when more than one user matches FindByFullName.
+var ErrAmbiguousUserFullName = errors.New("multiple users match the given full name")
 
 // User represents a row from the users table.
 type User struct {
@@ -15,6 +19,8 @@ type User struct {
 	Email        string
 	PasswordHash string
 	DisplayName  string
+	FirstName    string
+	FamilyName   string
 	IsActive     bool
 	CreatedAt    time.Time
 	LastLoginAt  *time.Time
@@ -39,14 +45,17 @@ func NewUserRepo(pool *pgxpool.Pool) *UserRepo {
 }
 
 // Create inserts a new user and returns the created record.
-func (r *UserRepo) Create(ctx context.Context, email, passwordHash, displayName string) (*User, error) {
+// displayName is stored in display_name (legacy/UI); firstName and familyName are stored explicitly.
+func (r *UserRepo) Create(ctx context.Context, email, passwordHash, displayName, firstName, familyName string) (*User, error) {
 	var u User
 	err := r.pool.QueryRow(ctx,
-		`INSERT INTO users (email, password_hash, display_name)
-		 VALUES ($1, $2, NULLIF($3, ''))
-		 RETURNING id, email, password_hash, COALESCE(display_name, ''), is_active, created_at`,
-		email, passwordHash, displayName,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.IsActive, &u.CreatedAt)
+		`INSERT INTO users (email, password_hash, display_name, first_name, family_name)
+		 VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''))
+		 RETURNING id, email, password_hash,
+		           COALESCE(display_name, ''), COALESCE(first_name, ''), COALESCE(family_name, ''),
+		           is_active, created_at`,
+		email, passwordHash, displayName, firstName, familyName,
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.FirstName, &u.FamilyName, &u.IsActive, &u.CreatedAt)
 	return &u, err
 }
 
@@ -54,24 +63,72 @@ func (r *UserRepo) Create(ctx context.Context, email, passwordHash, displayName 
 func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*User, error) {
 	var u User
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, email, password_hash, COALESCE(display_name, ''), is_active, created_at
+		`SELECT id, email, password_hash, COALESCE(display_name, ''), COALESCE(first_name, ''), COALESCE(family_name, ''), is_active, created_at
 		 FROM users WHERE email = $1`,
 		email,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.IsActive, &u.CreatedAt)
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.FirstName, &u.FamilyName, &u.IsActive, &u.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	return &u, err
 }
 
+const findByFullNameSelect = `SELECT id, email, password_hash, COALESCE(display_name, ''), COALESCE(first_name, ''), COALESCE(family_name, ''), is_active, created_at
+		 FROM users WHERE LOWER(TRIM(COALESCE(first_name, ''))) = LOWER($1)
+		   AND LOWER(TRIM(COALESCE(family_name, ''))) = LOWER($2)
+		 LIMIT 2`
+
+// FindByFullName parses fullName as whitespace-separated tokens: the first token is first_name
+// and the remaining tokens (joined with a single space) are family_name.
+// Matching is case-insensitive. Returns nil, nil if no user matches.
+// Returns ErrAmbiguousUserFullName if more than one user matches.
+func (r *UserRepo) FindByFullName(ctx context.Context, fullName string) (*User, error) {
+	fullName = strings.TrimSpace(fullName)
+	if fullName == "" {
+		return nil, nil
+	}
+	parts := strings.Fields(fullName)
+	first := parts[0]
+	family := ""
+	if len(parts) > 1 {
+		family = strings.Join(parts[1:], " ")
+	}
+
+	rows, err := r.pool.Query(ctx, findByFullNameSelect, first, family)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []*User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.FirstName, &u.FamilyName, &u.IsActive, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, &u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	switch len(users) {
+	case 0:
+		return nil, nil
+	case 1:
+		return users[0], nil
+	default:
+		return nil, ErrAmbiguousUserFullName
+	}
+}
+
 // FindByID returns the user with the given ID, or nil if not found.
 func (r *UserRepo) FindByID(ctx context.Context, id int64) (*User, error) {
 	var u User
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, email, password_hash, COALESCE(display_name, ''), is_active, created_at
+		`SELECT id, email, password_hash, COALESCE(display_name, ''), COALESCE(first_name, ''), COALESCE(family_name, ''), is_active, created_at
 		 FROM users WHERE id = $1`,
 		id,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.IsActive, &u.CreatedAt)
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.FirstName, &u.FamilyName, &u.IsActive, &u.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -153,7 +210,7 @@ func (r *UserRepo) PurgeExpiredSessions(ctx context.Context) error {
 // ListAll returns every user ordered by created_at ascending.
 func (r *UserRepo) ListAll(ctx context.Context) ([]*User, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, email, password_hash, COALESCE(display_name, ''), is_active, created_at
+		`SELECT id, email, password_hash, COALESCE(display_name, ''), COALESCE(first_name, ''), COALESCE(family_name, ''), is_active, created_at
 		 FROM users ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
@@ -162,7 +219,7 @@ func (r *UserRepo) ListAll(ctx context.Context) ([]*User, error) {
 	var users []*User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.IsActive, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.FirstName, &u.FamilyName, &u.IsActive, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, &u)
