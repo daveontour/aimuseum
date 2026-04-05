@@ -390,10 +390,8 @@ Modals.ReferenceDocuments = (() => {
             document.getElementById('reference-documents-edit-id').value = doc.id;
             document.getElementById('reference-documents-edit-title').value = doc.title || '';
             document.getElementById('reference-documents-edit-description').value = doc.description || '';
-            document.getElementById('reference-documents-edit-author').value = doc.author || '';
             document.getElementById('reference-documents-edit-tags').value = doc.tags || '';
             document.getElementById('reference-documents-edit-categories').value = doc.categories || '';
-            document.getElementById('reference-documents-edit-notes').value = doc.notes || '';
             document.getElementById('reference-documents-edit-task').checked = doc.available_for_task || false;
             
             Modals._openModal(DOM.referenceDocumentsEditModal);
@@ -532,10 +530,8 @@ Modals.ReferenceDocuments = (() => {
                     }
 
                     const description = document.getElementById('reference-documents-upload-description').value;
-                    const author = document.getElementById('reference-documents-upload-author').value;
                     const tags = document.getElementById('reference-documents-upload-tags').value;
                     const categories = document.getElementById('reference-documents-upload-categories').value;
-                    const notes = document.getElementById('reference-documents-upload-notes').value;
                     const availableForTask = document.getElementById('reference-documents-upload-task').checked;
 
                     const failures = [];
@@ -547,10 +543,8 @@ Modals.ReferenceDocuments = (() => {
                             formData.append('file', file);
                             formData.append('title', file.name);
                             formData.append('description', description);
-                            formData.append('author', author);
                             formData.append('tags', tags);
                             formData.append('categories', categories);
-                            formData.append('notes', notes);
                             formData.append('available_for_task', availableForTask);
                             try {
                                 const response = await fetch('/reference-documents', {
@@ -613,10 +607,8 @@ Modals.ReferenceDocuments = (() => {
                     const updateData = {
                         title: document.getElementById('reference-documents-edit-title').value || null,
                         description: document.getElementById('reference-documents-edit-description').value || null,
-                        author: document.getElementById('reference-documents-edit-author').value || null,
                         tags: document.getElementById('reference-documents-edit-tags').value || null,
                         categories: document.getElementById('reference-documents-edit-categories').value || null,
-                        notes: document.getElementById('reference-documents-edit-notes').value || null,
                         available_for_task: document.getElementById('reference-documents-edit-task').checked
                     };
                     
