@@ -236,8 +236,10 @@
         }
         .hero-carousel__dots {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
             gap: 0.35rem;
+            max-width: min(100%, 22rem);
         }
         .hero-carousel__dot {
             width: 8px;
@@ -479,43 +481,125 @@
                         aria-label="Product screenshots"
                         tabindex="0">
                         <div class="hero-carousel__viewport" id="hero-carousel-slides">
-                            <figure class="hero-carousel__slide is-active" role="group" aria-roledescription="slide" aria-label="Slide 1 of 3">
-                                <img
-                                    src="./images/features.png"
-                                    width="800"
-                                    height="450"
-                                    alt="Main Digital Museum chat screen: top bar with app title, central conversation area with user message and AI reply, side panel for mood or voice controls and reference hints." />
-                                <figcaption class="hero-carousel__caption">
-                                    Main chat: ask in natural language while the assistant uses tools to search your archive.
-                                </figcaption>
+                            <figure class="hero-carousel__slide is-active" role="group" aria-roledescription="slide" aria-label="Slide 1 of 23">
+                                <img src="./images/0100_Welcome.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Welcome screen with the gallery of available personalities and data statistics</figcaption>
                             </figure>
-                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 2 of 3" aria-hidden="true">
-                                <img
-                                    src="./images/architecture.png"
-                                    width="800"
-                                    height="450"
-                                    alt="Architecture diagram: browser to API, auth middleware, services, and PostgreSQL." />
-                                <figcaption class="hero-carousel__caption">
-                                    Stack overview: Chi HTTP API, session auth, repositories, and PostgreSQL under the hood.
-                                </figcaption>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 2 of 23" aria-hidden="true">
+                                <img src="./images/0200_AIConversation.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Have a conversation with the AI about your archive or topics in general</figcaption>
                             </figure>
-                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 3 of 3" aria-hidden="true">
-                                <img
-                                    src="./images/info-graphic.png"
-                                    width="800"
-                                    height="450"
-                                    alt="High-level flow from browser through router and middleware to the database." />
-                                <figcaption class="hero-carousel__caption">
-                                    Request path: browser to router, user context from middleware, then data layers and DB.
-                                </figcaption>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 3 of 23" aria-hidden="true">
+                                <img src="./images/0400_ChatConfig.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Set up a conversation between AIs about the data in the archive</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 4 of 23" aria-hidden="true">
+                                <img src="./images/0500_Chat.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Watch how the AI conversation evolves and inject where needed</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 5 of 23" aria-hidden="true">
+                                <img src="./images/0600_Question.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Get the AI to generate a probing question about the data in the archive - and then answer it</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 6 of 23" aria-hidden="true">
+                                <img src="./images/0700_InterviewConfig.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Set up an interview with the AI about the data in the archive</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 7 of 23" aria-hidden="true">
+                                <img src="./images/0800_Interview.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Have an interactive interview with the AI about the data in the archive</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 8 of 23" aria-hidden="true">
+                                <img src="./images/0900_Emails.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Email archive browser</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 9 of 23" aria-hidden="true">
+                                <img src="./images/1000_Messages.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Messages browser across channels</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 10 of 23" aria-hidden="true">
+                                <img src="./images/1050_Images.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Image gallery from all your sources</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 11 of 23" aria-hidden="true">
+                                <img src="./images/1100_FBAlbums.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Facebook Albums</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 12 of 23" aria-hidden="true">
+                                <img src="./images/1200_FBPosts.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Facebook Posts</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 13 of 23" aria-hidden="true">
+                                <img src="./images/1300_Locations.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Locations and Places</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 14 of 23" aria-hidden="true">
+                                <img src="./images/1400_Contacts.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Contacts Browser</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 15 of 23" aria-hidden="true">
+                                <img src="./images/1450_MemoryCompanion.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Memory Companion</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 16 of 23" aria-hidden="true">
+                                <img src="./images/1500_Statistics.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Archive statistics</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 17 of 23" aria-hidden="true">
+                                <img src="./images/1600_DataImport.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Import and manage data sources</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 18 of 23" aria-hidden="true">
+                                <img src="./images/1700_PrivateData.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Confidently store and access private and sensitive data</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 19 of 23" aria-hidden="true">
+                                <img src="./images/1800_ReferenceDocuments.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Import and manage reference documents for the AI</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 20 of 23" aria-hidden="true">
+                                <img src="./images/1900_SystemConfig.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">System and account configuration</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 21 of 23" aria-hidden="true">
+                                <img src="./images/2000_VisitorRights.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Allow Visitor access with fine-grained and controlled access rights</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 22 of 23" aria-hidden="true">
+                                <img src="./images/features.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Features overview composite</figcaption>
+                            </figure>
+                            <figure class="hero-carousel__slide" role="group" aria-roledescription="slide" aria-label="Slide 23 of 23" aria-hidden="true">
+                                <img src="./images/info-graphic.png" width="800" height="450" alt="" />
+                                <figcaption class="hero-carousel__caption">Architecture and flow overview</figcaption>
                             </figure>
                         </div>
                         <p id="hero-carousel-live" class="hero-carousel__live" aria-live="polite"></p>
                         <div class="hero-carousel__toolbar">
                             <div class="hero-carousel__dots" role="group" aria-label="Choose slide">
-                                <button type="button" class="hero-carousel__dot is-active" data-carousel-dot="0" aria-current="true" aria-label="Slide 1 of 3"></button>
-                                <button type="button" class="hero-carousel__dot" data-carousel-dot="1" aria-label="Slide 2 of 3"></button>
-                                <button type="button" class="hero-carousel__dot" data-carousel-dot="2" aria-label="Slide 3 of 3"></button>
+                                <button type="button" class="hero-carousel__dot is-active" data-carousel-dot="0" aria-current="true" aria-label="Slide 1 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="1" aria-label="Slide 2 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="2" aria-label="Slide 3 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="3" aria-label="Slide 4 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="4" aria-label="Slide 5 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="5" aria-label="Slide 6 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="6" aria-label="Slide 7 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="7" aria-label="Slide 8 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="8" aria-label="Slide 9 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="9" aria-label="Slide 10 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="10" aria-label="Slide 11 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="11" aria-label="Slide 12 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="12" aria-label="Slide 13 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="13" aria-label="Slide 14 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="14" aria-label="Slide 15 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="15" aria-label="Slide 16 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="16" aria-label="Slide 17 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="17" aria-label="Slide 18 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="18" aria-label="Slide 19 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="19" aria-label="Slide 20 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="20" aria-label="Slide 21 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="21" aria-label="Slide 22 of 23"></button>
+                                <button type="button" class="hero-carousel__dot" data-carousel-dot="22" aria-label="Slide 23 of 23"></button>
                             </div>
                             <div class="hero-carousel__nav">
                                 <button type="button" class="btn" data-carousel-prev aria-label="Previous slide">
@@ -527,7 +611,7 @@
                             </div>
                         </div>
                     </div>
-                    <p class="screenshot-caption">Add or replace assets under <code style="background:rgba(0,0,0,0.2);padding:0.1em 0.35em;border-radius:4px;">docs/images/</code> (e.g. <code style="background:rgba(0,0,0,0.2);padding:0.1em 0.35em;border-radius:4px;">features.png</code>, <code style="background:rgba(0,0,0,0.2);padding:0.1em 0.35em;border-radius:4px;">architecture.png</code>, <code style="background:rgba(0,0,0,0.2);padding:0.1em 0.35em;border-radius:4px;">info-graphic.png</code>). Use arrow keys when the carousel is focused.</p>
+                    <!-- <p class="screenshot-caption">Add or replace assets under <code style="background:rgba(0,0,0,0.2);padding:0.1em 0.35em;border-radius:4px;">docs/images/</code> (e.g. <code style="background:rgba(0,0,0,0.2);padding:0.1em 0.35em;border-radius:4px;">features.png</code>, <code style="background:rgba(0,0,0,0.2);padding:0.1em 0.35em;border-radius:4px;">architecture.png</code>, <code style="background:rgba(0,0,0,0.2);padding:0.1em 0.35em;border-radius:4px;">info-graphic.png</code>). Use arrow keys when the carousel is focused.</p> -->
                 </div>
             </div>
         </section>
@@ -572,10 +656,10 @@
 
                 <figure class="screenshot-frame" style="margin-top:2rem; max-width: 720px;">
                     <img
-                        src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='720' height='400'%3E%3Crect fill='%23f8f9fa' width='720' height='400'/%3E%3Ctext x='360' y='200' text-anchor='middle' fill='%234a90e2' font-family='system-ui' font-size='15'%3E Feature grid screenshot %3C/text%3E%3C/svg%3E"
+                        src="./images/features.png"
                         width="720"
                         height="400"
-                        alt="Settings or dashboard area showing feature toggles: AI tool access matrix with rows for each tool type and columns for owner, visitor, and server key policies." />
+                       />
                     <figcaption style="padding:0.6rem 1rem; font-size:0.85rem; color:var(--color-text-muted); border-top:1px solid var(--color-border);">
                         Placeholder: swap for a real screenshot of the AI Tool Access or Personal Data / keys UI.
                     </figcaption>
