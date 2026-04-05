@@ -99,7 +99,7 @@ func insertExclusionIfNotExists(ctx context.Context, pool *pgxpool.Pool, email, 
 	// user_id NULL = global defaults for all tenants (FK allows NULL; no fixed user id at seed time)
 	_, err = pool.Exec(ctx,
 		`INSERT INTO email_exclusions (email, name, name_email, user_id) VALUES ($1, $2, $3, $4)`,
-		email, name, nameEmail, 2)
+		email, name, nameEmail, nil)
 	if err != nil {
 		return 0, err
 	}
