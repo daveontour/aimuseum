@@ -1,0 +1,185 @@
+package repository
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/daveontour/aimuseum/internal/model"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// SubjectConfigRepo reads the singleton subject_configuration table.
+type SubjectConfigRepo struct {
+	pool *pgxpool.Pool
+}
+
+// NewSubjectConfigRepo creates a SubjectConfigRepo.
+func NewSubjectConfigRepo(pool *pgxpool.Pool) *SubjectConfigRepo {
+	return &SubjectConfigRepo{pool: pool}
+}
+
+// UpdateWritingStyleAI sets the writing_style_ai field on the first config row.
+func (r *SubjectConfigRepo) UpdateWritingStyleAI(ctx context.Context, summary string) error {
+	uid := uidFromCtx(ctx)
+	q := `UPDATE subject_configuration SET writing_style_ai = $1, updated_at = NOW()
+	      WHERE id = (SELECT id FROM subject_configuration WHERE TRUE`
+	args := []any{summary}
+	if uid > 0 {
+		args = append(args, uid)
+		q += fmt.Sprintf(" AND user_id = $%d", len(args))
+	}
+	q += " LIMIT 1)"
+	_, err := r.pool.Exec(ctx, q, args...)
+	return err
+}
+
+// UpdatePsychologicalProfileAI sets the psychological_profile_ai field on the first config row.
+func (r *SubjectConfigRepo) UpdatePsychologicalProfileAI(ctx context.Context, profile string) error {
+	uid := uidFromCtx(ctx)
+	q := `UPDATE subject_configuration SET psychological_profile_ai = $1, updated_at = NOW()
+	      WHERE id = (SELECT id FROM subject_configuration WHERE TRUE`
+	args := []any{profile}
+	if uid > 0 {
+		args = append(args, uid)
+		q += fmt.Sprintf(" AND user_id = $%d", len(args))
+	}
+	q += " LIMIT 1)"
+	_, err := r.pool.Exec(ctx, q, args...)
+	return err
+}
+
+// UpsertParams holds the fields the caller wants to write.
+type UpsertSubjectConfigParams struct {
+	SubjectName     string
+	Gender          *string // defaults to "Male" if nil
+	FamilyName      *string
+	OtherNames      *string
+	EmailAddresses  *string
+	PhoneNumbers    *string
+	WhatsAppHandle  *string
+	InstagramHandle *string
+}
+
+// Upsert creates the subject configuration row if it doesn't exist, or updates
+// the existing singleton row in-place.
+func (r *SubjectConfigRepo) Upsert(ctx context.Context, p UpsertSubjectConfigParams) (*model.SubjectConfig, error) {
+	uid := uidFromCtx(ctx)
+	gender := "Male"
+	if p.Gender != nil && *p.Gender != "" {
+		gender = *p.Gender
+	}
+
+	// Check whether a row already exists (scoped by uid when uid > 0).
+	q := `SELECT id FROM subject_configuration WHERE TRUE`
+	args := []any{}
+	q, args = addUIDFilter(q, args, uid)
+	q += " LIMIT 1"
+	var id int64
+	err := r.pool.QueryRow(ctx, q, args...).Scan(&id)
+	noRow := isNoRows(err)
+	if err != nil && !noRow {
+		return nil, fmt.Errorf("Upsert check: %w", err)
+	}
+
+	if noRow {
+		err = r.pool.QueryRow(ctx, `
+			INSERT INTO subject_configuration
+				(subject_name, gender,
+				 family_name, other_names, email_addresses, phone_numbers,
+				 whatsapp_handle, instagram_handle, user_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			RETURNING id`,
+			p.SubjectName, gender,
+			p.FamilyName, p.OtherNames, p.EmailAddresses,
+			p.PhoneNumbers, p.WhatsAppHandle, p.InstagramHandle, uidVal(uid),
+		).Scan(&id)
+		if err != nil {
+			return nil, fmt.Errorf("Upsert insert: %w", err)
+		}
+	} else {
+		// Always update the required fields; only overwrite optional fields when provided.
+		set := []string{"subject_name = $1", "gender = $2", "updated_at = NOW()"}
+		args := []any{p.SubjectName, gender}
+		idx := 3
+
+		addOpt := func(col string, v *string) {
+			if v != nil {
+				set = append(set, fmt.Sprintf("%s = $%d", col, idx))
+				args = append(args, *v)
+				idx++
+			}
+		}
+		addOpt("family_name", p.FamilyName)
+		addOpt("other_names", p.OtherNames)
+		addOpt("email_addresses", p.EmailAddresses)
+		addOpt("phone_numbers", p.PhoneNumbers)
+		addOpt("whatsapp_handle", p.WhatsAppHandle)
+		addOpt("instagram_handle", p.InstagramHandle)
+
+		args = append(args, id)
+		_, err = r.pool.Exec(ctx,
+			fmt.Sprintf(`UPDATE subject_configuration SET %s WHERE id = $%d`, strings.Join(set, ", "), idx),
+			args...)
+		if err != nil {
+			return nil, fmt.Errorf("Upsert update: %w", err)
+		}
+	}
+
+	return r.GetFirst(ctx)
+}
+
+// GetFirst returns the first (and only) subject configuration row.
+// Returns nil, nil if no row exists yet.
+func (r *SubjectConfigRepo) GetFirst(ctx context.Context) (*model.SubjectConfig, error) {
+	uid := uidFromCtx(ctx)
+	q := `
+		SELECT id, subject_name, gender, family_name, other_names,
+		       email_addresses, phone_numbers, whatsapp_handle, instagram_handle,
+		       writing_style_ai, psychological_profile_ai,
+		       created_at, updated_at
+		FROM subject_configuration
+		WHERE TRUE`
+	args := []any{}
+	q, args = addUIDFilter(q, args, uid)
+	q += " LIMIT 1"
+
+	row := r.pool.QueryRow(ctx, q, args...)
+
+	cfg := &model.SubjectConfig{}
+	err := row.Scan(
+		&cfg.ID, &cfg.SubjectName, &cfg.Gender, &cfg.FamilyName, &cfg.OtherNames,
+		&cfg.EmailAddresses, &cfg.PhoneNumbers, &cfg.WhatsAppHandle, &cfg.InstagramHandle,
+		&cfg.WritingStyleAI, &cfg.PsychologicalProfileAI,
+		&cfg.CreatedAt, &cfg.UpdatedAt,
+	)
+	if err != nil {
+		if isNoRows(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("GetFirst subject_configuration: %w", err)
+	}
+	return cfg, nil
+}
+
+// FindUserIDBySubjectName returns (userID, found, error) for the archive whose
+// subject_name matches case-insensitively.
+// found=false means no row matched. found=true with userID=0 means the row exists
+// but has no user_id (legacy single-tenant row).
+func (r *SubjectConfigRepo) FindUserIDBySubjectName(ctx context.Context, name string) (int64, bool, error) {
+	var uid pgtype.Int8
+	err := r.pool.QueryRow(ctx,
+		`SELECT user_id FROM subject_configuration WHERE LOWER(subject_name) = LOWER($1) LIMIT 1`,
+		name).Scan(&uid)
+	if isNoRows(err) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("FindUserIDBySubjectName: %w", err)
+	}
+	if !uid.Valid {
+		return 0, true, nil // single-tenant/legacy row
+	}
+	return uid.Int64, true, nil
+}

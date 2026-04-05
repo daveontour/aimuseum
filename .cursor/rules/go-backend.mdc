@@ -1,0 +1,34 @@
+---
+description: Go backend — handlers, services, repos, router, DB
+globs: "**/*.go"
+alwaysApply: false
+---
+
+# Go backend
+
+**Module path:** `github.com/daveontour/aimuseum` (imports must use this prefix).
+
+## Layers (typical new API)
+
+1. `internal/handler/<domain>_handler.go` — HTTP
+2. `internal/api/router/router.go` — register route
+3. `internal/service/<domain>_service.go` — business logic
+4. `internal/repository/<domain>_repo.go` — SQL via pgx
+
+## Database
+
+- **Schema reference:** `sqlc/schema.sql` (keep aligned when you add tables/columns).
+- **Migrations:** Go code under `internal/database/` (`Migrate`, billing migrate, etc.) — append new DDL; do not rewrite old steps that may already have run on deployed DBs.
+- After schema changes: `make generate` (sqlc) where applicable; update hand-written repos to match.
+
+## System instructions (universal LLM prompts)
+
+- Stored in **`app_system_instructions`** (singleton), accessed via **`internal/repository/app_system_instructions_repo.go`**.
+- **`ChatService`** (and have-a-chat) take **`AppSystemInstructionsRepo`** — chat loads prompts from the DB, not from `subject_configuration` text columns.
+- **Owner / master unlock:** `PUT /api/system-instructions` on the dashboard handler.
+- **Admin UI:** `GET` / `PUT /admin/system-instructions` (admin session), wired in `internal/handler/admin_users_handler.go`; **`NewAdminUsersHandler`** receives `appInstrRepo`.
+
+## Style
+
+- Follow existing error handling and logging in neighboring handlers/services.
+- New endpoints belong in the router with the same middleware/style as siblings.

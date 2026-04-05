@@ -1,0 +1,33 @@
+---
+description: Vanilla JS — Modals modules, foundation.js, script order
+globs: "static/js/**/*.js"
+alwaysApply: false
+---
+
+# Frontend (vanilla JS)
+
+## Module pattern
+
+Use a revealing module (IIFE returning `{ init, … }`), consistent with `static/js/museum/*.js`.
+
+## DOM and wiring
+
+- **DOM cache / shared refs:** `static/js/museum/foundation.js` (`DOM` object).
+- **Persisted UI settings:** `foundation.js` → **`Config`** — loads/saves **`CONSTANTS.LOCAL_STORAGE_KEYS.CHAT_SETTINGS`** (JSON): message font, creativity, show audio/image/JSON tags, auto voice for short replies, **auto-run first response action** (`#auto-open-suggestions` → `autoOpenSuggestions`), etc. Add new toggles to `loadSettings` / `saveSettings` / `Config.init` listeners when they belong with chat UI prefs.
+- **Initialization:** `app.js` / `Modals.initAll()` runs for scripts loaded in order. Scripts **after** `app.js` with `defer` must **self-init** at the bottom of the file (e.g. `MyModule.init();`) per `CLAUDE.md`.
+
+## Chat rendering
+
+- **`static/js/museum/chat.js`** renders assistant **`embedded_json`**: image previews, **`_addResponseActionButtons`** (map, galleries, SMS, Facebook, etc.), optional JSON viewer. When **`DOM.autoOpenSuggestions`** is checked, the **first** defined action in that fixed order runs automatically after the message is appended (see `_addResponseActionButtons`).
+
+## New feature checklist
+
+1. Add `static/js/museum/<feature>.js`
+2. In `templates/index.template.html`: `<script … defer>` **after** `app.js`
+3. Self-init at end of new file if not wired from `Modals.initAll()`
+4. Styles in `static/css/museum_of.css`
+
+## UX
+
+- Display dates in **local** format unless an existing screen does otherwise.
+- Always use app specific dialogs boxes. Do not use Windows alert, or confirm dialogs.

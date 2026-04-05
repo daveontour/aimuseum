@@ -1,0 +1,15 @@
+---
+description: Digital Museum — core context, security, and global constraints
+alwaysApply: true
+---
+
+# Digital Museum — core
+
+Multi-tenant AI archive: many users per deployment; archive data is scoped by `user_id` in repos and RLS (see `CLAUDE.md`). Go + Chi + PostgreSQL; vanilla JS SPA; Claude and Gemini with tool-calling.
+
+- **Deeper reference:** root `CLAUDE.md` (layout, env vars, auth, chat/voice, imports, billing DB).
+- **Do not overwrite or commit `.env`** (secrets). Do not commit stray binaries.
+- **Migrations:** DDL runs from `internal/database/` (e.g. `migrate.go`, `migrate_billing.go`). **Do not change already-applied migration steps in place** — add new statements or helpers; keep `sqlc/schema.sql` in sync for documentation/sqlc.
+- **Repositories:** hand-written pgx in `internal/repository/` — do not wire generated sqlc output as the primary access path (see `CLAUDE.md`).
+- **Frontend:** no Node/npm build; keep vanilla JS unless the project explicitly changes stack.
+- **Scope:** prefer minimal, task-focused diffs; match existing naming and patterns in touched files.

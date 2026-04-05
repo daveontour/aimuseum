@@ -1,0 +1,15 @@
+---
+description: AI providers — tools and access
+globs: "internal/ai/**/*.go"
+alwaysApply: false
+---
+
+# AI tools and providers
+
+- **Tool definitions:** `internal/ai/provider.go` → `GetToolDefinitions()`
+- **Execution:** `internal/ai/tools.go` → `NewToolExecutor()` switch (add new cases there)
+- **Access tiers (Visitor / Master):** `internal/ai/tool_access.go` when tools need tier gating
+- **User scoping:** SQL in `tools.go` must apply **`toolsUIDFilter`** / `user_id` in the **WHERE** clause — never append `AND user_id` after **`ORDER BY`**, **`LIMIT`**, or **`OFFSET`** (filter belongs before those clauses).
+- **Response metadata:** providers should surface **`embedded_json`** (and related keys) in chat metadata so the SPA can render response action buttons; Gemini and Claude paths should stay consistent.
+
+Keep JSON schemas for tools aligned with handler expectations and existing tool style.
