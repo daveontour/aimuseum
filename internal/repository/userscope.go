@@ -22,6 +22,17 @@ func addUIDFilter(q string, args []any, uid int64) (string, []any) {
 	return q + fmt.Sprintf(" AND user_id = $%d", len(args)), args
 }
 
+// addUIDFilterNullableGlobal appends "AND (user_id = $N OR user_id IS NULL)" when uid > 0.
+// NULL user_id marks rows seeded for all tenants (JSON seed at startup); they are visible
+// for list/get/exists but remain non-updatable via addUIDFilter on UPDATE/DELETE.
+func addUIDFilterNullableGlobal(q string, args []any, uid int64) (string, []any) {
+	if uid == 0 {
+		return q, args
+	}
+	args = append(args, uid)
+	return q + fmt.Sprintf(" AND (user_id = $%d OR user_id IS NULL)", len(args)), args
+}
+
 // addUIDFilterQualified appends "AND <alias>.user_id = $N" when uid > 0.
 // Use when the query JOINs tables that each have user_id (multitenancy), e.g. media_items mi + post_media pm.
 func addUIDFilterQualified(q string, args []any, uid int64, tableAlias string) (string, []any) {

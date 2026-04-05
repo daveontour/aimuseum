@@ -359,7 +359,7 @@ func (r *ContactRepo) ListEmailMatches(ctx context.Context, primaryName string) 
 		args = append(args, "%"+primaryName+"%")
 		q += fmt.Sprintf(" AND primary_name ILIKE $%d", len(args))
 	}
-	q, args = addUIDFilter(q, args, uid)
+	q, args = addUIDFilterNullableGlobal(q, args, uid)
 	q += " ORDER BY primary_name, email"
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -381,7 +381,7 @@ func (r *ContactRepo) GetEmailMatchByID(ctx context.Context, id int64) (*model.E
 	uid := uidFromCtx(ctx)
 	q := `SELECT id, primary_name, email, created_at, updated_at FROM email_matches WHERE id=$1`
 	args := []any{id}
-	q, args = addUIDFilter(q, args, uid)
+	q, args = addUIDFilterNullableGlobal(q, args, uid)
 	m, err := scanEmailMatch(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
@@ -396,7 +396,7 @@ func (r *ContactRepo) EmailMatchExists(ctx context.Context, primaryName, email s
 	uid := uidFromCtx(ctx)
 	q := `SELECT COUNT(*) FROM email_matches WHERE primary_name=$1 AND email=$2`
 	args := []any{primaryName, email}
-	q, args = addUIDFilter(q, args, uid)
+	q, args = addUIDFilterNullableGlobal(q, args, uid)
 	var n int
 	err := r.pool.QueryRow(ctx, q, args...).Scan(&n)
 	return n > 0, err
@@ -470,7 +470,7 @@ func (r *ContactRepo) ListEmailExclusions(ctx context.Context, search string, na
 	if len(conds) > 0 {
 		q += " AND " + joinAnd(conds)
 	}
-	q, args = addUIDFilter(q, args, uid)
+	q, args = addUIDFilterNullableGlobal(q, args, uid)
 	q += " ORDER BY email, name"
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -492,7 +492,7 @@ func (r *ContactRepo) GetEmailExclusionByID(ctx context.Context, id int64) (*mod
 	uid := uidFromCtx(ctx)
 	q := `SELECT id, email, name, name_email, created_at, updated_at FROM email_exclusions WHERE id=$1`
 	args := []any{id}
-	q, args = addUIDFilter(q, args, uid)
+	q, args = addUIDFilterNullableGlobal(q, args, uid)
 	e, err := scanEmailExclusion(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
@@ -507,7 +507,7 @@ func (r *ContactRepo) ExclusionExists(ctx context.Context, email, name string, n
 	uid := uidFromCtx(ctx)
 	q := `SELECT COUNT(*) FROM email_exclusions WHERE email=$1 AND name=$2 AND name_email=$3`
 	args := []any{email, name, nameEmail}
-	q, args = addUIDFilter(q, args, uid)
+	q, args = addUIDFilterNullableGlobal(q, args, uid)
 	var n int
 	err := r.pool.QueryRow(ctx, q, args...).Scan(&n)
 	return n > 0, err
@@ -581,7 +581,7 @@ func (r *ContactRepo) ListEmailClassifications(ctx context.Context, name, classi
 	if len(conds) > 0 {
 		q += " AND " + joinAnd(conds)
 	}
-	q, args = addUIDFilter(q, args, uid)
+	q, args = addUIDFilterNullableGlobal(q, args, uid)
 	q += " ORDER BY classification, name"
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -603,7 +603,7 @@ func (r *ContactRepo) GetEmailClassificationByID(ctx context.Context, id int64) 
 	uid := uidFromCtx(ctx)
 	q := `SELECT id, name, classification, created_at, updated_at FROM email_classifications WHERE id=$1`
 	args := []any{id}
-	q, args = addUIDFilter(q, args, uid)
+	q, args = addUIDFilterNullableGlobal(q, args, uid)
 	c, err := scanEmailClassification(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
@@ -618,7 +618,7 @@ func (r *ContactRepo) ClassificationExists(ctx context.Context, name, classifica
 	uid := uidFromCtx(ctx)
 	q := `SELECT COUNT(*) FROM email_classifications WHERE name=$1 AND classification=$2`
 	args := []any{name, classification}
-	q, args = addUIDFilter(q, args, uid)
+	q, args = addUIDFilterNullableGlobal(q, args, uid)
 	var n int
 	err := r.pool.QueryRow(ctx, q, args...).Scan(&n)
 	return n > 0, err
@@ -672,7 +672,7 @@ func (r *ContactRepo) GetClassificationByNameLower(ctx context.Context, name str
 	uid := uidFromCtx(ctx)
 	q := `SELECT id, name, classification, created_at, updated_at FROM email_classifications WHERE LOWER(name)=LOWER($1)`
 	args := []any{name}
-	q, args = addUIDFilter(q, args, uid)
+	q, args = addUIDFilterNullableGlobal(q, args, uid)
 	q += " LIMIT 1"
 	c, err := scanEmailClassification(r.pool.QueryRow(ctx, q, args...))
 	if err != nil {

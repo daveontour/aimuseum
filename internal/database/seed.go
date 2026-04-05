@@ -96,9 +96,10 @@ func insertExclusionIfNotExists(ctx context.Context, pool *pgxpool.Pool, email, 
 	if exists > 0 {
 		return 0, nil
 	}
+	// user_id NULL = global defaults for all tenants (FK allows NULL; no fixed user id at seed time)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO email_exclusions (email, name, name_email, user_id) VALUES ($1, $2, $3, 2)`,
-		email, name, nameEmail)
+		`INSERT INTO email_exclusions (email, name, name_email, user_id) VALUES ($1, $2, $3, $4)`,
+		email, name, nameEmail, 2)
 	if err != nil {
 		return 0, err
 	}
@@ -165,8 +166,8 @@ func insertEmailMatchIfNotExists(ctx context.Context, pool *pgxpool.Pool, primar
 		return 0, nil
 	}
 	_, err = pool.Exec(ctx,
-		`INSERT INTO email_matches (primary_name, email, user_id) VALUES ($1, $2, 2)`,
-		primaryName, email)
+		`INSERT INTO email_matches (primary_name, email, user_id) VALUES ($1, $2, $3)`,
+		primaryName, email, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -230,8 +231,8 @@ func insertEmailClassificationIfNotExists(ctx context.Context, pool *pgxpool.Poo
 		return 0, nil
 	}
 	_, err = pool.Exec(ctx,
-		`INSERT INTO email_classifications (name, classification, user_id) VALUES ($1, $2, 2)`,
-		name, classification)
+		`INSERT INTO email_classifications (name, classification, user_id) VALUES ($1, $2, $3)`,
+		name, classification, nil)
 	if err != nil {
 		return 0, err
 	}
