@@ -51,6 +51,12 @@ func (s *ChatService) GenerateHaveAChatTurn(
 			provider = cp
 			providerName = "claude"
 		}
+	} else if speakingProviderKey == "localai" {
+		lp := s.effectiveLocalAIProvider()
+		if lp != nil && lp.IsAvailable() {
+			provider = lp
+			providerName = "localai"
+		}
 	}
 	if provider == nil {
 		provider = s.effectiveGeminiProvider(ctx, r, "")

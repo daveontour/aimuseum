@@ -129,6 +129,10 @@ type AIConfig struct {
 	ClaudeModelName string
 
 	TavilyAPIKey string
+
+	LocalAIBaseURL   string
+	LocalAIAPIKey    string
+	LocalAIModelName string
 }
 
 // AttachmentConfig holds attachment filtering settings.
@@ -305,6 +309,10 @@ func loadAIConfig() AIConfig {
 		ClaudeModelName: getenv("CLAUDE_MODEL_NAME", "claude-sonnet-4-6"),
 
 		TavilyAPIKey: os.Getenv("TAVILY_API_KEY"),
+
+		LocalAIBaseURL:   os.Getenv("LOCALAI_BASE_URL"),
+		LocalAIAPIKey:    os.Getenv("LOCALAI_API_KEY"),
+		LocalAIModelName: getenv("LOCALAI_MODEL_NAME", "local-model"),
 	}
 }
 

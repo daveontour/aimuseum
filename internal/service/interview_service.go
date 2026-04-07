@@ -499,6 +499,12 @@ func (s *ChatService) pickInterviewProvider(ctx context.Context, r *http.Request
 			return cp, "claude"
 		}
 	}
+	if preferred == "localai" {
+		lp := s.effectiveLocalAIProvider()
+		if lp != nil && lp.IsAvailable() {
+			return lp, "localai"
+		}
+	}
 	gp := s.effectiveGeminiProvider(ctx, r, "")
 	if gp != nil && gp.IsAvailable() {
 		return gp, "gemini"

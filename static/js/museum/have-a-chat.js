@@ -99,7 +99,7 @@ const HaveAChat = (() => {
         // LLM badge (secondary — shows which model is speaking)
         const llmBadge = document.createElement('span');
         llmBadge.className = 'have-a-chat-llm-badge have-a-chat-llm-' + provider;
-        llmBadge.textContent = provider === 'claude' ? 'Claude' : 'Gemini';
+        llmBadge.textContent = provider === 'claude' ? 'Claude' : provider === 'localai' ? 'Local AI' : 'Gemini';
 
         header.appendChild(img);
         header.appendChild(nameLabel);
@@ -248,7 +248,7 @@ const HaveAChat = (() => {
             const voiceKey  = _currentSlot === 'a' ? _voiceA : _voiceB;
             const provider  = _currentSlot === 'a' ? _providerA : _providerB;
             const voiceName = _voiceNames[voiceKey] || voiceKey;
-            const llmLabel  = provider === 'claude' ? 'Claude' : 'Gemini';
+            const llmLabel  = provider === 'claude' ? 'Claude' : provider === 'localai' ? 'Local AI' : 'Gemini';
             _setStatus(`${voiceName} (${llmLabel}) is thinking…`);
 
             try {

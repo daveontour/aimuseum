@@ -69,15 +69,16 @@ const App = (() => {
     async function getLLMProviderAvailabilityPair() {
         try {
             const res = await fetch('/chat/availability', { credentials: 'same-origin' });
-            if (!res.ok) return { gemini: true, claude: true };
+            if (!res.ok) return { gemini: true, claude: true, localai: false };
             const av = await res.json();
-            return { gemini: !!av.gemini_available, claude: !!av.claude_available };
+            return { gemini: !!av.gemini_available, claude: !!av.claude_available, localai: !!av.localai_available };
         } catch (e) {
-            return { gemini: true, claude: true };
+            return { gemini: true, claude: true, localai: false };
         }
     }
 
     function otherLLMProvider(p) {
+        if (p === 'localai') return 'gemini';
         return p === 'gemini' ? 'claude' : 'gemini';
     }
 
@@ -104,7 +105,9 @@ const App = (() => {
         return { ok: true, data };
     }
 
-    /** On LLM error, retry once with the other provider if it is available; update AI Provider selector on success. */
+    /** On LLM error, retry once with the other provider if it is available; update AI Provider selector on success.
+     *  LocalAI is never used as an automatic failover target, and selecting it disables cloud failover
+     *  (the user explicitly chose a local model and should not be silently routed to a cloud provider). */
     async function runChatWithProviderFailover(url, buildPayload) {
         const select = typeof DOM !== 'undefined' ? DOM.llmProviderSelect : null;
         const primary = (select && select.value) ? select.value : 'gemini';
@@ -112,7 +115,15 @@ const App = (() => {
         if (first.ok) {
             return { ok: true, data: first.data, switched: false };
         }
+        // Never failover away from an explicitly chosen local provider.
+        if (primary === 'localai') {
+            return { ok: false, error: first.error || 'Local AI request failed', data: first.data };
+        }
         const alt = otherLLMProvider(primary);
+        // Also never failover TO localai automatically.
+        if (alt === 'localai') {
+            return { ok: false, error: first.error || 'Request failed', data: first.data };
+        }
         const av = await getLLMProviderAvailabilityPair();
         const altAvailable = alt === 'gemini' ? av.gemini : av.claude;
         if (!altAvailable) {
@@ -1231,15 +1242,20 @@ const App = (() => {
                 }
                 const gOk = !!av.gemini_available;
                 const cOk = !!av.claude_available;
+                const lOk = !!av.localai_available;
                 const gemVal = gOk
                     ? '<strong style="color:#15803d;">Ready</strong> — Gemini can be selected as AI Provider'
                     : '<strong style="color:#b91c1c;">Not available</strong> — configure a Gemini API key';
                 const claVal = cOk
                     ? '<strong style="color:#15803d;">Ready</strong> — Claude can be selected as AI Provider'
                     : '<strong style="color:#b91c1c;">Not available</strong> — configure an Anthropic API key';
+                const localVal = lOk
+                    ? '<strong style="color:#15803d;">Ready</strong> — Local AI can be selected as AI Provider'
+                    : '<strong style="color:#b91c1c;">Not available</strong> — set LOCALAI_BASE_URL in server config';
                 const parts = [];
                 parts.push(row2('<span style="color:#64748b;">Gemini</span>', `<span>${gemVal}</span>`));
                 parts.push(row2('<span style="color:#64748b;">Claude</span>', `<span>${claVal}</span>`));
+                parts.push(row2('<span style="color:#64748b;">Local AI</span>', `<span>${localVal}</span>`));
                 if (me && me.llm_settings) {
                     const ls = me.llm_settings;
                     const sess = !!ls.session_scoped;
@@ -1265,7 +1281,7 @@ const App = (() => {
                 const lbl = document.getElementById('overview-llm-keys-open-btn-label');
                 archiveOverviewMeForKeys = null;
                 if (wrap) {
-                    if (!gOk && !cOk && me) {
+                    if (!gOk && !cOk && !lOk && me) {
                         wrap.style.display = 'block';
                         archiveOverviewMeForKeys = me;
                         if (lbl) {
@@ -3659,13 +3675,20 @@ const App = (() => {
             const av = await res.json();
             const gemini_available = !!av.gemini_available;
             const claude_available = !!av.claude_available;
+            const localai_available = !!av.localai_available;
             const geminiOpt = select.querySelector('option[value="gemini"]');
             const claudeOpt = select.querySelector('option[value="claude"]');
+            const localaiOpt = select.querySelector('option[value="localai"]');
             if (geminiOpt) geminiOpt.disabled = !gemini_available;
             if (claudeOpt) claudeOpt.disabled = !claude_available;
+            if (localaiOpt) localaiOpt.disabled = !localai_available;
             const current = select.value;
-            if ((current === 'gemini' && !gemini_available) || (current === 'claude' && !claude_available)) {
-                select.value = gemini_available ? 'gemini' : (claude_available ? 'claude' : 'gemini');
+            const currentUnavailable =
+                (current === 'gemini' && !gemini_available) ||
+                (current === 'claude' && !claude_available) ||
+                (current === 'localai' && !localai_available);
+            if (currentUnavailable) {
+                select.value = gemini_available ? 'gemini' : (claude_available ? 'claude' : (localai_available ? 'localai' : 'gemini'));
             }
             if (typeof UI !== 'undefined' && UI.updateChatContextStatusBarFromAvailability) {
                 UI.updateChatContextStatusBarFromAvailability(av);

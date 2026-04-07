@@ -27,6 +27,7 @@ type TemplateHandler struct {
 	pythonStaticDir       string
 	defaultGeminiOK       bool
 	defaultClaudeOK       bool
+	defaultLocalAIOK      bool
 	pageTitle             string
 	deploymentNatureLocal bool
 }
@@ -40,6 +41,7 @@ func NewTemplateHandler(subjectRepo *repository.SubjectConfigRepo, userRepo *rep
 		pythonStaticDir:       cfg.App.AssetStaticDir,
 		defaultGeminiOK:       cfg.AI.GeminiAPIKey != "",
 		defaultClaudeOK:       cfg.AI.AnthropicAPIKey != "",
+		defaultLocalAIOK:      strings.TrimSpace(cfg.AI.LocalAIBaseURL) != "",
 		pageTitle:             cfg.App.PageTitle,
 		deploymentNatureLocal: strings.EqualFold(strings.TrimSpace(cfg.App.DeploymentNature), "local"),
 	}
@@ -167,6 +169,11 @@ func (h *TemplateHandler) GetFoundationJS(w http.ResponseWriter, r *http.Request
 		ctx["claude_configured"] = "True"
 	} else {
 		ctx["claude_configured"] = "False"
+	}
+	if h.defaultLocalAIOK {
+		ctx["localai_configured"] = "True"
+	} else {
+		ctx["localai_configured"] = "False"
 	}
 
 	content, err := h.readFile(h.pythonStaticDir, filepath.Join("js", "museum", "foundation.js"))

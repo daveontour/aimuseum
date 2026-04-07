@@ -55,6 +55,9 @@ type ChatService struct {
 	defaultAnthropicKey string
 	defaultClaudeModel  string
 	defaultTavilyKey    string
+	defaultLocalAIURL   string
+	defaultLocalAIKey   string
+	defaultLocalAIModel string
 	pythonStaticDir     string
 	pepper              string
 	sessionStore        *keystore.SessionMasterStore
@@ -73,6 +76,7 @@ func NewChatService(
 	pool *pgxpool.Pool,
 	userRepo *repository.UserRepo,
 	defaultGeminiKey, defaultGeminiModel, defaultAnthropicKey, defaultClaudeModel, defaultTavilyKey string,
+	defaultLocalAIURL, defaultLocalAIKey, defaultLocalAIModel string,
 	pythonStaticDir string,
 	pepper string,
 	sessionStore *keystore.SessionMasterStore,
@@ -92,6 +96,9 @@ func NewChatService(
 		defaultAnthropicKey: defaultAnthropicKey,
 		defaultClaudeModel:  defaultClaudeModel,
 		defaultTavilyKey:    defaultTavilyKey,
+		defaultLocalAIURL:   defaultLocalAIURL,
+		defaultLocalAIKey:   defaultLocalAIKey,
+		defaultLocalAIModel: defaultLocalAIModel,
 		pythonStaticDir:     pythonStaticDir,
 		pepper:              pepper,
 		sessionStore:        sessionStore,
@@ -235,6 +242,8 @@ func (s *ChatService) applyUsageKeySourceToLLMUsage(ctx context.Context, r *http
 		v = gS
 	case "claude":
 		v = cS
+	case "localai":
+		v = true // LocalAI always runs on the server
 	default:
 		return
 	}
@@ -250,6 +259,18 @@ func (s *ChatService) effectiveGeminiProvider(ctx context.Context, r *http.Reque
 func (s *ChatService) effectiveClaudeProvider(ctx context.Context, r *http.Request, authSessionID string) appai.ChatProvider {
 	_, _, k, m, _ := s.effectiveAIConfig(ctx, r, authSessionID)
 	return appai.NewClaudeProvider(k, m)
+}
+
+// effectiveLocalAIProvider returns a LocalAIProvider using the server-level config.
+// LocalAI does not support per-user API key overrides — it always uses the server default.
+func (s *ChatService) effectiveLocalAIProvider() appai.ChatProvider {
+	return appai.NewLocalAIProvider(s.defaultLocalAIURL, s.defaultLocalAIKey, s.defaultLocalAIModel)
+}
+
+// LocalAIAvailable reports whether the LocalAI provider is configured.
+func (s *ChatService) LocalAIAvailable() bool {
+	p := s.effectiveLocalAIProvider()
+	return p != nil && p.IsAvailable()
 }
 
 func (s *ChatService) perRequestGetRAM(r *http.Request) appai.RAMMasterGetter {
@@ -322,15 +343,17 @@ func (s *ChatService) ClaudeAvailable(ctx context.Context, r *http.Request) bool
 
 // GenerateResponse runs a full chat generation cycle.
 func (s *ChatService) GenerateResponse(ctx context.Context, r *http.Request, req model.ChatRequest) (*model.ChatResponse, error) {
-	// Choose provider
-	provider := s.effectiveGeminiProvider(ctx, r, "")
-	providerName := "gemini"
-	if req.Provider == "claude" {
-		cp := s.effectiveClaudeProvider(ctx, r, "")
-		if cp != nil && cp.IsAvailable() {
-			provider = cp
-			providerName = "claude"
-		}
+	// Choose provider explicitly so the requested provider is always honoured.
+	var provider appai.ChatProvider
+	providerName := req.Provider
+	switch req.Provider {
+	case "claude":
+		provider = s.effectiveClaudeProvider(ctx, r, "")
+	case "localai":
+		provider = s.effectiveLocalAIProvider()
+	default:
+		providerName = "gemini"
+		provider = s.effectiveGeminiProvider(ctx, r, "")
 	}
 	if provider == nil || !provider.IsAvailable() {
 		err := fmt.Errorf("provider '%s' is not available — check API key", providerName)
@@ -482,15 +505,17 @@ func (s *ChatService) GenerateResponse(ctx context.Context, r *http.Request, req
 
 // Generate A Random Question
 func (s *ChatService) GenerateRandomQuestion(ctx context.Context, r *http.Request, req model.ChatRequest) (*model.ChatResponse, error) {
-	// Choose provider
-	provider := s.effectiveGeminiProvider(ctx, r, "")
-	providerName := "gemini"
-	if req.Provider == "claude" {
-		cp := s.effectiveClaudeProvider(ctx, r, "")
-		if cp != nil && cp.IsAvailable() {
-			provider = cp
-			providerName = "claude"
-		}
+	// Choose provider explicitly so the requested provider is always honoured.
+	var provider appai.ChatProvider
+	providerName := req.Provider
+	switch req.Provider {
+	case "claude":
+		provider = s.effectiveClaudeProvider(ctx, r, "")
+	case "localai":
+		provider = s.effectiveLocalAIProvider()
+	default:
+		providerName = "gemini"
+		provider = s.effectiveGeminiProvider(ctx, r, "")
 	}
 	if provider == nil || !provider.IsAvailable() {
 		err := fmt.Errorf("provider '%s' is not available — check API key", providerName)
@@ -830,6 +855,7 @@ func (s *ChatService) GenerateCompleteProfile(ctx context.Context, name string, 
 	}
 	claudeP := s.effectiveClaudeProvider(ctx, nil, authSessionID)
 	geminiP := s.effectiveGeminiProvider(ctx, nil, authSessionID)
+	localaiP := s.effectiveLocalAIProvider()
 	if provider == "claude" && (claudeP == nil || !claudeP.IsAvailable()) {
 		provider = "gemini" // fallback
 	}
@@ -850,9 +876,13 @@ func (s *ChatService) GenerateCompleteProfile(ctx context.Context, name string, 
 		if gp, ok := geminiP.(*appai.GeminiProvider); ok && gp != nil {
 			ai = gp
 		}
+	case "localai":
+		if lp, ok := localaiP.(*appai.LocalAIProvider); ok && lp != nil {
+			ai = lp
+		}
 	}
 	if ai == nil {
-		return fmt.Errorf("no AI provider available for complete profile (gemini or claude API key required)")
+		return fmt.Errorf("no AI provider available for complete profile (gemini, claude, or localai required)")
 	}
 
 	var interimSummary string

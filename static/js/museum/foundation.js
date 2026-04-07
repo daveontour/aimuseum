@@ -86,7 +86,8 @@ const CONSTANTS = {
     },
     LLM_PROVIDERS: {
         GEMINI: "{{gemini_configured}}",
-        CLAUDE: "{{claude_configured}}"
+        CLAUDE: "{{claude_configured}}",
+        LOCALAI: "{{localai_configured}}"
     },
     /** True when DEPLOYMENT_NATURE=local — path-based import tiles are shown; otherwise they are hidden. */
     DEPLOYMENT_NATURE_LOCAL: "{{deployment_nature_local}}",
@@ -554,8 +555,9 @@ const UI = (() => {
         const wrap = document.getElementById('chat-context-failover-wrap');
         const el = document.getElementById('chat-context-failover-msg');
         if (!el || !wrap) return;
-        const fromN = fromProvider === 'claude' ? 'Claude' : 'Gemini';
-        const toN = toProvider === 'claude' ? 'Claude' : 'Gemini';
+        const providerLabel = (p) => p === 'claude' ? 'Claude' : p === 'localai' ? 'Local AI' : 'Gemini';
+        const fromN = providerLabel(fromProvider);
+        const toN = providerLabel(toProvider);
         el.textContent = `Switched to ${toN} after ${fromN} returned an error.`;
         wrap.style.display = 'inline-flex';
         syncChatContextStatusBarVisibility();

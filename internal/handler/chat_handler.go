@@ -60,6 +60,7 @@ func (h *ChatHandler) GetAvailability(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"gemini_available":                    h.svc.GeminiAvailable(r.Context(), r),
 		"claude_available":                    h.svc.ClaudeAvailable(r.Context(), r),
+		"localai_available":                   h.svc.LocalAIAvailable(),
 		"llm_tools_count":                     tools,
 		"reference_documents_available_count": refDocs,
 	})
