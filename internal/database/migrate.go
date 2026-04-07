@@ -30,6 +30,10 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		pgTrgmAvailable = false
 	}
 
+	if _, err := conn.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS vector"); err != nil {
+		slog.Warn("pgvector extension unavailable — vector similarity / embedding features disabled", "err", err)
+	}
+
 	// ── Tables and indexes ────────────────────────────────────────────────────
 	for _, stmt := range schemaDDL() {
 		if _, err := conn.Exec(ctx, stmt); err != nil {
@@ -39,6 +43,31 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 			}
 			return fmt.Errorf("migration statement failed (%s): %w", preview, err)
 		}
+	}
+
+	if _, err := conn.Exec(ctx, `ALTER TABLE emails ADD COLUMN IF NOT EXISTS embedding_vector vector(2560)`); err != nil {
+		return fmt.Errorf("alter emails.embedding_vector: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `ALTER TABLE messages ADD COLUMN IF NOT EXISTS embedding_vector vector(2560)`); err != nil {
+		return fmt.Errorf("alter messages.embedding_vector: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `ALTER TABLE facebook_albums ADD COLUMN IF NOT EXISTS embedding_vector vector(2560)`); err != nil {
+		return fmt.Errorf("alter facebook_albums.embedding_vector: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `ALTER TABLE facebook_posts ADD COLUMN IF NOT EXISTS embedding_vector vector(2560)`); err != nil {
+		return fmt.Errorf("alter facebook_posts.embedding_vector: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `ALTER TABLE emails ALTER COLUMN embedding_vector TYPE vector(2560)`); err != nil {
+		return fmt.Errorf("resize emails.embedding_vector to vector(2560): %w", err)
+	}
+	if _, err := conn.Exec(ctx, `ALTER TABLE messages ALTER COLUMN embedding_vector TYPE vector(2560)`); err != nil {
+		return fmt.Errorf("resize messages.embedding_vector to vector(2560): %w", err)
+	}
+	if _, err := conn.Exec(ctx, `ALTER TABLE facebook_albums ALTER COLUMN embedding_vector TYPE vector(2560)`); err != nil {
+		return fmt.Errorf("resize facebook_albums.embedding_vector to vector(2560): %w", err)
+	}
+	if _, err := conn.Exec(ctx, `ALTER TABLE facebook_posts ALTER COLUMN embedding_vector TYPE vector(2560)`); err != nil {
+		return fmt.Errorf("resize facebook_posts.embedding_vector to vector(2560): %w", err)
 	}
 
 	// Widen media_items.source_reference for long upload paths (VARCHAR(500) → TEXT on existing DBs).

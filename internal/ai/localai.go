@@ -315,12 +315,63 @@ func buildLocalAIMessages(req GenerateRequest, history []ConvTurn, systemPrompt 
 	return messages
 }
 
-func localaiPost(ctx context.Context, baseURL, apiKey string, body map[string]any) (map[string]any, error) {
+// Embed calls the OpenAI-compatible /v1/embeddings endpoint and returns the
+// embedding vector for the given text. The caller supplies the embedding model
+// name because it is typically different from the chat completion model.
+// Returns a nil slice and an error when the server is unreachable or unconfigured.
+func (p *LocalAIProvider) Embed(ctx context.Context, text, embeddingModel string) ([]float32, error) {
+	if p == nil || p.baseURL == "" {
+		return nil, fmt.Errorf("localai: not configured")
+	}
+	if strings.TrimSpace(text) == "" {
+		return nil, fmt.Errorf("localai: embed called with empty text")
+	}
+	model := embeddingModel
+	if strings.TrimSpace(model) == "" {
+		model = p.modelName
+	}
+
+	body := map[string]any{
+		"model": model,
+		"input": text,
+	}
+	resp, err := localaiPost(ctx, p.baseURL, p.apiKey, body, "/v1/embeddings")
+	if err != nil {
+		return nil, fmt.Errorf("localai embed: %w", err)
+	}
+
+	// Response shape: { "data": [ { "embedding": [float, ...], "index": 0, "object": "embedding" } ], ... }
+	dataRaw, _ := resp["data"].([]any)
+	if len(dataRaw) == 0 {
+		return nil, fmt.Errorf("localai embed: empty data array in response")
+	}
+	first, _ := dataRaw[0].(map[string]any)
+	embRaw, _ := first["embedding"].([]any)
+	if len(embRaw) == 0 {
+		return nil, fmt.Errorf("localai embed: no embedding values in response")
+	}
+
+	vec := make([]float32, len(embRaw))
+	for i, v := range embRaw {
+		f, ok := v.(float64)
+		if !ok {
+			return nil, fmt.Errorf("localai embed: unexpected value type at index %d", i)
+		}
+		vec[i] = float32(f)
+	}
+	return vec, nil
+}
+
+func localaiPost(ctx context.Context, baseURL, apiKey string, body map[string]any, path ...string) (map[string]any, error) {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	url := baseURL + "/v1/chat/completions"
+	endpoint := "/v1/chat/completions"
+	if len(path) > 0 && path[0] != "" {
+		endpoint = path[0]
+	}
+	url := baseURL + endpoint
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
 	if err != nil {
 		return nil, err

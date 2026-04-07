@@ -130,9 +130,10 @@ type AIConfig struct {
 
 	TavilyAPIKey string
 
-	LocalAIBaseURL   string
-	LocalAIAPIKey    string
-	LocalAIModelName string
+	LocalAIBaseURL        string
+	LocalAIAPIKey         string
+	LocalAIModelName      string
+	LocalAIEmbeddingModel string
 }
 
 // AttachmentConfig holds attachment filtering settings.
@@ -310,9 +311,10 @@ func loadAIConfig() AIConfig {
 
 		TavilyAPIKey: os.Getenv("TAVILY_API_KEY"),
 
-		LocalAIBaseURL:   os.Getenv("LOCALAI_BASE_URL"),
-		LocalAIAPIKey:    os.Getenv("LOCALAI_API_KEY"),
-		LocalAIModelName: getenv("LOCALAI_MODEL_NAME", "local-model"),
+		LocalAIBaseURL:        os.Getenv("LOCALAI_BASE_URL"),
+		LocalAIAPIKey:         os.Getenv("LOCALAI_API_KEY"),
+		LocalAIModelName:      getenv("LOCALAI_MODEL_NAME", "local-model"),
+		LocalAIEmbeddingModel: getenv("LOCALAI_EMBEDDING_MODEL", ""),
 	}
 }
 

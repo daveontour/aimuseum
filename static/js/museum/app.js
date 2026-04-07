@@ -1510,7 +1510,7 @@ const App = (() => {
                 const response = await fetch('/api/import-control-last-run');
                 if (!response.ok) return;
                 const data = await response.json();
-                const importTypes = ['email_processing', 'imap_processing', 'filesystem', 'imported_images', 'filesystem_reference', 'reference_import', 'image_export', 'thumbnails', 'thumbnails_async', 'contacts', 'zip_whatsapp', 'zip_instagram', 'zip_imessage', 'zip_facebook', 'upload_photos', 'upload_zip'];
+                const importTypes = ['email_processing', 'imap_processing', 'filesystem', 'imported_images', 'filesystem_reference', 'reference_import', 'email_embeddings', 'message_embeddings', 'image_export', 'thumbnails', 'thumbnails_async', 'contacts', 'zip_whatsapp', 'zip_instagram', 'zip_imessage', 'zip_facebook', 'upload_photos', 'upload_zip'];
                 for (const importType of importTypes) {
                     const els = document.querySelectorAll(`[data-import-last-run="${importType}"]`);
                     const info = data[importType];
@@ -1996,6 +1996,8 @@ const App = (() => {
                 filesystem_reference: 'Filesystem References',
                 thumbnails: 'Thumbnails',
                 reference_import: 'Reference Images',
+                email_embeddings: 'Email Embeddings',
+                message_embeddings: 'Message Embeddings',
                 image_export: 'Export Images',
                 contacts: 'ProcessContacts'
             };
@@ -2341,6 +2343,8 @@ const App = (() => {
             imap_processing: '/imap/process/cancel',
             filesystem: '/images/import/cancel',
             reference_import: '/images/import-reference/cancel',
+            email_embeddings: '/emails/embeddings/backfill/cancel',
+            message_embeddings: '/messages/embeddings/backfill/cancel',
             image_export: '/images/export/cancel',
             thumbnails: '/images/process-thumbnails/cancel',
             contacts: '/contacts/extract/cancel'
@@ -2518,6 +2522,10 @@ const App = (() => {
                     return `File: ${data.current_file || '-'} | ${data.files_processed || 0}/${data.total_files || 0} | ${data.images_imported || 0} imported, ${data.images_referenced || 0} referenced, ${data.images_updated || 0} updated | ${data.errors || 0} errors`;
                 case 'reference_import':
                     return `Item: ${data.processed || 0}/${data.total || 0} | ${data.imported || 0} imported, ${data.skipped || 0} skipped | ${data.errors || 0} errors`;
+                case 'email_embeddings':
+                    return `Email: ${data.processed || 0}/${data.total || 0} | ${data.embedded || 0} embedded, ${data.skipped || 0} skipped | ${data.errors || 0} errors`;
+                case 'message_embeddings':
+                    return `Message: ${data.processed || 0}/${data.total || 0} | ${data.embedded || 0} embedded, ${data.skipped || 0} skipped | ${data.errors || 0} errors`;
                 case 'image_export':
                     return `Item: ${data.processed || 0}/${data.total || 0} | ${data.exported || 0} exported, ${data.skipped || 0} skipped | ${data.errors || 0} errors`;
                 case 'thumbnails':
@@ -2601,6 +2609,8 @@ const App = (() => {
             filesystem: { needsInput: true, title: 'Filesystem Image Import', fields: [{ id: 'root_directory', key: 'filesystem_import_directory', label: 'Root Directory(ies)', placeholder: 'e.g., C:\\Users\\Dave\\Pictures; D:\\Photos', required: true }, { id: 'max_images', key: 'filesystem_import_max_images', label: 'Max Images (Optional)', placeholder: 'Leave empty for all', required: false, type: 'number' }, { id: 'reference_mode', key: 'filesystem_import_reference_mode', label: 'Reference only — leave images on filesystem', required: false, type: 'checkbox' }], run: async (vals) => { const body = { root_directory: vals.root_directory, create_thumb_and_get_exif: false, reference_mode: !!vals.reference_mode }; if (vals.max_images) body.max_images = parseInt(vals.max_images, 10); const r = await fetch('/images/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return r; }, stream: '/images/import/stream' },
             filesystem_reference: { needsInput: true, title: 'Reference images on filesystem (local)', fields: [{ id: 'root_directory', key: 'filesystem_reference_import_directory', label: 'Folder(s) on this machine — separate with semicolons. Each folder is scanned recursively; only paths are stored in the archive (images stay on disk).', placeholder: 'e.g., C:\\Photos\\Vacation; D:\\Pictures', required: true }, { id: 'max_images', key: 'filesystem_reference_import_max_images', label: 'Max images (optional)', placeholder: 'Leave empty for all', required: false, type: 'number' }], run: async (vals) => { const body = { root_directory: vals.root_directory, create_thumb_and_get_exif: false, reference_mode: true }; if (vals.max_images) body.max_images = parseInt(vals.max_images, 10); const r = await fetch('/images/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return r; }, stream: '/images/import/stream' },
             reference_import: { needsInput: false, title: 'Import Reference Images to Database', run: async () => { const r = await fetch('/images/import-reference', { method: 'POST' }); return r; }, stream: '/images/import-reference/stream' },
+            email_embeddings: { needsInput: false, title: 'Generate missing email embedding vectors', run: async () => { const r = await fetch('/emails/embeddings/backfill', { method: 'POST' }); return r; }, stream: '/emails/embeddings/backfill/stream' },
+            message_embeddings: { needsInput: false, title: 'Generate missing message embedding vectors', run: async () => { const r = await fetch('/messages/embeddings/backfill', { method: 'POST' }); return r; }, stream: '/messages/embeddings/backfill/stream' },
             image_export: { needsInput: true, title: 'Export Images to Filesystem', fields: [{ id: 'target_directory', key: 'image_export_directory', label: 'Target Directory', placeholder: 'e.g., C:\\Users\\Dave\\Exports\\images', required: true }], run: async (vals) => { const r = await fetch('/images/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target_directory: vals.target_directory }) }); return r; }, stream: '/images/export/stream' },
             thumbnails: { needsInput: false, title: 'Image Processing', run: async () => { const r = await fetch('/images/process-thumbnails', { method: 'POST' }); return r; }, stream: '/images/process-thumbnails/stream' },
             thumbnails_async: { needsInput: false, title: 'Image Processing (Async)', run: async () => { const r = await fetch('/images/process-thumbnails/async', { method: 'POST' }); return r; }, stream: null },
@@ -3091,12 +3101,14 @@ const App = (() => {
             try {
                 const res = await cfg.run(values);
                 let result = {};
+                let rawText = '';
                 try {
-                    const text = await res.text();
-                    if (text) result = JSON.parse(text);
+                    rawText = await res.text();
+                    if (rawText) result = JSON.parse(rawText);
                 } catch (_) {}
                 if (!res.ok) {
-                    finishImport(jobKey, false, result.detail || 'Failed to start');
+                    const fallback = (rawText || '').trim();
+                    finishImport(jobKey, false, result.detail || fallback || 'Failed to start');
                     return;
                 }
                 if (cfg.stream) {
@@ -3110,6 +3122,7 @@ const App = (() => {
         }
 
         async function triggerImport(importType) {
+            if (!(await ensureMasterKeyForDataImport())) return;
             const jobKey = makeJobKey(importType, {});
             if (runningJobs.has(jobKey)) return;
             if (importType === 'email_processing') {
@@ -3278,13 +3291,15 @@ const App = (() => {
         })();
 
         async function checkInitialImportStatus() {
-            const types = ['upload_zip','email_processing','imap_processing','filesystem','reference_import','image_export','thumbnails','contacts'];
+            const types = ['upload_zip','email_processing','imap_processing','filesystem','reference_import','email_embeddings','message_embeddings','image_export','thumbnails','contacts'];
             const statusEndpoints = {
                 upload_zip: '/import/upload/status',
                 email_processing: '/gmail/process/status',
                 imap_processing: '/imap/process/status',
                 filesystem: '/images/import/status',
                 reference_import: '/images/import-reference/status',
+                email_embeddings: '/emails/embeddings/backfill/status',
+                message_embeddings: '/messages/embeddings/backfill/status',
                 image_export: '/images/export/status',
                 thumbnails: '/images/process-thumbnails/status',
                 contacts: '/contacts/extract/status'

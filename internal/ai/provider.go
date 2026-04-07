@@ -136,6 +136,28 @@ func toolDefinitions() []map[string]any {
 			},
 		},
 		{
+			"name":        "search_messages_by_similarity",
+			"description": "Vector similarity search over archived messages using embedding_vector. Accepts free text, embeds it, and returns the top 20 closest messages.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"text": map[string]any{"type": "string", "description": "Natural language query text to embed and search against messages"},
+				},
+				"required": []string{"text"},
+			},
+		},
+		{
+			"name":        "search_emails_by_similarity",
+			"description": "Vector similarity search over archived emails using embedding_vector. Accepts free text, embeds it, and returns the top 20 closest emails.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"text": map[string]any{"type": "string", "description": "Natural language query text to embed and search against emails"},
+				},
+				"required": []string{"text"},
+			},
+		},
+		{
 			"name":        "get_emails_by_contact",
 			"description": "Get plain text of emails where the sender or receiver matches the specified name or email address.",
 			"parameters": map[string]any{

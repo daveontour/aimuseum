@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ import (
 	"github.com/daveontour/aimuseum/internal/importstorage"
 	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/repository"
+	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -128,6 +130,16 @@ var (
 		"status": "idle", "status_line": nil, "total": 0, "processed": 0,
 		"exported": 0, "skipped": 0, "errors": 0, "error_message": nil, "error_messages": []string{},
 	})
+
+	emailEmbeddingBackfillJob = importer.NewImportJob("Email embedding backfill", map[string]any{
+		"status": "idle", "status_line": nil, "error_message": nil,
+		"total": 0, "processed": 0, "embedded": 0, "skipped": 0, "errors": 0,
+	})
+
+	messageEmbeddingBackfillJob = importer.NewImportJob("Message embedding backfill", map[string]any{
+		"status": "idle", "status_line": nil, "error_message": nil,
+		"total": 0, "processed": 0, "embedded": 0, "skipped": 0, "errors": 0,
+	})
 )
 
 // ── ImporterHandler ───────────────────────────────────────────────────────────
@@ -139,6 +151,7 @@ type ImporterHandler struct {
 	pool              *pgxpool.Pool
 	subjectConfigRepo *repository.SubjectConfigRepo
 	sessionStore      *keystore.SessionMasterStore
+	embeddingSvc      *service.EmbeddingService
 }
 
 // ImporterHandlerDeps holds dependencies for NewImporterHandler.
@@ -148,6 +161,7 @@ type ImporterHandlerDeps struct {
 	Pool              *pgxpool.Pool
 	SubjectConfigRepo *repository.SubjectConfigRepo
 	SessionStore      *keystore.SessionMasterStore
+	EmbeddingSvc      *service.EmbeddingService
 }
 
 // NewImporterHandler creates an ImporterHandler.
@@ -158,6 +172,7 @@ func NewImporterHandler(deps ImporterHandlerDeps) *ImporterHandler {
 		pool:              deps.Pool,
 		subjectConfigRepo: deps.SubjectConfigRepo,
 		sessionStore:      deps.SessionStore,
+		embeddingSvc:      deps.EmbeddingSvc,
 	}
 }
 
@@ -247,6 +262,18 @@ func (h *ImporterHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/emails/process/stream", h.EmailProcessStream)
 	r.Post("/emails/process/cancel", h.EmailProcessCancel)
 	r.Get("/emails/process/status", h.EmailProcessStatus)
+
+	// Email embedding backfill (embed rows where embedding_vector is NULL)
+	r.Post("/emails/embeddings/backfill", h.EmailEmbeddingBackfillStart)
+	r.Get("/emails/embeddings/backfill/stream", h.EmailEmbeddingBackfillStream)
+	r.Post("/emails/embeddings/backfill/cancel", h.EmailEmbeddingBackfillCancel)
+	r.Get("/emails/embeddings/backfill/status", h.EmailEmbeddingBackfillStatus)
+
+	// Message embedding backfill (embed rows where embedding_vector is NULL)
+	r.Post("/messages/embeddings/backfill", h.MessageEmbeddingBackfillStart)
+	r.Get("/messages/embeddings/backfill/stream", h.MessageEmbeddingBackfillStream)
+	r.Post("/messages/embeddings/backfill/cancel", h.MessageEmbeddingBackfillCancel)
+	r.Get("/messages/embeddings/backfill/status", h.MessageEmbeddingBackfillStatus)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1793,6 +1820,514 @@ func (h *ImporterHandler) EmailProcessCancel(w http.ResponseWriter, r *http.Requ
 }
 func (h *ImporterHandler) EmailProcessStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, emailProcessJob.Status())
+}
+
+func (h *ImporterHandler) EmailEmbeddingBackfillStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
+	if err := emailEmbeddingBackfillJob.AssertNotRunning(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if h.pool == nil {
+		writeError(w, http.StatusServiceUnavailable, "email embedding backfill not configured")
+		return
+	}
+	if h.embeddingSvc == nil || !h.embeddingSvc.IsAvailable() {
+		writeError(w, http.StatusServiceUnavailable, "embedding service not available — set LOCALAI_BASE_URL and LOCALAI_EMBEDDING_MODEL")
+		return
+	}
+
+	emailEmbeddingBackfillJob.Start()
+	emailEmbeddingBackfillJob.UpdateState(map[string]any{
+		"status": "in_progress", "status_line": "Starting email embedding backfill...",
+		"total": 0, "processed": 0, "embedded": 0, "skipped": 0, "errors": 0, "error_message": nil,
+	})
+	emailEmbeddingBackfillJob.Broadcast("status", map[string]any{"status_line": "Starting email embedding backfill..."})
+
+	uid := appctx.UserIDFromCtx(r.Context())
+	go runEmailEmbeddingBackfill(h.pool, h.embeddingSvc, emailEmbeddingBackfillJob, uid)
+
+	writeJSON(w, map[string]any{"message": "Email embedding backfill started", "status": "started"})
+}
+
+func runEmailEmbeddingBackfill(pool *pgxpool.Pool, embeddingSvc *service.EmbeddingService, job *importer.ImportJob, uid int64) {
+	ctx := context.WithValue(context.Background(), appctx.ContextKeyUserID, uid)
+	defer job.Finish()
+
+	rows, err := pool.Query(ctx, `
+		SELECT id, COALESCE(to_addresses, ''), COALESCE(from_address, ''), COALESCE(plain_text, '')
+		FROM emails
+		WHERE embedding_vector IS NULL
+		  AND COALESCE(user_id, 0) = $1
+		ORDER BY id ASC
+	`, uid)
+	if err != nil {
+		msg := fmt.Sprintf("failed to query emails: %v", err)
+		job.UpdateState(map[string]any{"status": "error", "status_line": msg, "error_message": msg})
+		job.Broadcast("error", job.GetState())
+		return
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		id          int64
+		toAddresses string
+		fromAddress string
+		plainText   string
+	}
+	candidates := make([]candidate, 0, 256)
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.id, &c.toAddresses, &c.fromAddress, &c.plainText); err != nil {
+			msg := fmt.Sprintf("failed to scan email row: %v", err)
+			job.UpdateState(map[string]any{"status": "error", "status_line": msg, "error_message": msg})
+			job.Broadcast("error", job.GetState())
+			return
+		}
+		candidates = append(candidates, c)
+	}
+	if err := rows.Err(); err != nil {
+		msg := fmt.Sprintf("email query cursor failed: %v", err)
+		job.UpdateState(map[string]any{"status": "error", "status_line": msg, "error_message": msg})
+		job.Broadcast("error", job.GetState())
+		return
+	}
+
+	total := len(candidates)
+	job.UpdateState(map[string]any{
+		"total":       total,
+		"status_line": fmt.Sprintf("Found %d emails with missing embedding vectors", total),
+	})
+	job.Broadcast("progress", job.GetState())
+
+	embedded, skipped, errorsCount := 0, 0, 0
+	for i, c := range candidates {
+		if job.IsCancelled() {
+			job.UpdateState(map[string]any{
+				"status":      "cancelled",
+				"status_line": "Email embedding backfill cancelled.",
+				"processed":   i,
+				"embedded":    embedded,
+				"skipped":     skipped,
+				"errors":      errorsCount,
+			})
+			job.Broadcast("cancelled", job.GetState())
+			return
+		}
+
+		payload := buildEmailEmbeddingInput(c.toAddresses, c.fromAddress, c.plainText, 6000)
+		if payload == "" {
+			skipped++
+			job.UpdateState(map[string]any{
+				"processed":   i + 1,
+				"embedded":    embedded,
+				"skipped":     skipped,
+				"errors":      errorsCount,
+				"status_line": fmt.Sprintf("Processed %d/%d emails (%d embedded, %d skipped, %d errors)", i+1, total, embedded, skipped, errorsCount),
+			})
+			job.Broadcast("progress", job.GetState())
+			continue
+		}
+
+		var (
+			vec     []float32
+			err     error
+			lastCap = 0
+		)
+		for _, capChars := range []int{6000, 3000, 1500, 900} {
+			candidate := buildEmailEmbeddingInput(c.toAddresses, c.fromAddress, c.plainText, capChars)
+			if candidate == "" {
+				break
+			}
+			lastCap = capChars
+			vec, err = embeddingSvc.EmbedText(ctx, candidate)
+			if err == nil {
+				break
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), "too large") {
+				break
+			}
+		}
+		if err != nil {
+			errorsCount++
+			job.UpdateState(map[string]any{
+				"processed":     i + 1,
+				"embedded":      embedded,
+				"skipped":       skipped,
+				"errors":        errorsCount,
+				"status_line":   fmt.Sprintf("Embedding failed for email %d (max payload chars tried: %d): %v", c.id, lastCap, err),
+				"error_message": fmt.Sprintf("Embedding failed for email %d (max payload chars tried: %d): %v", c.id, lastCap, err),
+			})
+			job.Broadcast("progress", job.GetState())
+			continue
+		}
+
+		vectorLiteral := float32SliceToVectorLiteral(vec)
+		if _, err := pool.Exec(ctx, `
+			UPDATE emails
+			SET embedding_vector = $1::vector, updated_at = NOW()
+			WHERE id = $2 AND COALESCE(user_id, 0) = $3
+		`, vectorLiteral, c.id, uid); err != nil {
+			errorsCount++
+			job.UpdateState(map[string]any{
+				"processed":     i + 1,
+				"embedded":      embedded,
+				"skipped":       skipped,
+				"errors":        errorsCount,
+				"status_line":   fmt.Sprintf("Failed updating embedding for email %d: %v", c.id, err),
+				"error_message": fmt.Sprintf("Failed updating embedding for email %d: %v", c.id, err),
+			})
+			job.Broadcast("progress", job.GetState())
+			continue
+		}
+
+		embedded++
+		job.UpdateState(map[string]any{
+			"processed":   i + 1,
+			"embedded":    embedded,
+			"skipped":     skipped,
+			"errors":      errorsCount,
+			"status_line": fmt.Sprintf("Processed %d/%d emails (%d embedded, %d skipped, %d errors)", i+1, total, embedded, skipped, errorsCount),
+		})
+		job.Broadcast("progress", job.GetState())
+	}
+
+	job.UpdateState(map[string]any{
+		"status":      "completed",
+		"status_line": fmt.Sprintf("Email embedding backfill complete: %d embedded, %d skipped, %d errors", embedded, skipped, errorsCount),
+		"processed":   total,
+		"embedded":    embedded,
+		"skipped":     skipped,
+		"errors":      errorsCount,
+	})
+	job.Broadcast("completed", job.GetState())
+}
+
+func float32SliceToVectorLiteral(values []float32) string {
+	if len(values) == 0 {
+		return "[]"
+	}
+	var b strings.Builder
+	b.Grow(len(values) * 10)
+	b.WriteByte('[')
+	for i, v := range values {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatFloat(float64(v), 'g', -1, 32))
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+func buildEmailEmbeddingInput(toAddresses, fromAddress, plainText string, maxChars int) string {
+	toAddresses = strings.TrimSpace(toAddresses)
+	fromAddress = strings.TrimSpace(fromAddress)
+	plainText = strings.TrimSpace(plainText)
+	if maxChars <= 0 {
+		maxChars = 900
+	}
+
+	parts := make([]string, 0, 3)
+	if toAddresses != "" {
+		parts = append(parts, "To: "+toAddresses)
+	}
+	if fromAddress != "" {
+		parts = append(parts, "From: "+fromAddress)
+	}
+	if plainText != "" {
+		parts = append(parts, "Body: "+plainText)
+	}
+	payload := strings.TrimSpace(strings.Join(parts, "\n"))
+	if payload == "" {
+		return ""
+	}
+	if len(payload) <= maxChars {
+		return payload
+	}
+
+	// Keep address context; trim body first.
+	prefixParts := make([]string, 0, 2)
+	if toAddresses != "" {
+		prefixParts = append(prefixParts, "To: "+toAddresses)
+	}
+	if fromAddress != "" {
+		prefixParts = append(prefixParts, "From: "+fromAddress)
+	}
+	prefix := strings.TrimSpace(strings.Join(prefixParts, "\n"))
+	if prefix == "" {
+		if maxChars > len(payload) {
+			return payload
+		}
+		return strings.TrimSpace(payload[:maxChars])
+	}
+
+	remaining := maxChars - len(prefix) - 1 // newline separator
+	if remaining <= 0 {
+		if maxChars > len(prefix) {
+			return prefix
+		}
+		return strings.TrimSpace(prefix[:maxChars])
+	}
+	body := plainText
+	if len(body) > remaining {
+		body = body[:remaining]
+	}
+	return strings.TrimSpace(prefix + "\n" + body)
+}
+
+func (h *ImporterHandler) EmailEmbeddingBackfillStream(w http.ResponseWriter, r *http.Request) {
+	emailEmbeddingBackfillJob.ServeSSE(w, r)
+}
+
+func (h *ImporterHandler) EmailEmbeddingBackfillCancel(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
+	writeJSON(w, emailEmbeddingBackfillJob.Cancel())
+}
+
+func (h *ImporterHandler) EmailEmbeddingBackfillStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, emailEmbeddingBackfillJob.Status())
+}
+
+func (h *ImporterHandler) MessageEmbeddingBackfillStart(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
+	if err := messageEmbeddingBackfillJob.AssertNotRunning(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if h.pool == nil {
+		writeError(w, http.StatusServiceUnavailable, "message embedding backfill not configured")
+		return
+	}
+	if h.embeddingSvc == nil || !h.embeddingSvc.IsAvailable() {
+		writeError(w, http.StatusServiceUnavailable, "embedding service not available — set LOCALAI_BASE_URL and LOCALAI_EMBEDDING_MODEL")
+		return
+	}
+
+	messageEmbeddingBackfillJob.Start()
+	messageEmbeddingBackfillJob.UpdateState(map[string]any{
+		"status": "in_progress", "status_line": "Starting message embedding backfill...",
+		"total": 0, "processed": 0, "embedded": 0, "skipped": 0, "errors": 0, "error_message": nil,
+	})
+	messageEmbeddingBackfillJob.Broadcast("status", map[string]any{"status_line": "Starting message embedding backfill..."})
+
+	uid := appctx.UserIDFromCtx(r.Context())
+	go runMessageEmbeddingBackfill(h.pool, h.embeddingSvc, messageEmbeddingBackfillJob, uid)
+
+	writeJSON(w, map[string]any{"message": "Message embedding backfill started", "status": "started"})
+}
+
+func runMessageEmbeddingBackfill(pool *pgxpool.Pool, embeddingSvc *service.EmbeddingService, job *importer.ImportJob, uid int64) {
+	ctx := context.WithValue(context.Background(), appctx.ContextKeyUserID, uid)
+	defer job.Finish()
+
+	rows, err := pool.Query(ctx, `
+		SELECT id, COALESCE(chat_session, ''), COALESCE(text, '')
+		FROM messages
+		WHERE embedding_vector IS NULL
+		  AND COALESCE(user_id, 0) = $1
+		ORDER BY id ASC
+	`, uid)
+	if err != nil {
+		msg := fmt.Sprintf("failed to query messages: %v", err)
+		job.UpdateState(map[string]any{"status": "error", "status_line": msg, "error_message": msg})
+		job.Broadcast("error", job.GetState())
+		return
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		id          int64
+		chatSession string
+		text        string
+	}
+	candidates := make([]candidate, 0, 256)
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.id, &c.chatSession, &c.text); err != nil {
+			msg := fmt.Sprintf("failed to scan message row: %v", err)
+			job.UpdateState(map[string]any{"status": "error", "status_line": msg, "error_message": msg})
+			job.Broadcast("error", job.GetState())
+			return
+		}
+		candidates = append(candidates, c)
+	}
+	if err := rows.Err(); err != nil {
+		msg := fmt.Sprintf("message query cursor failed: %v", err)
+		job.UpdateState(map[string]any{"status": "error", "status_line": msg, "error_message": msg})
+		job.Broadcast("error", job.GetState())
+		return
+	}
+
+	total := len(candidates)
+	job.UpdateState(map[string]any{
+		"total":       total,
+		"status_line": fmt.Sprintf("Found %d messages with missing embedding vectors", total),
+	})
+	job.Broadcast("progress", job.GetState())
+
+	embedded, skipped, errorsCount := 0, 0, 0
+	for i, c := range candidates {
+		if job.IsCancelled() {
+			job.UpdateState(map[string]any{
+				"status":      "cancelled",
+				"status_line": "Message embedding backfill cancelled.",
+				"processed":   i,
+				"embedded":    embedded,
+				"skipped":     skipped,
+				"errors":      errorsCount,
+			})
+			job.Broadcast("cancelled", job.GetState())
+			return
+		}
+
+		var (
+			vec     []float32
+			err     error
+			lastCap = 0
+		)
+		for _, capChars := range []int{6000, 3000, 1500, 900} {
+			candidate := buildMessageEmbeddingInput(c.chatSession, c.text, capChars)
+			if candidate == "" {
+				break
+			}
+			lastCap = capChars
+			vec, err = embeddingSvc.EmbedText(ctx, candidate)
+			if err == nil {
+				break
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), "too large") {
+				break
+			}
+		}
+		if err != nil {
+			errorsCount++
+			job.UpdateState(map[string]any{
+				"processed":     i + 1,
+				"embedded":      embedded,
+				"skipped":       skipped,
+				"errors":        errorsCount,
+				"status_line":   fmt.Sprintf("Embedding failed for message %d (max payload chars tried: %d): %v", c.id, lastCap, err),
+				"error_message": fmt.Sprintf("Embedding failed for message %d (max payload chars tried: %d): %v", c.id, lastCap, err),
+			})
+			job.Broadcast("progress", job.GetState())
+			continue
+		}
+		if vec == nil {
+			skipped++
+			job.UpdateState(map[string]any{
+				"processed":   i + 1,
+				"embedded":    embedded,
+				"skipped":     skipped,
+				"errors":      errorsCount,
+				"status_line": fmt.Sprintf("Processed %d/%d messages (%d embedded, %d skipped, %d errors)", i+1, total, embedded, skipped, errorsCount),
+			})
+			job.Broadcast("progress", job.GetState())
+			continue
+		}
+
+		vectorLiteral := float32SliceToVectorLiteral(vec)
+		if _, err := pool.Exec(ctx, `
+			UPDATE messages
+			SET embedding_vector = $1::vector, updated_at = NOW()
+			WHERE id = $2 AND COALESCE(user_id, 0) = $3
+		`, vectorLiteral, c.id, uid); err != nil {
+			errorsCount++
+			job.UpdateState(map[string]any{
+				"processed":     i + 1,
+				"embedded":      embedded,
+				"skipped":       skipped,
+				"errors":        errorsCount,
+				"status_line":   fmt.Sprintf("Failed updating embedding for message %d: %v", c.id, err),
+				"error_message": fmt.Sprintf("Failed updating embedding for message %d: %v", c.id, err),
+			})
+			job.Broadcast("progress", job.GetState())
+			continue
+		}
+
+		embedded++
+		job.UpdateState(map[string]any{
+			"processed":   i + 1,
+			"embedded":    embedded,
+			"skipped":     skipped,
+			"errors":      errorsCount,
+			"status_line": fmt.Sprintf("Processed %d/%d messages (%d embedded, %d skipped, %d errors)", i+1, total, embedded, skipped, errorsCount),
+		})
+		job.Broadcast("progress", job.GetState())
+	}
+
+	job.UpdateState(map[string]any{
+		"status":      "completed",
+		"status_line": fmt.Sprintf("Message embedding backfill complete: %d embedded, %d skipped, %d errors", embedded, skipped, errorsCount),
+		"processed":   total,
+		"embedded":    embedded,
+		"skipped":     skipped,
+		"errors":      errorsCount,
+	})
+	job.Broadcast("completed", job.GetState())
+}
+
+func buildMessageEmbeddingInput(chatSession, text string, maxChars int) string {
+	chatSession = strings.TrimSpace(chatSession)
+	text = strings.TrimSpace(text)
+	if maxChars <= 0 {
+		maxChars = 900
+	}
+	parts := make([]string, 0, 2)
+	if chatSession != "" {
+		parts = append(parts, "Chat Session: "+chatSession)
+	}
+	if text != "" {
+		parts = append(parts, "Text: "+text)
+	}
+	payload := strings.TrimSpace(strings.Join(parts, "\n"))
+	if payload == "" {
+		return ""
+	}
+	if len(payload) <= maxChars {
+		return payload
+	}
+
+	prefix := ""
+	if chatSession != "" {
+		prefix = "Chat Session: " + chatSession
+	}
+	if prefix == "" {
+		return strings.TrimSpace(payload[:maxChars])
+	}
+	remaining := maxChars - len(prefix) - 1
+	if remaining <= 0 {
+		if maxChars > len(prefix) {
+			return prefix
+		}
+		return strings.TrimSpace(prefix[:maxChars])
+	}
+	body := text
+	if len(body) > remaining {
+		body = body[:remaining]
+	}
+	return strings.TrimSpace(prefix + "\n" + body)
+}
+
+func (h *ImporterHandler) MessageEmbeddingBackfillStream(w http.ResponseWriter, r *http.Request) {
+	messageEmbeddingBackfillJob.ServeSSE(w, r)
+}
+
+func (h *ImporterHandler) MessageEmbeddingBackfillCancel(w http.ResponseWriter, r *http.Request) {
+	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+		return
+	}
+	writeJSON(w, messageEmbeddingBackfillJob.Cancel())
+}
+
+func (h *ImporterHandler) MessageEmbeddingBackfillStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, messageEmbeddingBackfillJob.Status())
 }
 
 // ── stdout parsers ────────────────────────────────────────────────────────────

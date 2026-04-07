@@ -162,6 +162,10 @@ func New(pool *pgxpool.Pool, billingPool *pgxpool.Pool, cfg *config.Config) (htt
 	attachmentHandler := handler.NewAttachmentHandler(attachmentSvc, cfg.App.AssetStaticDir, sessionMasterStore)
 	attachmentHandler.RegisterRoutes(r)
 
+	// ── Embeddings (local AI) ─────────────────────────────────────────────────
+	localAIProvider := appai.NewLocalAIProvider(cfg.AI.LocalAIBaseURL, cfg.AI.LocalAIAPIKey, cfg.AI.LocalAIModelName)
+	embeddingSvc := service.NewEmbeddingService(localAIProvider, cfg.AI.LocalAIEmbeddingModel)
+
 	// ── Import jobs ───────────────────────────────────────────────────────────
 	importerHandler := handler.NewImporterHandler(handler.ImporterHandlerDeps{
 		ExcludePatterns:   cfg.Filesystem.ExcludePatterns,
@@ -169,6 +173,7 @@ func New(pool *pgxpool.Pool, billingPool *pgxpool.Pool, cfg *config.Config) (htt
 		Pool:              pool,
 		SubjectConfigRepo: subjectConfigRepo,
 		SessionStore:      sessionMasterStore,
+		EmbeddingSvc:      embeddingSvc,
 	})
 	importerHandler.RegisterRoutes(r)
 
@@ -177,6 +182,9 @@ func New(pool *pgxpool.Pool, billingPool *pgxpool.Pool, cfg *config.Config) (htt
 	if err := uploadImportHandler.RegisterRoutes(r); err != nil {
 		return nil, err
 	}
+
+	embeddingHandler := handler.NewEmbeddingHandler(embeddingSvc)
+	embeddingHandler.RegisterRoutes(r)
 
 	// ── Chat & AI ────────────────────────────────────────────────────────────
 	geminiProvider := appai.NewGeminiProvider(cfg.AI.GeminiAPIKey, cfg.AI.GeminiModelName)

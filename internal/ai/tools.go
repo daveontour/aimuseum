@@ -9,7 +9,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -136,6 +138,12 @@ func NewToolExecutor(pool *pgxpool.Pool, subjectName, tavilyKey, pepper string, 
 			ch, _ := args["chat_session"].(string)
 			kw, _ := args["keyword"].(string)
 			return searchChatMessagesInSession(ctx, pool, ch, kw)
+		case "search_messages_by_similarity":
+			text, _ := args["text"].(string)
+			return searchMessagesBySimilarity(ctx, pool, text)
+		case "search_emails_by_similarity":
+			text, _ := args["text"].(string)
+			return searchEmailsBySimilarity(ctx, pool, text)
 		case "list_complete_profiles":
 			return listCompleteProfilesTool(ctx, pool)
 		case "get_complete_profile":
@@ -222,6 +230,142 @@ func visitorKeyMayReadReferenceDoc(ctx context.Context, pool *pgxpool.Pool, docI
 func visitorKeySensitiveLLMAccessDenied(ctx context.Context) bool {
 	va := appctx.VisitorAccessFromCtx(ctx)
 	return va.Restricted && !va.AllowSensitivePrivate()
+}
+
+func toolEmbedText(ctx context.Context, text string) ([]float32, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, fmt.Errorf("text is required")
+	}
+	baseURL := strings.TrimSpace(os.Getenv("LOCALAI_BASE_URL"))
+	apiKey := strings.TrimSpace(os.Getenv("LOCALAI_API_KEY"))
+	model := strings.TrimSpace(os.Getenv("LOCALAI_MODEL_NAME"))
+	embeddingModel := strings.TrimSpace(os.Getenv("LOCALAI_EMBEDDING_MODEL"))
+	if embeddingModel == "" {
+		embeddingModel = model
+	}
+	provider := NewLocalAIProvider(baseURL, apiKey, model)
+	if provider == nil || !provider.IsAvailable() {
+		return nil, fmt.Errorf("embedding service unavailable: set LOCALAI_BASE_URL and LOCALAI_EMBEDDING_MODEL")
+	}
+	return provider.Embed(ctx, text, embeddingModel)
+}
+
+func toolVectorLiteral(values []float32) string {
+	if len(values) == 0 {
+		return "[]"
+	}
+	var b strings.Builder
+	b.Grow(len(values) * 10)
+	b.WriteByte('[')
+	for i, v := range values {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatFloat(float64(v), 'g', -1, 32))
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+func searchMessagesBySimilarity(ctx context.Context, pool *pgxpool.Pool, text string) (map[string]any, error) {
+	vec, err := toolEmbedText(ctx, text)
+	if err != nil {
+		return map[string]any{"error": err.Error(), "messages": []any{}}, nil
+	}
+	q, args := toolsUIDFilter(ctx, `
+		SELECT
+			id,
+			chat_session,
+			sender_name,
+			message_date,
+			subject,
+			text,
+			(embedding_vector <=> $1::vector) AS distance
+		FROM messages
+		WHERE embedding_vector IS NOT NULL
+		ORDER BY embedding_vector <=> $1::vector
+		LIMIT 20
+	`, []any{toolVectorLiteral(vec)})
+	rows, err := pool.Query(ctx, q, args...)
+	if err != nil {
+		return map[string]any{"error": err.Error(), "messages": []any{}}, nil
+	}
+	defer rows.Close()
+	var out []map[string]any
+	for rows.Next() {
+		var id int64
+		var chatSession, senderName, subject, body *string
+		var messageDate *time.Time
+		var distance *float64
+		if err := rows.Scan(&id, &chatSession, &senderName, &messageDate, &subject, &body, &distance); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"id":           id,
+			"chat_session": chatSession,
+			"sender_name":  senderName,
+			"message_date": messageDate,
+			"subject":      subject,
+			"text":         body,
+			"distance":     distance,
+		})
+	}
+	if out == nil {
+		out = []map[string]any{}
+	}
+	return map[string]any{"messages": out}, nil
+}
+
+func searchEmailsBySimilarity(ctx context.Context, pool *pgxpool.Pool, text string) (map[string]any, error) {
+	vec, err := toolEmbedText(ctx, text)
+	if err != nil {
+		return map[string]any{"error": err.Error(), "emails": []any{}}, nil
+	}
+	q, args := toolsUIDFilter(ctx, `
+		SELECT
+			id,
+			subject,
+			from_address,
+			to_addresses,
+			date,
+			snippet,
+			plain_text,
+			(embedding_vector <=> $1::vector) AS distance
+		FROM emails
+		WHERE embedding_vector IS NOT NULL
+		ORDER BY embedding_vector <=> $1::vector
+		LIMIT 20
+	`, []any{toolVectorLiteral(vec)})
+	rows, err := pool.Query(ctx, q, args...)
+	if err != nil {
+		return map[string]any{"error": err.Error(), "emails": []any{}}, nil
+	}
+	defer rows.Close()
+	var out []map[string]any
+	for rows.Next() {
+		var id int64
+		var subject, fromAddr, toAddrs, snippet, plainText *string
+		var date *time.Time
+		var distance *float64
+		if err := rows.Scan(&id, &subject, &fromAddr, &toAddrs, &date, &snippet, &plainText, &distance); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"id":           id,
+			"subject":      subject,
+			"from_address": fromAddr,
+			"to_addresses": toAddrs,
+			"date":         date,
+			"snippet":      snippet,
+			"plain_text":   plainText,
+			"distance":     distance,
+		})
+	}
+	if out == nil {
+		out = []map[string]any{}
+	}
+	return map[string]any{"emails": out}, nil
 }
 
 // visitorKeyMayReadSensitiveReferenceDoc is true for non-restricted sessions (owner or share visitor).

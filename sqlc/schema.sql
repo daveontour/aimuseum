@@ -4,6 +4,7 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS vector;
 
 -- ============================================================
 -- Identity tables  (no user_id FK — these ARE the identity layer)
@@ -176,6 +177,7 @@ CREATE TABLE IF NOT EXISTS emails (
     plain_text      TEXT,
     snippet         TEXT,
     embedding       TEXT,
+    embedding_vector vector(2560),
     has_attachments BOOLEAN NOT NULL DEFAULT FALSE,
     user_deleted    BOOLEAN NOT NULL DEFAULT FALSE,
     is_personal     BOOLEAN NOT NULL DEFAULT FALSE,
@@ -230,6 +232,7 @@ CREATE TABLE IF NOT EXISTS messages (
     replying_to    VARCHAR(500),
     subject        VARCHAR(1000),
     text           TEXT,
+    embedding_vector vector(2560),
     processed      BOOLEAN NOT NULL DEFAULT FALSE,
     created_at     TIMESTAMP DEFAULT NOW(),
     updated_at     TIMESTAMP DEFAULT NOW(),
@@ -315,6 +318,7 @@ CREATE TABLE IF NOT EXISTS facebook_albums (
     description             TEXT,
     cover_photo_uri         VARCHAR(500),
     last_modified_timestamp TIMESTAMP,
+    embedding_vector        vector(2560),
     created_at              TIMESTAMP DEFAULT NOW(),
     updated_at              TIMESTAMP DEFAULT NOW(),
     user_id                 BIGINT REFERENCES users(id) ON DELETE CASCADE
@@ -339,6 +343,7 @@ CREATE TABLE IF NOT EXISTS facebook_posts (
     post_text    TEXT,
     external_url VARCHAR(2000),
     post_type    VARCHAR(50),
+    embedding_vector vector(2560),
     created_at   TIMESTAMP DEFAULT NOW(),
     updated_at   TIMESTAMP DEFAULT NOW(),
     user_id      BIGINT REFERENCES users(id) ON DELETE CASCADE
