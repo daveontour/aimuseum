@@ -2,12 +2,11 @@ package contacts
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // NameEmailPair excludes a specific name when paired with a specific email
@@ -52,8 +51,8 @@ func LoadExclusions(filename string) error {
 }
 
 // LoadExclusionsFromDB loads exclusions from the email_exclusions database table.
-func LoadExclusionsFromDB(ctx context.Context, db *pgxpool.Pool) error {
-	rows, err := db.Query(ctx, "SELECT email, name, name_email FROM email_exclusions")
+func LoadExclusionsFromDB(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, "SELECT email, name, name_email FROM email_exclusions")
 	if err != nil {
 		return fmt.Errorf("query email_exclusions: %w", err)
 	}

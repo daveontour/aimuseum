@@ -18,11 +18,13 @@ type AttachmentHandler struct {
 	svc             *service.AttachmentService
 	pythonStaticDir string
 	sessionStore    *keystore.SessionMasterStore
+	sensitiveSvc    *service.SensitiveService
+	authSvc         *service.AuthService
 }
 
 // NewAttachmentHandler creates an AttachmentHandler.
-func NewAttachmentHandler(svc *service.AttachmentService, pythonStaticDir string, sessionStore *keystore.SessionMasterStore) *AttachmentHandler {
-	return &AttachmentHandler{svc: svc, pythonStaticDir: pythonStaticDir, sessionStore: sessionStore}
+func NewAttachmentHandler(svc *service.AttachmentService, pythonStaticDir string, sessionStore *keystore.SessionMasterStore, sensitiveSvc *service.SensitiveService, authSvc *service.AuthService) *AttachmentHandler {
+	return &AttachmentHandler{svc: svc, pythonStaticDir: pythonStaticDir, sessionStore: sessionStore, sensitiveSvc: sensitiveSvc, authSvc: authSvc}
 }
 
 // RegisterRoutes mounts all attachment routes.
@@ -64,8 +66,8 @@ func writeAttachmentInfo(a *model.AttachmentInfo) map[string]any {
 		"email_from":    a.EmailFrom,
 		"email_folder":  a.EmailFolder,
 	}
-	if a.EmailDate != nil {
-		m["email_date"] = a.EmailDate.Format("2006-01-02T15:04:05.999999")
+	if a.EmailDate.Valid {
+		m["email_date"] = a.EmailDate.Time.Format("2006-01-02T15:04:05.999999")
 	} else {
 		m["email_date"] = nil
 	}
@@ -251,7 +253,7 @@ func (h *AttachmentHandler) Content(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AttachmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	id, ok := parseAttachmentID(w, r)

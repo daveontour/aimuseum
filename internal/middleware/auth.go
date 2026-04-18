@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -24,7 +25,7 @@ var exemptPrefixes = []string{
 	"/share/",
 	"/s/",
 	"/visitor/",
-	"/admin",  // admin panel has its own session-based auth
+	"/admin", // admin panel has its own session-based auth
 }
 
 // exemptExact lists paths that are always accessible without authentication.
@@ -67,6 +68,7 @@ func NewAuthMiddleware(svc *service.AuthService) func(http.Handler) http.Handler
 			// Authenticate also slides the session TTL forward on each hit.
 			auth, err := svc.Authenticate(r.Context(), sessionID)
 			if err != nil {
+				slog.Error("authenticate failed", "err", err, "path", path)
 				writeAuthError(w, http.StatusInternalServerError, "session lookup failed")
 				return
 			}

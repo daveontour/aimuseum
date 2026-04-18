@@ -2,22 +2,25 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // AttachmentRepo accesses IMAP and Gmail email attachment rows in media_items.
 type AttachmentRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // emailAttachmentSourcesSQL matches media_items.source for stored email attachments (IMAP + Gmail).
 const emailAttachmentSourcesSQL = `mm.source IN ('email_attachment', 'gmail_attachment')`
 
+// emailIDJoinExpr compares emails.id to string-stored source_reference (PostgreSQL ::bigint is not portable).
+const emailIDJoinExpr = `CAST(mm.source_reference AS INTEGER)`
+
 // NewAttachmentRepo creates an AttachmentRepo.
-func NewAttachmentRepo(pool *pgxpool.Pool) *AttachmentRepo {
+func NewAttachmentRepo(pool *sql.DB) *AttachmentRepo {
 	return &AttachmentRepo{pool: pool}
 }
 
@@ -47,7 +50,7 @@ func (r *AttachmentRepo) GetRandom(ctx context.Context) (*model.AttachmentInfo, 
 	q := `
 		SELECT ` + attachmentInfoCols + `
 		FROM media_items mm
-		JOIN emails e ON e.id = mm.source_reference::bigint
+		JOIN emails e ON e.id = ` + emailIDJoinExpr + `
 		WHERE ` + emailAttachmentSourcesSQL
 	args := []any{}
 	// Use qualified alias — media_items mm and emails e both have user_id
@@ -55,7 +58,7 @@ func (r *AttachmentRepo) GetRandom(ctx context.Context) (*model.AttachmentInfo, 
 	q += `
 		ORDER BY RANDOM()
 		LIMIT 1`
-	a, err := scanAttachmentInfo(r.pool.QueryRow(ctx, q, args...))
+	a, err := scanAttachmentInfo(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -71,7 +74,7 @@ func (r *AttachmentRepo) GetByIDOrder(ctx context.Context, offset int) (*model.A
 	q := `
 		SELECT ` + attachmentInfoCols + `
 		FROM media_items mm
-		JOIN emails e ON e.id = mm.source_reference::bigint
+		JOIN emails e ON e.id = ` + emailIDJoinExpr + `
 		WHERE ` + emailAttachmentSourcesSQL
 	args := []any{}
 	// Use qualified alias — media_items mm and emails e both have user_id
@@ -81,7 +84,7 @@ func (r *AttachmentRepo) GetByIDOrder(ctx context.Context, offset int) (*model.A
 		ORDER BY mm.id ASC
 		OFFSET $%d
 		LIMIT 1`, len(args))
-	a, err := scanAttachmentInfo(r.pool.QueryRow(ctx, q, args...))
+	a, err := scanAttachmentInfo(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -102,7 +105,7 @@ func (r *AttachmentRepo) GetBySize(ctx context.Context, orderDesc bool, offset i
 		SELECT ` + attachmentInfoCols + `, octet_length(mb.image_data) AS sz
 		FROM media_items mm
 		JOIN media_blobs mb ON mb.id = mm.media_blob_id
-		JOIN emails e ON e.id = mm.source_reference::bigint
+		JOIN emails e ON e.id = ` + emailIDJoinExpr + `
 		WHERE ` + emailAttachmentSourcesSQL
 	args := []any{}
 	// Use qualified alias — media_items mm, media_blobs mb, and emails e all have user_id
@@ -114,7 +117,7 @@ func (r *AttachmentRepo) GetBySize(ctx context.Context, orderDesc bool, offset i
 		LIMIT 1`, dir, len(args))
 	var a model.AttachmentInfo
 	var sz *int64
-	err := r.pool.QueryRow(ctx, q, args...).Scan(
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(
 		&a.AttachmentID, &a.Filename, &a.ContentType,
 		&a.EmailID, &a.EmailSubject, &a.EmailFrom, &a.EmailDate, &a.EmailFolder,
 		&sz,
@@ -136,7 +139,7 @@ func (r *AttachmentRepo) Count(ctx context.Context) (int64, error) {
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
 	var n int64
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&n)
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(&n)
 	return n, err
 }
 
@@ -157,12 +160,12 @@ func (r *AttachmentRepo) GetInfo(ctx context.Context, id int64) (*model.Attachme
 	q := `
 		SELECT ` + attachmentInfoColsGetInfo + `
 		FROM media_items mm
-		LEFT JOIN emails e ON e.id = mm.source_reference::bigint
+		LEFT JOIN emails e ON e.id = ` + emailIDJoinExpr + `
 		WHERE ` + emailAttachmentSourcesSQL + ` AND mm.id = $1`
 	args := []any{id}
 	// Use qualified alias — media_items mm and emails e both have user_id
 	q, args = addUIDFilterQualified(q, args, uid, "mm")
-	a, err := scanAttachmentInfo(r.pool.QueryRow(ctx, q, args...))
+	a, err := scanAttachmentInfo(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -183,7 +186,7 @@ func (r *AttachmentRepo) GetData(ctx context.Context, id int64) (data, thumbnail
 	args := []any{id}
 	// Use qualified alias — media_items mm and media_blobs mb both have user_id
 	q, args = addUIDFilterQualified(q, args, uid, "mm")
-	err = r.pool.QueryRow(ctx, q, args...).
+	err = r.pool.QueryRowContext(ctx, q, args...).
 		Scan(&data, &thumbnail, &mediaType, &filename)
 	if err != nil {
 		if isNoRows(err) {
@@ -198,7 +201,7 @@ func (r *AttachmentRepo) GetData(ctx context.Context, id int64) (data, thumbnail
 // Delete removes a media_items row and its blob if no other media_items reference it.
 func (r *AttachmentRepo) Delete(ctx context.Context, id int64) (bool, error) {
 	var blobID *int64
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT media_blob_id FROM media_items WHERE id=$1 AND source IN ('email_attachment', 'gmail_attachment')`, id).
 		Scan(&blobID)
 	if err != nil {
@@ -208,14 +211,14 @@ func (r *AttachmentRepo) Delete(ctx context.Context, id int64) (bool, error) {
 		return false, err
 	}
 
-	if _, err := r.pool.Exec(ctx, `DELETE FROM media_items WHERE id=$1`, id); err != nil {
+	if _, err := r.pool.ExecContext(ctx, `DELETE FROM media_items WHERE id=$1`, id); err != nil {
 		return false, err
 	}
 
 	if blobID != nil {
 		var refs int
-		if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM media_items WHERE media_blob_id=$1`, *blobID).Scan(&refs); err == nil && refs == 0 {
-			_, _ = r.pool.Exec(ctx, `DELETE FROM media_blobs WHERE id=$1`, *blobID)
+		if err := r.pool.QueryRowContext(ctx, `SELECT COUNT(*) FROM media_items WHERE media_blob_id=$1`, *blobID).Scan(&refs); err == nil && refs == 0 {
+			_, _ = r.pool.ExecContext(ctx, `DELETE FROM media_blobs WHERE id=$1`, *blobID)
 		}
 	}
 	return true, nil
@@ -258,14 +261,14 @@ func (r *AttachmentRepo) ListImages(ctx context.Context, page, pageSize int, ord
 		SELECT COUNT(*)
 		FROM media_items mm
 		JOIN media_blobs mb ON mb.id = mm.media_blob_id
-		JOIN emails e ON e.id = mm.source_reference::bigint
+		JOIN emails e ON e.id = `+emailIDJoinExpr+`
 		WHERE `+emailAttachmentSourcesSQL+`%s`, typeFilter)
 	countArgs := []any{}
 	// Use qualified alias — media_items mm, media_blobs mb, and emails e all have user_id
 	countBase, countArgs = addUIDFilterQualified(countBase, countArgs, uid, "mm")
 
 	var total int64
-	if err := r.pool.QueryRow(ctx, countBase, countArgs...).Scan(&total); err != nil {
+	if err := r.pool.QueryRowContext(ctx, countBase, countArgs...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("ListImagesCount: %w", err)
 	}
 
@@ -276,7 +279,7 @@ func (r *AttachmentRepo) ListImages(ctx context.Context, page, pageSize int, ord
 		       octet_length(mb.image_data) AS sz
 		FROM media_items mm
 		JOIN media_blobs mb ON mb.id = mm.media_blob_id
-		JOIN emails e ON e.id = mm.source_reference::bigint
+		JOIN emails e ON e.id = `+emailIDJoinExpr+`
 		WHERE `+emailAttachmentSourcesSQL+`%s`, typeFilter)
 	listArgs := []any{}
 	// Use qualified alias — media_items mm, media_blobs mb, and emails e all have user_id
@@ -286,7 +289,7 @@ func (r *AttachmentRepo) ListImages(ctx context.Context, page, pageSize int, ord
 		ORDER BY %s
 		LIMIT $%d OFFSET $%d`, orderExpr, len(listArgs)-1, len(listArgs))
 
-	rows, err := r.pool.Query(ctx, listBase, listArgs...)
+	rows, err := r.pool.QueryContext(ctx, listBase, listArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("ListImages: %w", err)
 	}

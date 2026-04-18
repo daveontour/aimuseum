@@ -2,14 +2,12 @@ package importstorage
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const maxSourceRefLen = 500
@@ -31,20 +29,20 @@ type BatchAlbumImageItem struct {
 
 // FacebookAlbumStorage handles Facebook album storage operations.
 type FacebookAlbumStorage struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewFacebookAlbumStorage creates a new Facebook album storage instance.
-func NewFacebookAlbumStorage(pool *pgxpool.Pool) *FacebookAlbumStorage {
+func NewFacebookAlbumStorage(pool *sql.DB) *FacebookAlbumStorage {
 	return &FacebookAlbumStorage{pool: pool}
 }
 
 // FindAlbumByName looks up an album by name.
 func (s *FacebookAlbumStorage) FindAlbumByName(ctx context.Context, name string) (int64, bool, error) {
 	var albumID int64
-	err := s.pool.QueryRow(ctx, `SELECT id FROM facebook_albums WHERE name = $1 LIMIT 1`, name).Scan(&albumID)
+	err := s.pool.QueryRowContext(ctx, `SELECT id FROM facebook_albums WHERE name = $1 LIMIT 1`, name).Scan(&albumID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return 0, false, nil
 		}
 		return 0, false, fmt.Errorf("failed to find album by name: %w", err)
@@ -61,8 +59,8 @@ func (s *FacebookAlbumStorage) SaveOrUpdateAlbum(ctx context.Context, name, desc
 		return 0, false, err
 	}
 	if found {
-		_, err = s.pool.Exec(ctx, `UPDATE facebook_albums SET
-			description = $1, cover_photo_uri = $2, last_modified_timestamp = $3, updated_at = NOW()
+		_, err = s.pool.ExecContext(ctx, `UPDATE facebook_albums SET
+			description = $1, cover_photo_uri = $2, last_modified_timestamp = $3, updated_at = CURRENT_TIMESTAMP
 			WHERE id = $4`,
 			nullIfEmpty(description),
 			nullIfEmpty(coverPhotoURI),
@@ -76,8 +74,8 @@ func (s *FacebookAlbumStorage) SaveOrUpdateAlbum(ctx context.Context, name, desc
 	}
 	var albumID int64
 	query := `INSERT INTO facebook_albums (name, description, cover_photo_uri, last_modified_timestamp, user_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) RETURNING id`
-	err = s.pool.QueryRow(ctx, query,
+		VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) RETURNING id`
+	err = s.pool.QueryRowContext(ctx, query,
 		name,
 		nullIfEmpty(description),
 		nullIfEmpty(coverPhotoURI),
@@ -98,13 +96,13 @@ func (s *FacebookAlbumStorage) SaveAlbumImagesBatch(ctx context.Context, items [
 
 	uid := uidFromCtx(ctx)
 
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
-	if _, err = tx.Exec(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
+	if _, err = tx.ExecContext(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
 		return 0, fmt.Errorf("failed to set synchronous_commit: %w", err)
 	}
 
@@ -114,17 +112,17 @@ func (s *FacebookAlbumStorage) SaveAlbumImagesBatch(ctx context.Context, items [
 		sourceRef := albumPhotoSourceRef(item.AlbumID, item.URI)
 
 		var mediaItemID int64
-		err = tx.QueryRow(ctx, `SELECT id FROM media_items WHERE source = $1 AND source_reference = $2 LIMIT 1`,
+		err = tx.QueryRowContext(ctx, `SELECT id FROM media_items WHERE source = $1 AND source_reference = $2 LIMIT 1`,
 			facebookAlbumSource, sourceRef).Scan(&mediaItemID)
 		if err == nil {
 			// Photo already exists from a previous import; ensure album_media link exists.
 			var linkCount int
-			if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM album_media WHERE album_id = $1 AND media_item_id = $2`,
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM album_media WHERE album_id = $1 AND media_item_id = $2`,
 				item.AlbumID, mediaItemID).Scan(&linkCount); err != nil {
 				return imported, fmt.Errorf("failed to check album_media for %s: %w", item.URI, err)
 			}
 			if linkCount == 0 {
-				_, err = tx.Exec(ctx, `INSERT INTO album_media (album_id, media_item_id) VALUES ($1, $2)`, item.AlbumID, mediaItemID)
+				_, err = tx.ExecContext(ctx, `INSERT INTO album_media (album_id, media_item_id) VALUES ($1, $2)`, item.AlbumID, mediaItemID)
 				if err != nil {
 					return imported, fmt.Errorf("failed to link existing media item to album for %s: %w", item.URI, err)
 				}
@@ -132,16 +130,16 @@ func (s *FacebookAlbumStorage) SaveAlbumImagesBatch(ctx context.Context, items [
 			imported++
 			continue
 		}
-		if !errors.Is(err, pgx.ErrNoRows) {
+		if !errors.Is(err, sql.ErrNoRows) {
 			return imported, fmt.Errorf("failed to check existing media item for %s: %w", item.URI, err)
 		}
 
 		var blobID int64
 		if len(item.ImageData) > 0 {
-			err = tx.QueryRow(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`,
+			err = tx.QueryRowContext(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`,
 				item.ImageData, nil, uidVal(uid)).Scan(&blobID)
 		} else {
-			err = tx.QueryRow(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`,
+			err = tx.QueryRowContext(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`,
 				nil, nil, uidVal(uid)).Scan(&blobID)
 		}
 		if err != nil {
@@ -161,12 +159,12 @@ func (s *FacebookAlbumStorage) SaveAlbumImagesBatch(ctx context.Context, items [
 			displayTitle = item.Filename
 		}
 
-		err = tx.QueryRow(ctx, `INSERT INTO media_items (
+		err = tx.QueryRowContext(ctx, `INSERT INTO media_items (
 			media_blob_id, tags, source, source_reference, title, description,
 			media_type, year, month, latitude, longitude, altitude, has_gps,
 			processed, available_for_task, rating, is_personal, is_business,
 			is_social, is_promotional, is_spam, is_important, user_id, created_at, updated_at, is_referenced
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW(), NOW(), FALSE)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, FALSE)
 		RETURNING id`,
 			blobID,
 			nullIfEmpty(item.AlbumName),
@@ -185,14 +183,14 @@ func (s *FacebookAlbumStorage) SaveAlbumImagesBatch(ctx context.Context, items [
 			return imported, fmt.Errorf("failed to insert media item for %s: %w", item.URI, err)
 		}
 
-		_, err = tx.Exec(ctx, `INSERT INTO album_media (album_id, media_item_id) VALUES ($1, $2)`, item.AlbumID, mediaItemID)
+		_, err = tx.ExecContext(ctx, `INSERT INTO album_media (album_id, media_item_id) VALUES ($1, $2)`, item.AlbumID, mediaItemID)
 		if err != nil {
 			return imported, fmt.Errorf("failed to insert album_media for %s: %w", item.URI, err)
 		}
 		imported++
 	}
 
-	if err = tx.Commit(ctx); err != nil {
+	if err = tx.Commit(); err != nil {
 		return 0, fmt.Errorf("failed to commit: %w", err)
 	}
 	return imported, nil

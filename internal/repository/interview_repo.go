@@ -2,20 +2,20 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // InterviewRepo accesses the interviews and interview_turns tables.
 type InterviewRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewInterviewRepo creates an InterviewRepo.
-func NewInterviewRepo(pool *pgxpool.Pool) *InterviewRepo {
+func NewInterviewRepo(pool *sql.DB) *InterviewRepo {
 	return &InterviewRepo{pool: pool}
 }
 
@@ -23,7 +23,7 @@ func NewInterviewRepo(pool *pgxpool.Pool) *InterviewRepo {
 func (r *InterviewRepo) CreateInterview(ctx context.Context, title, style, purpose, purposeDetail, provider string) (*model.Interview, error) {
 	uid := uidFromCtx(ctx)
 	var iv model.Interview
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`INSERT INTO interviews (title, style, purpose, purpose_detail, provider, user_id)
 		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING id, title, style, purpose, purpose_detail, state, provider, created_at, updated_at, last_turn_at`,
@@ -46,7 +46,7 @@ func (r *InterviewRepo) GetInterview(ctx context.Context, id int64) (*model.Inte
 	args := []any{id}
 	q, args = addUIDFilterQualified(q, args, uid, "i")
 	var iv model.Interview
-	err := r.pool.QueryRow(ctx, q, args...).Scan(
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(
 		&iv.ID, &iv.Title, &iv.Style, &iv.Purpose, &iv.PurposeDetail,
 		&iv.State, &iv.Provider, &iv.Writeup, &iv.CreatedAt, &iv.UpdatedAt, &iv.LastTurnAt,
 		&iv.TurnCount,
@@ -77,7 +77,7 @@ func (r *InterviewRepo) ListInterviews(ctx context.Context, stateFilter string) 
 		q += fmt.Sprintf(" AND i.state = $%d", len(args))
 	}
 	q += " ORDER BY COALESCE(i.last_turn_at, i.created_at) DESC"
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListInterviews: %w", err)
 	}
@@ -98,20 +98,20 @@ func (r *InterviewRepo) ListInterviews(ctx context.Context, stateFilter string) 
 // SaveWriteup stores the generated writeup text and marks the interview as finished.
 func (r *InterviewRepo) SaveWriteup(ctx context.Context, id int64, writeup string) error {
 	uid := uidFromCtx(ctx)
-	q := `UPDATE interviews SET writeup = $1, state = 'finished', updated_at = NOW() WHERE id = $2`
+	q := `UPDATE interviews SET writeup = $1, state = 'finished', updated_at = CURRENT_TIMESTAMP WHERE id = $2`
 	args := []any{writeup, id}
 	q, args = addUIDFilter(q, args, uid)
-	_, err := r.pool.Exec(ctx, q, args...)
+	_, err := r.pool.ExecContext(ctx, q, args...)
 	return err
 }
 
 // UpdateInterviewState sets the state and updated_at.
 func (r *InterviewRepo) UpdateInterviewState(ctx context.Context, id int64, state string) error {
 	uid := uidFromCtx(ctx)
-	q := `UPDATE interviews SET state = $1, updated_at = NOW() WHERE id = $2`
+	q := `UPDATE interviews SET state = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`
 	args := []any{state, id}
 	q, args = addUIDFilter(q, args, uid)
-	_, err := r.pool.Exec(ctx, q, args...)
+	_, err := r.pool.ExecContext(ctx, q, args...)
 	return err
 }
 
@@ -119,14 +119,14 @@ func (r *InterviewRepo) UpdateInterviewState(ctx context.Context, id int64, stat
 // and updates last_turn_at on the parent interview.
 func (r *InterviewRepo) SaveTurn(ctx context.Context, interviewID int64, question string) (*model.InterviewTurn, error) {
 	uid := uidFromCtx(ctx)
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("SaveTurn begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	defer tx.Rollback() //nolint:errcheck
 
 	var t model.InterviewTurn
-	err = tx.QueryRow(ctx,
+	err = tx.QueryRowContext(ctx,
 		`INSERT INTO interview_turns (interview_id, turn_number, question, user_id)
 		 VALUES ($1,
 		   COALESCE((SELECT MAX(turn_number) FROM interview_turns WHERE interview_id = $1), 0) + 1,
@@ -138,13 +138,13 @@ func (r *InterviewRepo) SaveTurn(ctx context.Context, interviewID int64, questio
 		return nil, fmt.Errorf("SaveTurn insert: %w", err)
 	}
 
-	_, err = tx.Exec(ctx,
-		`UPDATE interviews SET last_turn_at = $1, updated_at = NOW() WHERE id = $2`,
+	_, err = tx.ExecContext(ctx,
+		`UPDATE interviews SET last_turn_at = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
 		time.Now(), interviewID)
 	if err != nil {
 		return nil, fmt.Errorf("SaveTurn update interview: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("SaveTurn commit: %w", err)
 	}
 	return &t, nil
@@ -152,14 +152,14 @@ func (r *InterviewRepo) SaveTurn(ctx context.Context, interviewID int64, questio
 
 // SaveAnswer updates the answer column on the latest unanswered turn.
 func (r *InterviewRepo) SaveAnswer(ctx context.Context, interviewID int64, answer string) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.pool.ExecContext(ctx,
 		`UPDATE interview_turns SET answer = $1
 		 WHERE interview_id = $2 AND answer IS NULL
 		 ORDER BY turn_number DESC LIMIT 1`,
 		answer, interviewID)
 	if err != nil {
 		// Fallback: some Postgres versions don't support ORDER BY + LIMIT on UPDATE.
-		_, err = r.pool.Exec(ctx,
+		_, err = r.pool.ExecContext(ctx,
 			`UPDATE interview_turns SET answer = $1
 			 WHERE id = (
 			   SELECT id FROM interview_turns
@@ -173,7 +173,7 @@ func (r *InterviewRepo) SaveAnswer(ctx context.Context, interviewID int64, answe
 
 // GetTurns returns all turns for an interview in chronological order.
 func (r *InterviewRepo) GetTurns(ctx context.Context, interviewID int64) ([]*model.InterviewTurn, error) {
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.pool.QueryContext(ctx,
 		`SELECT id, interview_id, question, answer, turn_number, created_at
 		 FROM interview_turns WHERE interview_id = $1
 		 ORDER BY turn_number ASC`,
@@ -196,7 +196,7 @@ func (r *InterviewRepo) GetTurns(ctx context.Context, interviewID int64) ([]*mod
 // GetLastTurn returns the most recent turn for an interview, or nil.
 func (r *InterviewRepo) GetLastTurn(ctx context.Context, interviewID int64) (*model.InterviewTurn, error) {
 	var t model.InterviewTurn
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT id, interview_id, question, answer, turn_number, created_at
 		 FROM interview_turns WHERE interview_id = $1
 		 ORDER BY turn_number DESC LIMIT 1`,
@@ -217,6 +217,6 @@ func (r *InterviewRepo) DeleteInterview(ctx context.Context, id int64) error {
 	q := `DELETE FROM interviews WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	_, err := r.pool.Exec(ctx, q, args...)
+	_, err := r.pool.ExecContext(ctx, q, args...)
 	return err
 }

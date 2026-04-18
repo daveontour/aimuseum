@@ -7,35 +7,35 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 // BillingRepo records LLM usage in the billing database (separate from main app DB).
 type BillingRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewBillingRepo creates a BillingRepo. pool may be nil to disable recording.
-func NewBillingRepo(pool *pgxpool.Pool) *BillingRepo {
+func NewBillingRepo(pool *sql.DB) *BillingRepo {
 	return &BillingRepo{pool: pool}
 }
 
 // LLMUsageEvent is one row in llm_usage_events.
 type LLMUsageEvent struct {
-	ID              int64     `json:"id"`
-	CreatedAt       time.Time `json:"created_at"`
-	Provider        string    `json:"provider"`
-	UserID          *int64    `json:"user_id,omitempty"`
-	IsVisitor       bool      `json:"is_visitor"`
-	InputTokens     int       `json:"input_tokens"`
-	OutputTokens    int       `json:"output_tokens"`
-	ModelName       *string   `json:"model_name,omitempty"`
-	UserEmail       *string   `json:"user_email,omitempty"`
-	UserFirstName    *string `json:"user_first_name,omitempty"`
-	UserFamilyName   *string `json:"user_family_name,omitempty"`
-	UsedServerLLMKey *bool   `json:"used_server_llm_key,omitempty"`
-	Succeeded        bool    `json:"succeeded"`
-	ErrorMessage     *string `json:"error_message,omitempty"`
+	ID               int64          `json:"id"`
+	CreatedAt        sqlutil.DBTime `json:"created_at"`
+	Provider         string         `json:"provider"`
+	UserID           *int64         `json:"user_id,omitempty"`
+	IsVisitor        bool           `json:"is_visitor"`
+	InputTokens      int            `json:"input_tokens"`
+	OutputTokens     int            `json:"output_tokens"`
+	ModelName        *string        `json:"model_name,omitempty"`
+	UserEmail        *string        `json:"user_email,omitempty"`
+	UserFirstName    *string        `json:"user_first_name,omitempty"`
+	UserFamilyName   *string        `json:"user_family_name,omitempty"`
+	UsedServerLLMKey *bool          `json:"used_server_llm_key,omitempty"`
+	Succeeded        bool           `json:"succeeded"`
+	ErrorMessage     *string        `json:"error_message,omitempty"`
 }
 
 // InsertLLMUsage appends a usage event. No-op if pool is nil.
@@ -52,7 +52,7 @@ func (r *BillingRepo) InsertLLMUsage(ctx context.Context, provider string, userI
 	if outputTokens < 0 {
 		outputTokens = 0
 	}
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.pool.ExecContext(ctx, `
 		INSERT INTO llm_usage_events (provider, user_id, is_visitor, input_tokens, output_tokens, model_name, user_email, user_first_name, user_family_name, used_server_llm_key, succeeded, error_message)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 		provider, userID, isVisitor, inputTokens, outputTokens, modelName, userEmail, userFirstName, userFamilyName, usedServerLLMKey, succeeded, errorMessage,
@@ -100,7 +100,7 @@ func (r *BillingRepo) SummaryByUser(ctx context.Context, userID int64, from, to 
 		q += fmt.Sprintf(" AND created_at < $%d", n)
 		args = append(args, *to)
 	}
-	err = r.pool.QueryRow(ctx, q, args...).Scan(&sum.TotalInputTokens, &sum.TotalOutputTokens, &sum.EventCount)
+	err = r.pool.QueryRowContext(ctx, q, args...).Scan(&sum.TotalInputTokens, &sum.TotalOutputTokens, &sum.EventCount)
 	if err != nil {
 		return sum, nil, nil, err
 	}
@@ -118,7 +118,7 @@ func (r *BillingRepo) SummaryByUser(ctx context.Context, userID int64, from, to 
 		args2 = append(args2, *to)
 	}
 	q2 += ` GROUP BY provider ORDER BY provider`
-	rows, err := r.pool.Query(ctx, q2, args2...)
+	rows, err := r.pool.QueryContext(ctx, q2, args2...)
 	if err != nil {
 		return sum, nil, nil, err
 	}
@@ -147,7 +147,7 @@ func (r *BillingRepo) SummaryByUser(ctx context.Context, userID int64, from, to 
 		args3 = append(args3, *to)
 	}
 	q3 += ` GROUP BY is_visitor ORDER BY is_visitor`
-	rows2, err := r.pool.Query(ctx, q3, args3...)
+	rows2, err := r.pool.QueryContext(ctx, q3, args3...)
 	if err != nil {
 		return sum, byProvider, nil, err
 	}
@@ -191,7 +191,7 @@ func (r *BillingRepo) ListEventsByUser(ctx context.Context, userID int64, from, 
 	}
 	q += fmt.Sprintf(` ORDER BY created_at DESC LIMIT $%d OFFSET $%d`, n, n+1)
 	args = append(args, limit, offset)
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +269,7 @@ func (r *BillingRepo) ListFailedEvents(ctx context.Context, userID *int64, from,
 	}
 	q += fmt.Sprintf(` ORDER BY created_at DESC LIMIT $%d OFFSET $%d`, n, n+1)
 	args = append(args, limit, offset)
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +344,7 @@ func (r *BillingRepo) ListEventsByUserAll(ctx context.Context, userID int64, fro
 	}
 	q += fmt.Sprintf(` ORDER BY created_at ASC LIMIT $%d`, n)
 	args = append(args, limit)
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -395,9 +395,9 @@ func (r *BillingRepo) ListEventsByUserAll(ctx context.Context, userID int64, fro
 
 // TimeseriesBucket is one 5-minute aggregate for charting.
 type TimeseriesBucket struct {
-	BucketStart   time.Time
-	InputTokens   int64
-	OutputTokens  int64
+	BucketStart  time.Time
+	InputTokens  int64
+	OutputTokens int64
 }
 
 // TimeseriesByUser5Min aggregates token sums into 300-second buckets (UTC epoch alignment).
@@ -405,12 +405,22 @@ func (r *BillingRepo) TimeseriesByUser5Min(ctx context.Context, userID int64, fr
 	if r == nil || r.pool == nil {
 		return nil, errors.New("billing: not configured")
 	}
-	q := `
+	var q string
+	if sqlutil.IsSQLite(ctx, r.pool) {
+		q = `
+		SELECT datetime((CAST(strftime('%s', created_at) AS INTEGER) / 300) * 300, 'unixepoch') AS bucket_start,
+			CAST(COALESCE(SUM(input_tokens), 0) AS INTEGER),
+			CAST(COALESCE(SUM(output_tokens), 0) AS INTEGER)
+		FROM llm_usage_events
+		WHERE user_id = $1`
+	} else {
+		q = `
 		SELECT to_timestamp(floor(extract(epoch FROM created_at) / 300) * 300) AS bucket_start,
 			COALESCE(SUM(input_tokens), 0)::bigint,
 			COALESCE(SUM(output_tokens), 0)::bigint
 		FROM llm_usage_events
 		WHERE user_id = $1`
+	}
 	args := []any{userID}
 	n := 2
 	if from != nil {
@@ -423,7 +433,7 @@ func (r *BillingRepo) TimeseriesByUser5Min(ctx context.Context, userID int64, fr
 		args = append(args, *to)
 	}
 	q += ` GROUP BY 1 ORDER BY 1`
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -440,7 +450,7 @@ func (r *BillingRepo) TimeseriesByUser5Min(ctx context.Context, userID int64, fr
 }
 
 // PgxPool returns the underlying pool for health checks (may be nil).
-func (r *BillingRepo) PgxPool() *pgxpool.Pool {
+func (r *BillingRepo) PgxPool() *sql.DB {
 	if r == nil {
 		return nil
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -14,7 +15,6 @@ import (
 	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/model"
 	"github.com/daveontour/aimuseum/internal/repository"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // chatHistoryTurnLimit is how many prior user/assistant exchanges to send as context to the LLM.
@@ -48,7 +48,7 @@ type ChatService struct {
 	appInstrRepo        *repository.AppSystemInstructionsRepo
 	cpRepo              *repository.CompleteProfileRepo
 	docRepo             *repository.DocumentRepo
-	pool                *pgxpool.Pool
+	pool                *sql.DB
 	userRepo            *repository.UserRepo
 	defaultGeminiKey    string
 	defaultGeminiModel  string
@@ -73,7 +73,7 @@ func NewChatService(
 	appInstrRepo *repository.AppSystemInstructionsRepo,
 	cpRepo *repository.CompleteProfileRepo,
 	docRepo *repository.DocumentRepo,
-	pool *pgxpool.Pool,
+	pool *sql.DB,
 	userRepo *repository.UserRepo,
 	defaultGeminiKey, defaultGeminiModel, defaultAnthropicKey, defaultClaudeModel, defaultTavilyKey string,
 	defaultLocalAIURL, defaultLocalAIKey, defaultLocalAIModel string,
@@ -699,7 +699,7 @@ func (s *ChatService) loadVoiceInstructions(ctx context.Context) map[string]voic
 	}
 
 	// Merge custom voices from DB (built-in keys are never overwritten)
-	rows, err := s.pool.Query(ctx, `SELECT key, name, description, instructions FROM custom_voices`)
+	rows, err := s.pool.QueryContext(ctx, `SELECT key, name, description, instructions FROM custom_voices`)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {

@@ -2,19 +2,19 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // DocumentRepo accesses the reference_documents table.
 type DocumentRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewDocumentRepo creates a DocumentRepo.
-func NewDocumentRepo(pool *pgxpool.Pool) *DocumentRepo {
+func NewDocumentRepo(pool *sql.DB) *DocumentRepo {
 	return &DocumentRepo{pool: pool}
 }
 
@@ -47,17 +47,17 @@ func (r *DocumentRepo) List(ctx context.Context, search, category, tag, contentT
 		args = append(args, "%"+search+"%")
 		idx := len(args)
 		conds = append(conds, fmt.Sprintf(
-			`(filename ILIKE $%d OR title ILIKE $%d OR description ILIKE $%d OR author ILIKE $%d)`,
+			`(filename LIKE $%d OR title LIKE $%d OR description LIKE $%d OR author LIKE $%d)`,
 			idx, idx, idx, idx,
 		))
 	}
 	if category != "" {
 		args = append(args, "%"+category+"%")
-		conds = append(conds, fmt.Sprintf("categories ILIKE $%d", len(args)))
+		conds = append(conds, fmt.Sprintf("categories LIKE $%d", len(args)))
 	}
 	if tag != "" {
 		args = append(args, "%"+tag+"%")
-		conds = append(conds, fmt.Sprintf("tags ILIKE $%d", len(args)))
+		conds = append(conds, fmt.Sprintf("tags LIKE $%d", len(args)))
 	}
 	if availableForTask != nil {
 		args = append(args, *availableForTask)
@@ -65,7 +65,7 @@ func (r *DocumentRepo) List(ctx context.Context, search, category, tag, contentT
 	}
 	if contentType != "" {
 		args = append(args, "%"+contentType+"%")
-		conds = append(conds, fmt.Sprintf("content_type ILIKE $%d", len(args)))
+		conds = append(conds, fmt.Sprintf("content_type LIKE $%d", len(args)))
 	}
 	if len(conds) > 0 {
 		q += " AND " + joinAnd(conds)
@@ -73,7 +73,7 @@ func (r *DocumentRepo) List(ctx context.Context, search, category, tag, contentT
 	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY created_at DESC"
 
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListDocuments: %w", err)
 	}
@@ -97,7 +97,7 @@ func (r *DocumentRepo) CountAvailableForAI(ctx context.Context) (int64, error) {
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
 	var n int64
-	if err := r.pool.QueryRow(ctx, q, args...).Scan(&n); err != nil {
+	if err := r.pool.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count reference documents for AI: %w", err)
 	}
 	return n, nil
@@ -109,7 +109,7 @@ func (r *DocumentRepo) GetByID(ctx context.Context, id int64) (*model.ReferenceD
 	q := `SELECT ` + documentCols + ` FROM reference_documents WHERE id = $1 AND is_sensitive = FALSE`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	d, err := scanDocument(r.pool.QueryRow(ctx, q, args...))
+	d, err := scanDocument(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -127,7 +127,7 @@ func (r *DocumentRepo) GetData(ctx context.Context, id int64) ([]byte, bool, err
 	q, args = addUIDFilter(q, args, uid)
 	var data []byte
 	var isEncrypted bool
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&data, &isEncrypted)
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(&data, &isEncrypted)
 	if err != nil {
 		if isNoRows(err) {
 			return nil, false, nil
@@ -144,7 +144,7 @@ func (r *DocumentRepo) Create(ctx context.Context,
 	availableForTask, isPrivate, isSensitive, isEncrypted bool,
 ) (*model.ReferenceDocument, error) {
 	uid := uidFromCtx(ctx)
-	d, err := scanDocument(r.pool.QueryRow(ctx,
+	d, err := scanDocument(r.pool.QueryRowContext(ctx,
 		`INSERT INTO reference_documents
 		 (filename, title, description, author, content_type, size, data,
 		  tags, categories, notes, available_for_task, is_private, is_sensitive, is_encrypted, user_id)
@@ -173,12 +173,12 @@ func (r *DocumentRepo) Update(ctx context.Context, id int64,
 	      categories       = COALESCE($5, categories),
 	      notes            = COALESCE($6, notes),
 	      available_for_task = COALESCE($7, available_for_task),
-	      updated_at       = NOW()
+	      updated_at       = CURRENT_TIMESTAMP
 	      WHERE id = $8`
 	args := []any{title, description, author, tags, categories, notes, availableForTask, id}
 	q, args = addUIDFilter(q, args, uid)
 	q += ` RETURNING ` + documentCols
-	d, err := scanDocument(r.pool.QueryRow(ctx, q, args...))
+	d, err := scanDocument(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -191,10 +191,10 @@ func (r *DocumentRepo) Update(ctx context.Context, id int64,
 // UpdateData replaces the binary content and encryption state of a document.
 func (r *DocumentRepo) UpdateData(ctx context.Context, id int64, data []byte, isEncrypted bool) error {
 	uid := uidFromCtx(ctx)
-	q := `UPDATE reference_documents SET data=$1, is_encrypted=$2, updated_at=NOW() WHERE id=$3`
+	q := `UPDATE reference_documents SET data=$1, is_encrypted=$2, updated_at=CURRENT_TIMESTAMP WHERE id=$3`
 	args := []any{data, isEncrypted, id}
 	q, args = addUIDFilter(q, args, uid)
-	_, err := r.pool.Exec(ctx, q, args...)
+	_, err := r.pool.ExecContext(ctx, q, args...)
 	return err
 }
 
@@ -204,7 +204,7 @@ func (r *DocumentRepo) Delete(ctx context.Context, id int64) error {
 	q := `DELETE FROM reference_documents WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	_, err := r.pool.Exec(ctx, q, args...)
+	_, err := r.pool.ExecContext(ctx, q, args...)
 	return err
 }
 
@@ -215,7 +215,7 @@ func (r *DocumentRepo) ListSensitive(ctx context.Context) ([]*model.ReferenceDoc
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY created_at DESC"
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListSensitive: %w", err)
 	}
@@ -237,7 +237,7 @@ func (r *DocumentRepo) GetSensitiveByID(ctx context.Context, id int64) (*model.R
 	q := `SELECT ` + documentCols + ` FROM reference_documents WHERE id = $1 AND is_sensitive = TRUE`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	d, err := scanDocument(r.pool.QueryRow(ctx, q, args...))
+	d, err := scanDocument(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -254,7 +254,7 @@ func (r *DocumentRepo) ListUnencrypted(ctx context.Context) ([]*model.ReferenceD
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY id"
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListUnencrypted: %w", err)
 	}

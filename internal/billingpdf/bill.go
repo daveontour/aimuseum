@@ -15,16 +15,16 @@ import (
 
 // BillMeta identifies the archive user and reporting window for the cover page.
 type BillMeta struct {
-	UserID           int64
-	Email            string
-	DisplayName      string
-	FirstName        string
-	FamilyName       string
-	PeriodFrom       *time.Time
-	PeriodTo         *time.Time
-	GeneratedAt      time.Time
-	EventsTruncated  bool
-	MaxEventRows int // cap used when loading events (e.g. 50000); used in truncation note only
+	UserID          int64
+	Email           string
+	DisplayName     string
+	FirstName       string
+	FamilyName      string
+	PeriodFrom      *time.Time
+	PeriodTo        *time.Time
+	GeneratedAt     time.Time
+	EventsTruncated bool
+	MaxEventRows    int // cap used when loading events (e.g. 50000); used in truncation note only
 }
 
 // RenderLLMUsageBill builds a PDF bytes slice with summary, per-event lines, and 5-minute buckets.

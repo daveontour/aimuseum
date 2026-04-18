@@ -1,6 +1,6 @@
 package model
 
-import "time"
+import "github.com/daveontour/aimuseum/internal/sqlutil"
 
 // Artefact is a row from the artefacts table.
 type Artefact struct {
@@ -9,8 +9,8 @@ type Artefact struct {
 	Description *string
 	Tags        *string
 	Story       *string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	CreatedAt   sqlutil.DBTime
+	UpdatedAt   sqlutil.DBTime
 }
 
 // ArtefactMedia is a row from the artefact_media junction table.
@@ -23,7 +23,7 @@ type ArtefactMedia struct {
 
 // ArtefactMediaItem is the joined view used in API responses.
 type ArtefactMediaItem struct {
-	ID           int64   `json:"id"`           // artefact_media.id
+	ID           int64   `json:"id"`            // artefact_media.id
 	MediaItemID  int64   `json:"media_item_id"` // media_items.id
 	MediaBlobID  *int64  `json:"media_blob_id"` // media_items.media_blob_id
 	SortOrder    int     `json:"sort_order"`
@@ -44,13 +44,13 @@ type ArtefactResponse struct {
 	MediaItems  []ArtefactMediaItem `json:"media_items"`
 }
 
-// ArtefactSummary is the lightweight list response (date fields use time.Time for scanning).
+// ArtefactSummary is the lightweight list response (date fields use sqlutil.DBTime for scanning).
 type ArtefactSummary struct {
 	ID                  int64
 	Name                string
 	Description         *string
 	Tags                *string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	CreatedAt           sqlutil.DBTime
+	UpdatedAt           sqlutil.DBTime
 	PrimaryThumbnailURL *string
 }

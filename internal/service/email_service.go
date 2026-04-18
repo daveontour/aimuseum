@@ -129,8 +129,8 @@ func (s *EmailService) emailThreadTranscript(ctx context.Context, participant st
 	}
 	for _, e := range emails {
 		dateStr := ""
-		if e.Date != nil {
-			dateStr = e.Date.Format(time.RFC1123)
+		if e.Date.Valid {
+			dateStr = e.Date.Time.Format(time.RFC1123)
 		}
 		sb.WriteString(fmt.Sprintf("From: %s\nTo: %s\nDate: %s\nSubject: %s\n",
 			ptrStr(e.FromAddress),

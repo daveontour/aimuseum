@@ -1,6 +1,6 @@
 package model
 
-import "time"
+import "github.com/daveontour/aimuseum/internal/sqlutil"
 
 // DashboardResponse is the shape returned by GET /api/dashboard.
 type DashboardResponse struct {
@@ -54,8 +54,8 @@ type SubjectConfig struct {
 	InstagramHandle        *string
 	WritingStyleAI         *string
 	PsychologicalProfileAI *string
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	CreatedAt              sqlutil.DBTime
+	UpdatedAt              sqlutil.DBTime
 }
 
 // SubjectConfigResponse is the shape returned by GET /api/subject-configuration.

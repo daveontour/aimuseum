@@ -3,6 +3,7 @@ package ai
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,8 +18,6 @@ import (
 
 	"github.com/daveontour/aimuseum/internal/appctx"
 	appcrypto "github.com/daveontour/aimuseum/internal/crypto"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // RAMMasterGetter returns the session master password when the browser has unlocked the keyring.
@@ -32,7 +31,7 @@ const chatMessageKeywordSearchLimit = 200
 
 // NewToolExecutor creates a ToolExecutor backed by the provided pool.
 // getRAM returns the sensitive keyring password for this HTTP request's session; used to decrypt encrypted reference documents for AI tools.
-func NewToolExecutor(pool *pgxpool.Pool, subjectName, tavilyKey, pepper string, getRAM RAMMasterGetter) ToolExecutor {
+func NewToolExecutor(pool *sql.DB, subjectName, tavilyKey, pepper string, getRAM RAMMasterGetter) ToolExecutor {
 	if getRAM == nil {
 		getRAM = func() (string, bool) { return "", false }
 	}
@@ -179,7 +178,6 @@ func toolsUIDFilter(ctx context.Context, q string, args []any) (string, []any) {
 		return q, args
 	}
 	args = append(args, uid)
-	n := len(args)
 	insertAt := toolsUIDFilterInsertPoint(q)
 	prefix := strings.TrimRight(q[:insertAt], " \t\n\r")
 	suffix := q[insertAt:]
@@ -189,42 +187,17 @@ func toolsUIDFilter(ctx context.Context, q string, args []any) (string, []any) {
 	if !hasWhere {
 		joiner = " WHERE user_id = "
 	}
-	return prefix + joiner + fmt.Sprintf("$%d", n) + suffix, args
+	return prefix + joiner + "?" + suffix, args
 }
 
 func visitorKeyReferenceDocsRestricted(ctx context.Context) bool {
 	return appctx.VisitorAccessFromCtx(ctx).Restricted
 }
 
-func visitorKeyMayReadReferenceDoc(ctx context.Context, pool *pgxpool.Pool, docID int64) (bool, error) {
-	hintID, ok := appctx.VisitorKeyHintIDFromCtx(ctx)
-	if !ok {
-		return false, nil
-	}
-	uid := appctx.UserIDFromCtx(ctx)
-	var allowed bool
-	var err error
-	if uid > 0 {
-		err = pool.QueryRow(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM reference_documents d
-				INNER JOIN visitor_key_hint_reference_documents j
-					ON j.reference_document_id = d.id AND j.visitor_key_hint_id = $1
-				WHERE d.id = $2 AND d.available_for_task = TRUE AND d.is_sensitive = FALSE AND d.user_id = $3)`,
-			hintID, docID, uid).Scan(&allowed)
-	} else {
-		err = pool.QueryRow(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM reference_documents d
-				INNER JOIN visitor_key_hint_reference_documents j
-					ON j.reference_document_id = d.id AND j.visitor_key_hint_id = $1
-				WHERE d.id = $2 AND d.available_for_task = TRUE AND d.is_sensitive = FALSE AND d.user_id IS NULL)`,
-			hintID, docID).Scan(&allowed)
-	}
-	if err != nil {
-		return false, err
-	}
-	return allowed, nil
+func visitorKeyMayReadReferenceDoc(ctx context.Context, pool *sql.DB, docID int64) (bool, error) {
+	_, _, _ = ctx, pool, docID
+	// Visitor key hint junction tables are not present in the SQLite build.
+	return false, nil
 }
 
 func visitorKeySensitiveLLMAccessDenied(ctx context.Context) bool {
@@ -268,110 +241,20 @@ func toolVectorLiteral(values []float32) string {
 	return b.String()
 }
 
-func searchMessagesBySimilarity(ctx context.Context, pool *pgxpool.Pool, text string) (map[string]any, error) {
-	vec, err := toolEmbedText(ctx, text)
-	if err != nil {
-		return map[string]any{"error": err.Error(), "messages": []any{}}, nil
-	}
-	q, args := toolsUIDFilter(ctx, `
-		SELECT
-			id,
-			chat_session,
-			sender_name,
-			message_date,
-			subject,
-			text,
-			(embedding_vector <=> $1::vector) AS distance
-		FROM messages
-		WHERE embedding_vector IS NOT NULL
-		ORDER BY embedding_vector <=> $1::vector
-		LIMIT 20
-	`, []any{toolVectorLiteral(vec)})
-	rows, err := pool.Query(ctx, q, args...)
-	if err != nil {
-		return map[string]any{"error": err.Error(), "messages": []any{}}, nil
-	}
-	defer rows.Close()
-	var out []map[string]any
-	for rows.Next() {
-		var id int64
-		var chatSession, senderName, subject, body *string
-		var messageDate *time.Time
-		var distance *float64
-		if err := rows.Scan(&id, &chatSession, &senderName, &messageDate, &subject, &body, &distance); err != nil {
-			continue
-		}
-		out = append(out, map[string]any{
-			"id":           id,
-			"chat_session": chatSession,
-			"sender_name":  senderName,
-			"message_date": messageDate,
-			"subject":      subject,
-			"text":         body,
-			"distance":     distance,
-		})
-	}
-	if out == nil {
-		out = []map[string]any{}
-	}
-	return map[string]any{"messages": out}, nil
+func searchMessagesBySimilarity(ctx context.Context, pool *sql.DB, text string) (map[string]any, error) {
+	_, _, _ = ctx, pool, text
+	return map[string]any{"error": "vector similarity search is not available in this build", "messages": []any{}}, nil
 }
 
-func searchEmailsBySimilarity(ctx context.Context, pool *pgxpool.Pool, text string) (map[string]any, error) {
-	vec, err := toolEmbedText(ctx, text)
-	if err != nil {
-		return map[string]any{"error": err.Error(), "emails": []any{}}, nil
-	}
-	q, args := toolsUIDFilter(ctx, `
-		SELECT
-			id,
-			subject,
-			from_address,
-			to_addresses,
-			date,
-			snippet,
-			plain_text,
-			(embedding_vector <=> $1::vector) AS distance
-		FROM emails
-		WHERE embedding_vector IS NOT NULL
-		ORDER BY embedding_vector <=> $1::vector
-		LIMIT 20
-	`, []any{toolVectorLiteral(vec)})
-	rows, err := pool.Query(ctx, q, args...)
-	if err != nil {
-		return map[string]any{"error": err.Error(), "emails": []any{}}, nil
-	}
-	defer rows.Close()
-	var out []map[string]any
-	for rows.Next() {
-		var id int64
-		var subject, fromAddr, toAddrs, snippet, plainText *string
-		var date *time.Time
-		var distance *float64
-		if err := rows.Scan(&id, &subject, &fromAddr, &toAddrs, &date, &snippet, &plainText, &distance); err != nil {
-			continue
-		}
-		out = append(out, map[string]any{
-			"id":           id,
-			"subject":      subject,
-			"from_address": fromAddr,
-			"to_addresses": toAddrs,
-			"date":         date,
-			"snippet":      snippet,
-			"plain_text":   plainText,
-			"distance":     distance,
-		})
-	}
-	if out == nil {
-		out = []map[string]any{}
-	}
-	return map[string]any{"emails": out}, nil
+func searchEmailsBySimilarity(ctx context.Context, pool *sql.DB, text string) (map[string]any, error) {
+	_, _, _ = ctx, pool, text
+	return map[string]any{"error": "vector similarity search is not available in this build", "emails": []any{}}, nil
 }
 
 // visitorKeyMayReadSensitiveReferenceDoc is true for non-restricted sessions (owner or share visitor).
 // For restricted visitor-key sessions with sensitive/private access, the document must appear
 // in visitor_key_hint_sensitive_reference_documents for the session hint.
-func visitorKeyMayReadSensitiveReferenceDoc(ctx context.Context, pool *pgxpool.Pool, docID int64) (bool, error) {
+func visitorKeyMayReadSensitiveReferenceDoc(ctx context.Context, pool *sql.DB, docID int64) (bool, error) {
 	va := appctx.VisitorAccessFromCtx(ctx)
 	if !va.Restricted {
 		return true, nil
@@ -379,84 +262,19 @@ func visitorKeyMayReadSensitiveReferenceDoc(ctx context.Context, pool *pgxpool.P
 	if !va.AllowSensitivePrivate() {
 		return false, nil
 	}
-	hintID, ok := appctx.VisitorKeyHintIDFromCtx(ctx)
-	if !ok {
-		return false, nil
-	}
-	uid := appctx.UserIDFromCtx(ctx)
-	var allowed bool
-	var err error
-	if uid > 0 {
-		err = pool.QueryRow(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM reference_documents d
-				INNER JOIN visitor_key_hint_sensitive_reference_documents j
-					ON j.reference_document_id = d.id AND j.visitor_key_hint_id = $1
-				WHERE d.id = $2 AND d.is_sensitive = TRUE AND d.user_id = $3)`,
-			hintID, docID, uid).Scan(&allowed)
-	} else {
-		err = pool.QueryRow(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM reference_documents d
-				INNER JOIN visitor_key_hint_sensitive_reference_documents j
-					ON j.reference_document_id = d.id AND j.visitor_key_hint_id = $1
-				WHERE d.id = $2 AND d.is_sensitive = TRUE AND d.user_id IS NULL)`,
-			hintID, docID).Scan(&allowed)
-	}
-	if err != nil {
-		return false, err
-	}
-	return allowed, nil
+	_, _, _ = pool, docID, ctx
+	// Visitor key hint junction tables are not present in the SQLite build.
+	return false, nil
 }
 
 // tool to get the title, description, id and tags of all reference documents
-func getAvailableReferenceDocuments(ctx context.Context, pool *pgxpool.Pool) (map[string]any, error) {
+func getAvailableReferenceDocuments(ctx context.Context, pool *sql.DB) (map[string]any, error) {
 	if visitorKeyReferenceDocsRestricted(ctx) {
-		hintID, ok := appctx.VisitorKeyHintIDFromCtx(ctx)
-		if !ok {
-			return map[string]any{"documents": []map[string]any{}}, nil
-		}
-		uid := appctx.UserIDFromCtx(ctx)
-		var rows pgx.Rows
-		var err error
-		if uid > 0 {
-			rows, err = pool.Query(ctx, `
-				SELECT d.id, d.title, d.description, d.tags
-				FROM reference_documents d
-				INNER JOIN visitor_key_hint_reference_documents j ON j.reference_document_id = d.id AND j.visitor_key_hint_id = $1
-				WHERE d.available_for_task = TRUE AND d.is_sensitive = FALSE AND d.user_id = $2`, hintID, uid)
-		} else {
-			rows, err = pool.Query(ctx, `
-				SELECT d.id, d.title, d.description, d.tags
-				FROM reference_documents d
-				INNER JOIN visitor_key_hint_reference_documents j ON j.reference_document_id = d.id AND j.visitor_key_hint_id = $1
-				WHERE d.available_for_task = TRUE AND d.is_sensitive = FALSE AND d.user_id IS NULL`, hintID)
-		}
-		if err != nil {
-			return map[string]any{"error": err.Error(), "documents": []any{}}, nil
-		}
-		defer rows.Close()
-		var documents []map[string]any
-		for rows.Next() {
-			var id int64
-			var title, description, tags *string
-			if err := rows.Scan(&id, &title, &description, &tags); err != nil {
-				continue
-			}
-			documents = append(documents, map[string]any{
-				"id":          id,
-				"title":       title,
-				"description": description,
-				"tags":        tags,
-			})
-		}
-		if documents == nil {
-			documents = []map[string]any{}
-		}
-		return map[string]any{"documents": documents}, nil
+		// Visitor key hint junction tables are not present in the SQLite build.
+		return map[string]any{"documents": []map[string]any{}}, nil
 	}
 	q, args := toolsUIDFilter(ctx, `SELECT id, title, description, tags FROM reference_documents WHERE available_for_task = TRUE AND is_sensitive = FALSE`, nil)
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "documents": []any{}}, nil
 	}
@@ -482,12 +300,12 @@ func getAvailableReferenceDocuments(ctx context.Context, pool *pgxpool.Pool) (ma
 	return map[string]any{"documents": documents}, nil
 }
 
-func getMessagesByChatSession(ctx context.Context, pool *pgxpool.Pool, chatSession string) (map[string]any, error) {
+func getMessagesByChatSession(ctx context.Context, pool *sql.DB, chatSession string) (map[string]any, error) {
 	q, args := toolsUIDFilter(ctx,
 		`SELECT id, message_date, sender_name, sender_id, type, text, service, subject
-		 FROM messages WHERE chat_session ILIKE $1 ORDER BY message_date ASC LIMIT 500`,
+		 FROM messages WHERE chat_session LIKE ? ORDER BY message_date ASC LIMIT 500`,
 		[]any{"%" + chatSession + "%"})
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "chat_session": chatSession, "message_count": 0, "messages": []any{}}, nil
 	}
@@ -527,8 +345,8 @@ func getMessagesByChatSession(ctx context.Context, pool *pgxpool.Pool, chatSessi
 
 // getMessagesAroundInChat returns up to chatMessageNeighborCount messages before and after
 // the anchor row in one chat session, ordered by message_date then id.
-// chat_session is matched the same way as getMessagesByChatSession (ILIKE with wildcards).
-func getMessagesAroundInChat(ctx context.Context, pool *pgxpool.Pool, chatSession string, messageID int64) (map[string]any, error) {
+// chat_session is matched the same way as getMessagesByChatSession (LIKE with wildcards).
+func getMessagesAroundInChat(ctx context.Context, pool *sql.DB, chatSession string, messageID int64) (map[string]any, error) {
 	if strings.TrimSpace(chatSession) == "" || messageID <= 0 {
 		return map[string]any{
 			"error":         "chat_session and positive message_id are required",
@@ -541,15 +359,12 @@ func getMessagesAroundInChat(ctx context.Context, pool *pgxpool.Pool, chatSessio
 	}
 	uid := appctx.UserIDFromCtx(ctx)
 	pattern := "%" + chatSession + "%"
-	innerWhere := "WHERE chat_session ILIKE $1"
+	innerWhere := "WHERE chat_session LIKE ?"
 	args := []any{pattern}
-	nextArg := 2
 	if uid > 0 {
-		innerWhere += fmt.Sprintf(" AND user_id = $%d", nextArg)
+		innerWhere += " AND user_id = ?"
 		args = append(args, uid)
-		nextArg++
 	}
-	messageIDArg := nextArg
 	args = append(args, messageID)
 
 	q := fmt.Sprintf(`WITH session_msgs AS (
@@ -559,16 +374,16 @@ func getMessagesAroundInChat(ctx context.Context, pool *pgxpool.Pool, chatSessio
 		%s
 	),
 	anchor AS (
-		SELECT rn FROM session_msgs WHERE id = $%d LIMIT 1
+		SELECT rn FROM session_msgs WHERE id = ? LIMIT 1
 	)
 	SELECT sm.id, sm.message_date, sm.sender_name, sm.sender_id, sm.type, sm.text, sm.service, sm.subject, sm.rn, a.rn AS anchor_rn
 	FROM session_msgs sm
 	CROSS JOIN anchor a
 	WHERE sm.rn BETWEEN GREATEST(1, a.rn - %d) AND a.rn + %d
 	ORDER BY sm.rn`,
-		innerWhere, messageIDArg, chatMessageNeighborCount, chatMessageNeighborCount)
+		innerWhere, chatMessageNeighborCount, chatMessageNeighborCount)
 
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{
 			"error":         err.Error(),
@@ -642,13 +457,13 @@ func getMessagesAroundInChat(ctx context.Context, pool *pgxpool.Pool, chatSessio
 	return out, nil
 }
 
-func getEmailsByContact(ctx context.Context, pool *pgxpool.Pool, name string) (map[string]any, error) {
+func getEmailsByContact(ctx context.Context, pool *sql.DB, name string) (map[string]any, error) {
 	pattern := "%" + name + "%"
 	q, args := toolsUIDFilter(ctx,
 		`SELECT id, date, from_address, to_addresses, subject, plain_text, snippet, has_attachments
-		 FROM emails WHERE (from_address ILIKE $1 OR to_addresses ILIKE $1) ORDER BY date ASC LIMIT 500`,
+		 FROM emails WHERE (from_address LIKE ? OR to_addresses LIKE ?) ORDER BY date ASC LIMIT 500`,
 		[]any{pattern})
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "contact_name": name, "email_count": 0, "emails": []any{}}, nil
 	}
@@ -692,12 +507,12 @@ func getEmailsByContact(ctx context.Context, pool *pgxpool.Pool, name string) (m
 	}, nil
 }
 
-func getSubjectWritingExamples(ctx context.Context, pool *pgxpool.Pool, subjectName string) (map[string]any, error) {
+func getSubjectWritingExamples(ctx context.Context, pool *sql.DB, subjectName string) (map[string]any, error) {
 	q, args := toolsUIDFilter(ctx,
 		`SELECT id, message_date, sender_name, sender_id, type, text, service, subject
-		 FROM messages WHERE sender_id = $1 AND type = 'text' ORDER BY RANDOM() LIMIT 200`,
+		 FROM messages WHERE sender_id = ? AND type = 'text' ORDER BY RANDOM() LIMIT 200`,
 		[]any{subjectName})
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error()}, nil
 	}
@@ -731,7 +546,7 @@ func getSubjectWritingExamples(ctx context.Context, pool *pgxpool.Pool, subjectN
 	return map[string]any{"subject_writing_examples": msgs}, nil
 }
 
-func getAllMessagesByContact(ctx context.Context, pool *pgxpool.Pool, name string) (map[string]any, error) {
+func getAllMessagesByContact(ctx context.Context, pool *sql.DB, name string) (map[string]any, error) {
 	messages, _ := getMessagesByChatSession(ctx, pool, name)
 	emails, _ := getEmailsByContact(ctx, pool, name)
 	messagesJSON, _ := json.Marshal(messages)
@@ -742,10 +557,10 @@ func getAllMessagesByContact(ctx context.Context, pool *pgxpool.Pool, name strin
 	}, nil
 }
 
-func getUniqueTagsCount(ctx context.Context, pool *pgxpool.Pool) (map[string]any, error) {
+func getUniqueTagsCount(ctx context.Context, pool *sql.DB) (map[string]any, error) {
 	mediaTags := map[string]struct{}{}
 	q, args := toolsUIDFilter(ctx, `SELECT tags FROM media_items WHERE tags IS NOT NULL AND tags != ''`, nil)
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -766,7 +581,7 @@ func getUniqueTagsCount(ctx context.Context, pool *pgxpool.Pool) (map[string]any
 	}
 	artefactTags := map[string]struct{}{}
 	q2, args2 := toolsUIDFilter(ctx, `SELECT tags FROM artefacts WHERE tags IS NOT NULL AND tags != ''`, nil)
-	rows2, err := pool.Query(ctx, q2, args2...)
+	rows2, err := pool.QueryContext(ctx, q2, args2...)
 	if err == nil {
 		defer rows2.Close()
 		for rows2.Next() {
@@ -802,13 +617,13 @@ func getUniqueTagsCount(ctx context.Context, pool *pgxpool.Pool) (map[string]any
 	}, nil
 }
 
-func searchFacebookAlbums(ctx context.Context, pool *pgxpool.Pool, keyword string) (map[string]any, error) {
+func searchFacebookAlbums(ctx context.Context, pool *sql.DB, keyword string) (map[string]any, error) {
 	pattern := "%" + keyword + "%"
 	q, args := toolsUIDFilter(ctx,
 		`SELECT id, name, description, cover_photo_uri, last_modified_timestamp
-		 FROM facebook_albums WHERE name ILIKE $1 OR description ILIKE $1 ORDER BY name ASC`,
+		 FROM facebook_albums WHERE name LIKE ? OR description LIKE ? ORDER BY name ASC`,
 		[]any{pattern})
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "albums": []any{}, "count": 0}, nil
 	}
@@ -839,20 +654,20 @@ func searchFacebookAlbums(ctx context.Context, pool *pgxpool.Pool, keyword strin
 	return map[string]any{"keyword": keyword, "count": len(albums), "albums": albums}, nil
 }
 
-func getAlbumImagesTool(ctx context.Context, pool *pgxpool.Pool, albumID int64) (map[string]any, error) {
+func getAlbumImagesTool(ctx context.Context, pool *sql.DB, albumID int64) (map[string]any, error) {
 	uid := appctx.UserIDFromCtx(ctx)
 	q := `SELECT mi.id, mi.title, mi.year, mi.month
           FROM media_items mi
           JOIN album_media am ON mi.id = am.media_item_id
-          WHERE am.album_id = $1`
+          WHERE am.album_id = ?`
 	args := []any{albumID}
 	if uid > 0 {
 		args = append(args, uid)
-		q += fmt.Sprintf(" AND mi.user_id = $%d", len(args))
+		q += " AND mi.user_id = ?"
 	}
 	q += " ORDER BY mi.created_at ASC LIMIT 5"
 
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "images": []any{}, "count": 0}, nil
 	}
@@ -883,12 +698,12 @@ func getAlbumImagesTool(ctx context.Context, pool *pgxpool.Pool, albumID int64) 
 	return map[string]any{"album_id": albumID, "count": len(images), "images": images}, nil
 }
 
-func searchFacebookPosts(ctx context.Context, pool *pgxpool.Pool, description string) (map[string]any, error) {
+func searchFacebookPosts(ctx context.Context, pool *sql.DB, description string) (map[string]any, error) {
 	pattern := "%" + description + "%"
 	q, args := toolsUIDFilter(ctx,
-		`SELECT id, title, post_text FROM facebook_posts WHERE post_text ILIKE $1 ORDER BY timestamp DESC`,
+		`SELECT id, title, post_text FROM facebook_posts WHERE post_text LIKE ? ORDER BY timestamp DESC`,
 		[]any{pattern})
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "posts": []any{}, "count": 0}, nil
 	}
@@ -912,11 +727,11 @@ func searchFacebookPosts(ctx context.Context, pool *pgxpool.Pool, description st
 	return map[string]any{"description": description, "count": len(posts), "posts": posts}, nil
 }
 
-func getAllFacebookPosts(ctx context.Context, pool *pgxpool.Pool) (map[string]any, error) {
+func getAllFacebookPosts(ctx context.Context, pool *sql.DB) (map[string]any, error) {
 	q, args := toolsUIDFilter(ctx,
 		`SELECT id, timestamp, title, post_text, external_url, post_type FROM facebook_posts ORDER BY timestamp DESC LIMIT 500`,
 		nil)
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "posts": []any{}, "count": 0}, nil
 	}
@@ -948,9 +763,9 @@ func getAllFacebookPosts(ctx context.Context, pool *pgxpool.Pool) (map[string]an
 	return map[string]any{"count": len(posts), "posts": posts}, nil
 }
 
-func getUserInterests(ctx context.Context, pool *pgxpool.Pool) (map[string]any, error) {
+func getUserInterests(ctx context.Context, pool *sql.DB) (map[string]any, error) {
 	q, args := toolsUIDFilter(ctx, `SELECT name FROM interests ORDER BY name`, nil)
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "interests": []any{}}, nil
 	}
@@ -977,14 +792,14 @@ func getUserInterests(ctx context.Context, pool *pgxpool.Pool) (map[string]any, 
 
 // listAvailableChatSessions lists all chat sessions (conversations) by name and optional ID.
 // Used by the tool "get_available_chat_sessions".
-func listAvailableChatSessions(ctx context.Context, pool *pgxpool.Pool) (map[string]any, error) {
+func listAvailableChatSessions(ctx context.Context, pool *sql.DB) (map[string]any, error) {
 	q, args := toolsUIDFilter(ctx, `
 		SELECT DISTINCT chat_session
 		FROM messages
 		WHERE chat_session IS NOT NULL AND chat_session <> ''
 		ORDER BY chat_session
 	`, nil)
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "chat_sessions": []any{}}, nil
 	}
@@ -1005,9 +820,9 @@ func listAvailableChatSessions(ctx context.Context, pool *pgxpool.Pool) (map[str
 	return map[string]any{"count": len(sessions), "chat_sessions": sessions}, nil
 }
 
-// searchChatMessagesGlobally finds messages in any chat whose body or subject matches keyword (ILIKE).
+// searchChatMessagesGlobally finds messages in any chat whose body or subject matches keyword (LIKE).
 // Each match returns chat_session_id (messages.chat_session string), message_id, and content (text, or subject if text empty).
-func searchChatMessagesGlobally(ctx context.Context, pool *pgxpool.Pool, keyword string) (map[string]any, error) {
+func searchChatMessagesGlobally(ctx context.Context, pool *sql.DB, keyword string) (map[string]any, error) {
 	if strings.TrimSpace(keyword) == "" {
 		return map[string]any{"error": "keyword is required", "keyword": keyword, "matches": []any{}, "count": 0}, nil
 	}
@@ -1016,14 +831,14 @@ func searchChatMessagesGlobally(ctx context.Context, pool *pgxpool.Pool, keyword
 		SELECT id, chat_session, text, subject
 		FROM messages
 		WHERE chat_session IS NOT NULL AND TRIM(chat_session) <> ''
-		  AND (COALESCE(text, '') ILIKE $1 OR COALESCE(subject, '') ILIKE $1)
+		  AND (COALESCE(text, '') LIKE ? OR COALESCE(subject, '') LIKE ?)
 		ORDER BY message_date ASC NULLS LAST, id ASC
 		LIMIT %d`, chatMessageKeywordSearchLimit), []any{pat})
 	return execChatMessageKeywordSearch(ctx, pool, q, args, keyword, "", true)
 }
 
-// searchChatMessagesInSession is like searchChatMessagesGlobally but only within one chat_session (ILIKE on session name, same as get_imessages_by_chat_session).
-func searchChatMessagesInSession(ctx context.Context, pool *pgxpool.Pool, chatSession, keyword string) (map[string]any, error) {
+// searchChatMessagesInSession is like searchChatMessagesGlobally but only within one chat_session (LIKE on session name, same as get_imessages_by_chat_session).
+func searchChatMessagesInSession(ctx context.Context, pool *sql.DB, chatSession, keyword string) (map[string]any, error) {
 	if strings.TrimSpace(chatSession) == "" || strings.TrimSpace(keyword) == "" {
 		return map[string]any{"error": "chat_session and keyword are required", "chat_session": chatSession, "keyword": keyword, "matches": []any{}, "count": 0}, nil
 	}
@@ -1032,15 +847,15 @@ func searchChatMessagesInSession(ctx context.Context, pool *pgxpool.Pool, chatSe
 	q, args := toolsUIDFilter(ctx, fmt.Sprintf(`
 		SELECT id, chat_session, text, subject
 		FROM messages
-		WHERE chat_session ILIKE $1
-		  AND (COALESCE(text, '') ILIKE $2 OR COALESCE(subject, '') ILIKE $2)
+		WHERE chat_session LIKE ?
+		  AND (COALESCE(text, '') LIKE ? OR COALESCE(subject, '') LIKE ?)
 		ORDER BY message_date ASC NULLS LAST, id ASC
 		LIMIT %d`, chatMessageKeywordSearchLimit), []any{sessPat, kwPat})
 	return execChatMessageKeywordSearch(ctx, pool, q, args, keyword, chatSession, false)
 }
 
-func execChatMessageKeywordSearch(ctx context.Context, pool *pgxpool.Pool, q string, args []any, keyword, chatSession string, global bool) (map[string]any, error) {
-	rows, err := pool.Query(ctx, q, args...)
+func execChatMessageKeywordSearch(ctx context.Context, pool *sql.DB, q string, args []any, keyword, chatSession string, global bool) (map[string]any, error) {
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		out := map[string]any{"error": err.Error(), "keyword": keyword, "matches": []any{}, "count": 0}
 		if !global {
@@ -1088,7 +903,7 @@ func execChatMessageKeywordSearch(ctx context.Context, pool *pgxpool.Pool, q str
 	return out, nil
 }
 
-func getReferenceDocuments(ctx context.Context, pool *pgxpool.Pool, ids []int64, pepper string, getRAM RAMMasterGetter) (map[string]any, error) {
+func getReferenceDocuments(ctx context.Context, pool *sql.DB, ids []int64, pepper string, getRAM RAMMasterGetter) (map[string]any, error) {
 	masterPassword, haveMaster := "", false
 	if getRAM != nil {
 		masterPassword, haveMaster = getRAM()
@@ -1110,9 +925,9 @@ func getReferenceDocuments(ctx context.Context, pool *pgxpool.Pool, ids []int64,
 		var data []byte
 		var isEncrypted bool
 		q, args := toolsUIDFilter(ctx,
-			`SELECT title, filename, content_type, data, is_encrypted FROM reference_documents WHERE id = $1 AND is_sensitive = FALSE`,
+			`SELECT title, filename, content_type, data, is_encrypted FROM reference_documents WHERE id = ? AND is_sensitive = FALSE`,
 			[]any{id})
-		err := pool.QueryRow(ctx, q, args...).Scan(&title, &filename, &contentType, &data, &isEncrypted)
+		err := pool.QueryRowContext(ctx, q, args...).Scan(&title, &filename, &contentType, &data, &isEncrypted)
 		if err != nil {
 			results = append(results, map[string]any{"id": id, "error": "not found"})
 			continue
@@ -1154,57 +969,17 @@ func getReferenceDocuments(ctx context.Context, pool *pgxpool.Pool, ids []int64,
 	return map[string]any{"documents": results}, nil
 }
 
-func getAvailableSensitiveReferenceDocuments(ctx context.Context, pool *pgxpool.Pool) (map[string]any, error) {
+func getAvailableSensitiveReferenceDocuments(ctx context.Context, pool *sql.DB) (map[string]any, error) {
 	if visitorKeySensitiveLLMAccessDenied(ctx) {
 		return map[string]any{"documents": []map[string]any{}}, nil
 	}
 	va := appctx.VisitorAccessFromCtx(ctx)
 	if va.Restricted {
-		hintID, ok := appctx.VisitorKeyHintIDFromCtx(ctx)
-		if !ok {
-			return map[string]any{"documents": []map[string]any{}}, nil
-		}
-		uid := appctx.UserIDFromCtx(ctx)
-		var rows pgx.Rows
-		var err error
-		if uid > 0 {
-			rows, err = pool.Query(ctx, `
-				SELECT d.id, d.title, d.description, d.tags
-				FROM reference_documents d
-				INNER JOIN visitor_key_hint_sensitive_reference_documents j ON j.reference_document_id = d.id AND j.visitor_key_hint_id = $1
-				WHERE d.is_sensitive = TRUE AND d.user_id = $2`, hintID, uid)
-		} else {
-			rows, err = pool.Query(ctx, `
-				SELECT d.id, d.title, d.description, d.tags
-				FROM reference_documents d
-				INNER JOIN visitor_key_hint_sensitive_reference_documents j ON j.reference_document_id = d.id AND j.visitor_key_hint_id = $1
-				WHERE d.is_sensitive = TRUE AND d.user_id IS NULL`, hintID)
-		}
-		if err != nil {
-			return map[string]any{"error": err.Error(), "documents": []any{}}, nil
-		}
-		defer rows.Close()
-		var documents []map[string]any
-		for rows.Next() {
-			var id int64
-			var title, description, tags *string
-			if err := rows.Scan(&id, &title, &description, &tags); err != nil {
-				continue
-			}
-			documents = append(documents, map[string]any{
-				"id":          id,
-				"title":       title,
-				"description": description,
-				"tags":        tags,
-			})
-		}
-		if documents == nil {
-			documents = []map[string]any{}
-		}
-		return map[string]any{"documents": documents}, nil
+		// Visitor key hint junction tables are not present in the SQLite build.
+		return map[string]any{"documents": []map[string]any{}}, nil
 	}
 	q, args := toolsUIDFilter(ctx, `SELECT id, title, description, tags FROM reference_documents WHERE is_sensitive = TRUE`, nil)
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error(), "documents": []any{}}, nil
 	}
@@ -1229,7 +1004,7 @@ func getAvailableSensitiveReferenceDocuments(ctx context.Context, pool *pgxpool.
 	return map[string]any{"documents": documents}, nil
 }
 
-func getSensitiveReferenceDocuments(ctx context.Context, pool *pgxpool.Pool, ids []int64, pepper string, getRAM RAMMasterGetter) (map[string]any, error) {
+func getSensitiveReferenceDocuments(ctx context.Context, pool *sql.DB, ids []int64, pepper string, getRAM RAMMasterGetter) (map[string]any, error) {
 	masterPassword, haveMaster := "", false
 	if getRAM != nil {
 		masterPassword, haveMaster = getRAM()
@@ -1253,9 +1028,9 @@ func getSensitiveReferenceDocuments(ctx context.Context, pool *pgxpool.Pool, ids
 		var data []byte
 		var isEncrypted bool
 		q, args := toolsUIDFilter(ctx,
-			`SELECT title, filename, content_type, data, is_encrypted FROM reference_documents WHERE id = $1 AND is_sensitive = TRUE`,
+			`SELECT title, filename, content_type, data, is_encrypted FROM reference_documents WHERE id = ? AND is_sensitive = TRUE`,
 			[]any{id})
-		err := pool.QueryRow(ctx, q, args...).Scan(&title, &filename, &contentType, &data, &isEncrypted)
+		err := pool.QueryRowContext(ctx, q, args...).Scan(&title, &filename, &contentType, &data, &isEncrypted)
 		if err != nil {
 			results = append(results, map[string]any{"id": id, "error": "not found"})
 			continue
@@ -1339,7 +1114,7 @@ func sortedKeys(m map[string]struct{}) []string {
 }
 
 // listInterviewsTool returns a summary list of interviews for the AI tool.
-func listInterviewsTool(ctx context.Context, pool *pgxpool.Pool, stateFilter string) (map[string]any, error) {
+func listInterviewsTool(ctx context.Context, pool *sql.DB, stateFilter string) (map[string]any, error) {
 	q := `SELECT i.id, i.title, i.style, i.purpose, i.purpose_detail, i.state,
 	             (i.writeup IS NOT NULL AND LENGTH(TRIM(COALESCE(i.writeup, ''))) > 0) AS has_writeup,
 	             COALESCE((SELECT COUNT(*) FROM interview_turns WHERE interview_id = i.id), 0) AS turn_count,
@@ -1349,14 +1124,14 @@ func listInterviewsTool(ctx context.Context, pool *pgxpool.Pool, stateFilter str
 	uid := appctx.UserIDFromCtx(ctx)
 	if uid > 0 {
 		args = append(args, uid)
-		q += fmt.Sprintf(" AND i.user_id = $%d", len(args))
+		q += " AND i.user_id = ?"
 	}
 	if stateFilter != "" {
 		args = append(args, stateFilter)
-		q += fmt.Sprintf(" AND i.state = $%d", len(args))
+		q += " AND i.state = ?"
 	}
 	q += " ORDER BY last_activity DESC"
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error()}, nil
 	}
@@ -1397,22 +1172,22 @@ func listInterviewsTool(ctx context.Context, pool *pgxpool.Pool, stateFilter str
 }
 
 // getInterviewTool returns full interview details including transcript and writeup.
-func getInterviewTool(ctx context.Context, pool *pgxpool.Pool, interviewID int64) (map[string]any, error) {
+func getInterviewTool(ctx context.Context, pool *sql.DB, interviewID int64) (map[string]any, error) {
 	uid := appctx.UserIDFromCtx(ctx)
 	q := `SELECT i.id, i.title, i.style, i.purpose, i.purpose_detail, i.state,
 	             i.writeup, i.created_at, i.updated_at
-	      FROM interviews i WHERE i.id = $1`
+	      FROM interviews i WHERE i.id = ?`
 	args := []any{interviewID}
 	if uid > 0 {
 		args = append(args, uid)
-		q += fmt.Sprintf(" AND i.user_id = $%d", len(args))
+		q += " AND i.user_id = ?"
 	}
 
 	var id int64
 	var title, style, purpose, state string
 	var purposeDetail, writeup *string
 	var createdAt, updatedAt time.Time
-	err := pool.QueryRow(ctx, q, args...).Scan(
+	err := pool.QueryRowContext(ctx, q, args...).Scan(
 		&id, &title, &style, &purpose, &purposeDetail, &state,
 		&writeup, &createdAt, &updatedAt,
 	)
@@ -1436,9 +1211,9 @@ func getInterviewTool(ctx context.Context, pool *pgxpool.Pool, interviewID int64
 		interview["writeup"] = *writeup
 	}
 
-	trows, err := pool.Query(ctx,
+	trows, err := pool.QueryContext(ctx,
 		`SELECT turn_number, question, answer FROM interview_turns
-		 WHERE interview_id = $1 ORDER BY turn_number ASC`, interviewID)
+		 WHERE interview_id = ? ORDER BY turn_number ASC`, interviewID)
 	if err != nil {
 		interview["turns_error"] = err.Error()
 		return interview, nil
@@ -1470,7 +1245,7 @@ func getInterviewTool(ctx context.Context, pool *pgxpool.Pool, interviewID int64
 }
 
 // listCompleteProfilesTool returns name and pending flag for each complete_profiles row (user-scoped).
-func listCompleteProfilesTool(ctx context.Context, pool *pgxpool.Pool) (map[string]any, error) {
+func listCompleteProfilesTool(ctx context.Context, pool *sql.DB) (map[string]any, error) {
 	va := appctx.VisitorAccessFromCtx(ctx)
 	if va.Restricted && !va.AllowRelationships() {
 		return map[string]any{"profiles": []any{}, "count": 0}, nil
@@ -1479,7 +1254,7 @@ func listCompleteProfilesTool(ctx context.Context, pool *pgxpool.Pool) (map[stri
 	args := []any{}
 	q, args = toolsUIDFilter(ctx, q, args)
 	q += " ORDER BY name"
-	rows, err := pool.Query(ctx, q, args...)
+	rows, err := pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return map[string]any{"error": err.Error()}, nil
 	}
@@ -1500,7 +1275,7 @@ func listCompleteProfilesTool(ctx context.Context, pool *pgxpool.Pool) (map[stri
 }
 
 // getCompleteProfileTool returns the profile text for one name (user-scoped).
-func getCompleteProfileTool(ctx context.Context, pool *pgxpool.Pool, name string) (map[string]any, error) {
+func getCompleteProfileTool(ctx context.Context, pool *sql.DB, name string) (map[string]any, error) {
 	va := appctx.VisitorAccessFromCtx(ctx)
 	if va.Restricted && !va.AllowRelationships() {
 		return map[string]any{"error": "not authorized for visitor key"}, nil
@@ -1509,14 +1284,14 @@ func getCompleteProfileTool(ctx context.Context, pool *pgxpool.Pool, name string
 	if name == "" {
 		return map[string]any{"error": "name is required"}, nil
 	}
-	q := `SELECT profile, generation_pending FROM complete_profiles WHERE name = $1`
+	q := `SELECT profile, generation_pending FROM complete_profiles WHERE name = ?`
 	args := []any{name}
 	q, args = toolsUIDFilter(ctx, q, args)
 	var prof *string
 	var pending bool
-	err := pool.QueryRow(ctx, q, args...).Scan(&prof, &pending)
+	err := pool.QueryRowContext(ctx, q, args...).Scan(&prof, &pending)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return map[string]any{"error": fmt.Sprintf("no complete profile found for %q", name)}, nil
 		}
 		return map[string]any{"error": err.Error()}, nil

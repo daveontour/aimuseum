@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -13,7 +14,6 @@ import (
 	"github.com/daveontour/aimuseum/internal/appctx"
 	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/repository"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // PamBotService implements the dementia companion LLM interaction.
@@ -22,7 +22,7 @@ type PamBotService struct {
 	repo                *repository.PamBotRepo
 	subjectRepo         *repository.SubjectConfigRepo
 	appInstrRepo        *repository.AppSystemInstructionsRepo
-	pool                *pgxpool.Pool
+	pool                *sql.DB
 	userRepo            *repository.UserRepo
 	defaultGeminiKey    string
 	defaultGeminiModel  string
@@ -39,7 +39,7 @@ func NewPamBotService(
 	repo *repository.PamBotRepo,
 	subjectRepo *repository.SubjectConfigRepo,
 	appInstrRepo *repository.AppSystemInstructionsRepo,
-	pool *pgxpool.Pool,
+	pool *sql.DB,
 	userRepo *repository.UserRepo,
 	defaultGeminiKey, defaultGeminiModel string,
 	defaultAnthropicKey, defaultClaudeModel string,

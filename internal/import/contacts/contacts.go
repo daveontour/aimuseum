@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 // RunContactsNormalise runs the contact normalisation process
@@ -142,7 +142,7 @@ func RunContactsNormalise(ctx context.Context, opts RunOptions) error {
 }
 
 // writeContactsAndClassifications writes contacts to DB and applies classifications
-func writeContactsAndClassifications(ctx context.Context, db *pgxpool.Pool, classificationsFile string, formattedOutput []FormattedOutputRecord, ownerUserID int64) error {
+func writeContactsAndClassifications(ctx context.Context, db *sql.DB, classificationsFile string, formattedOutput []FormattedOutputRecord, ownerUserID int64) error {
 	if db == nil {
 		return fmt.Errorf("database required for write")
 	}
@@ -161,8 +161,15 @@ func writeContactsAndClassifications(ctx context.Context, db *pgxpool.Pool, clas
 	return nil
 }
 
-func TruncateContactsTable(ctx context.Context, db *pgxpool.Pool) error {
-	_, err := db.Exec(ctx, "TRUNCATE contacts CASCADE")
+func TruncateContactsTable(ctx context.Context, db *sql.DB) error {
+	if sqlutil.IsSQLite(ctx, db) {
+		_, err := db.ExecContext(ctx, "DELETE FROM contacts")
+		if err != nil {
+			return fmt.Errorf("truncate contacts table: %w", err)
+		}
+		return nil
+	}
+	_, err := db.ExecContext(ctx, "TRUNCATE contacts CASCADE")
 	if err != nil {
 		return fmt.Errorf("truncate contacts table: %w", err)
 	}
@@ -170,7 +177,7 @@ func TruncateContactsTable(ctx context.Context, db *pgxpool.Pool) error {
 }
 
 // createSocialMediaRelationships creates directional relationships for each contact with non-zero social media counts.
-func createSocialMediaRelationships(ctx context.Context, db *pgxpool.Pool, formattedOutput []FormattedOutputRecord, socialMediaRecords []SocialMediaRecord) error {
+func createSocialMediaRelationships(ctx context.Context, db *sql.DB, formattedOutput []FormattedOutputRecord, socialMediaRecords []SocialMediaRecord) error {
 	subjectIds, err := LoadSubjectIdentifiers(ctx, db)
 	if err != nil {
 		return fmt.Errorf("load subject identifiers: %w", err)
@@ -258,7 +265,7 @@ func createSocialMediaRelationships(ctx context.Context, db *pgxpool.Pool, forma
 //
 // A single email row counts at most once per contact, even if multiple from/to
 // addresses in that row map to the same contact.
-func computeEmailMessageCounts(ctx context.Context, db *pgxpool.Pool, records []FormattedOutputRecord) error {
+func computeEmailMessageCounts(ctx context.Context, db *sql.DB, records []FormattedOutputRecord) error {
 	if db == nil || len(records) == 0 {
 		return nil
 	}
@@ -301,7 +308,7 @@ func computeEmailMessageCounts(ctx context.Context, db *pgxpool.Pool, records []
 		return nil
 	}
 
-	rows, err := db.Query(ctx, `SELECT from_address, to_addresses FROM emails`)
+	rows, err := db.QueryContext(ctx, `SELECT from_address, to_addresses FROM emails`)
 	if err != nil {
 		return fmt.Errorf("query emails for counts: %w", err)
 	}
@@ -379,7 +386,7 @@ SELECT
     COUNT(CASE WHEN service = 'Facebook Messenger' THEN 1 END) AS number_of_facebook,
     COUNT(CASE WHEN service = 'SMS' THEN 1 END) AS number_of_sms,
     COUNT(CASE WHEN service = 'Instagram' THEN 1 END) AS number_of_insta,
-    COUNT(CASE WHEN service ILIKE '%' THEN 1 END) AS total
+    COUNT(CASE WHEN service LIKE '%' THEN 1 END) AS total
 FROM
     messages
 GROUP BY
@@ -388,8 +395,8 @@ ORDER BY
     is_group_chat, total DESC;
 `
 
-func runSocialMediaQuery(ctx context.Context, db *pgxpool.Pool) ([]SocialMediaRecord, error) {
-	rows, err := db.Query(ctx, socialMediaQuery)
+func runSocialMediaQuery(ctx context.Context, db *sql.DB) ([]SocialMediaRecord, error) {
+	rows, err := db.QueryContext(ctx, socialMediaQuery)
 	if err != nil {
 		return nil, fmt.Errorf("execute query: %w", err)
 	}
@@ -545,14 +552,14 @@ func runMerge(records []InputRecord, emailMatchMap, emailPrimaryNameMap map[stri
 	return groups
 }
 
-func formatOutput(ctx context.Context, db *pgxpool.Pool, groups []Group) []FormattedOutputRecord {
+func formatOutput(ctx context.Context, db *sql.DB, groups []Group) []FormattedOutputRecord {
 	var formattedOutput []FormattedOutputRecord
 	index := 1
 	assignedZero := false
 
 	var subjectName string
 	var familyNamePtr *string
-	err := db.QueryRow(ctx, "SELECT subject_name, family_name FROM subject_configuration LIMIT 1").Scan(&subjectName, &familyNamePtr)
+	err := db.QueryRowContext(ctx, "SELECT subject_name, family_name FROM subject_configuration LIMIT 1").Scan(&subjectName, &familyNamePtr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error getting subject configuration: %v\n", err)
 		return formattedOutput
@@ -600,14 +607,14 @@ func formatOutput(ctx context.Context, db *pgxpool.Pool, groups []Group) []Forma
 	return formattedOutput
 }
 
-func findRelationships(ctx context.Context, emailMap map[string]int, query string, writeToDB bool, db *pgxpool.Pool) {
+func findRelationships(ctx context.Context, emailMap map[string]int, query string, writeToDB bool, db *sql.DB) {
 
 	emailToContact := make(map[string]struct {
 		Name string
 		ID   int
 	})
 	if db != nil {
-		rows, err := db.Query(ctx, "SELECT id, name, email FROM contacts")
+		rows, err := db.QueryContext(ctx, "SELECT id, name, email FROM contacts")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error reading contacts table: %v\n", err)
 		} else {
@@ -685,15 +692,15 @@ const relationshipBatchSize = 1000
 
 // writeSocialMediaRelationshipsToDatabase inserts social media relationships with type per service.
 // Deletes existing relationships of the given types for (source_id, target_id) pairs before inserting to avoid duplicates.
-func writeSocialMediaRelationshipsToDatabase(ctx context.Context, db *pgxpool.Pool, items []relationshipItem) error {
+func writeSocialMediaRelationshipsToDatabase(ctx context.Context, db *sql.DB, items []relationshipItem) error {
 	if len(items) == 0 {
 		return nil
 	}
-	tx, err := db.Begin(ctx)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 	// Delete existing social media relationships for the (source_id, target_id, type) combinations we're about to insert
 	seen := make(map[string]struct{})
 	for _, item := range items {
@@ -705,7 +712,7 @@ func writeSocialMediaRelationshipsToDatabase(ctx context.Context, db *pgxpool.Po
 			continue
 		}
 		seen[key] = struct{}{}
-		_, err := tx.Exec(ctx, `DELETE FROM relationships WHERE source_id = $1 AND target_id = $2 AND type = $3`,
+		_, err := tx.ExecContext(ctx, `DELETE FROM relationships WHERE source_id = $1 AND target_id = $2 AND type = $3`,
 			item.FromID, item.ToID, item.Type)
 		if err != nil {
 			return fmt.Errorf("delete existing relationship: %w", err)
@@ -732,20 +739,20 @@ func writeSocialMediaRelationshipsToDatabase(ctx context.Context, db *pgxpool.Po
 			continue
 		}
 		query := "INSERT INTO relationships (source_id, target_id, type, strength, is_active, is_personal, is_deleted) VALUES " + strings.Join(placeholders, ", ")
-		_, err := tx.Exec(ctx, query, args...)
+		_, err := tx.ExecContext(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("batch insert social media relationships: %w", err)
 		}
 	}
-	return tx.Commit(ctx)
+	return tx.Commit()
 }
 
 // FindRelationshipsFromDB finds relationships from database and prints to stderr
-func FindRelationshipsFromDB(ctx context.Context, db *pgxpool.Pool, query string, emailMap map[string]int) {
+func FindRelationshipsFromDB(ctx context.Context, db *sql.DB, query string, emailMap map[string]int) {
 	findRelationships(ctx, emailMap, query, false, db)
 }
 
 // FindAndWriteRelationships finds relationships from database and writes them to the relationships table
-func FindAndWriteRelationships(ctx context.Context, db *pgxpool.Pool, query string, emailMap map[string]int) {
+func FindAndWriteRelationships(ctx context.Context, db *sql.DB, query string, emailMap map[string]int) {
 	findRelationships(ctx, emailMap, query, true, db)
 }

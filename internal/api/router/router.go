@@ -2,6 +2,7 @@
 package router
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 
@@ -14,11 +15,10 @@ import (
 	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // New returns the fully-wired application router.
-func New(pool *pgxpool.Pool, billingPool *pgxpool.Pool, cfg *config.Config) (http.Handler, error) {
+func New(pool *sql.DB, billingPool *sql.DB, cfg *config.Config) (http.Handler, error) {
 	r := chi.NewRouter()
 
 	billingRepo := repository.NewBillingRepo(billingPool)
@@ -63,12 +63,12 @@ func New(pool *pgxpool.Pool, billingPool *pgxpool.Pool, cfg *config.Config) (htt
 	importDialogSettingsHandler.RegisterRoutes(r)
 
 	// ── IMAP ──────────────────────────────────────────────────────────────────
-	imapHandler := handler.NewIMAPHandler(pool, sessionMasterStore)
+	imapHandler := handler.NewIMAPHandler(pool, sessionMasterStore, sensitiveSvc, authSvc)
 	imapHandler.RegisterRoutes(r)
 
 	// ── Gmail ─────────────────────────────────────────────────────────────────
 	gmailHandler := handler.NewGmailHandler(pool,
-		cfg.Gmail.ClientID, cfg.Gmail.ClientSecret, cfg.Gmail.RedirectURL, sessionMasterStore)
+		cfg.Gmail.ClientID, cfg.Gmail.ClientSecret, cfg.Gmail.RedirectURL, sessionMasterStore, sensitiveSvc, authSvc)
 	gmailHandler.RegisterRoutes(r)
 
 	// ── Images & media ─────────────────────────────────────────────────────────
@@ -110,10 +110,10 @@ func New(pool *pgxpool.Pool, billingPool *pgxpool.Pool, cfg *config.Config) (htt
 	// ── Reference documents & sensitive data (shared keyring) ────────────────
 	sensitiveHandler := handler.NewSensitiveHandler(sensitiveSvc, cfg.App.AssetStaticDir, sessionMasterStore)
 	sensitiveHandler.RegisterRoutes(r)
-	documentHandler := handler.NewDocumentHandler(documentSvc, sensitiveSvc, sessionMasterStore)
+	documentHandler := handler.NewDocumentHandler(documentSvc, sensitiveSvc, authSvc, sessionMasterStore)
 	documentHandler.RegisterRoutes(r)
 
-	sessionHandler := handler.NewSessionHandler(sensitiveSvc, sessionMasterStore)
+	sessionHandler := handler.NewSessionHandler(sensitiveSvc, sessionMasterStore, authSvc)
 	sessionHandler.RegisterRoutes(r)
 
 	// ── Private key-value store (master-only DEK) ─────────────────────────────
@@ -123,7 +123,7 @@ func New(pool *pgxpool.Pool, billingPool *pgxpool.Pool, cfg *config.Config) (htt
 	// ── Artefacts ─────────────────────────────────────────────────────────────
 	artefactRepo := repository.NewArtefactRepo(pool)
 	artefactSvc := service.NewArtefactService(artefactRepo)
-	artefactHandler := handler.NewArtefactHandler(artefactSvc, sessionMasterStore)
+	artefactHandler := handler.NewArtefactHandler(artefactSvc, sensitiveSvc, authSvc, sessionMasterStore)
 	artefactHandler.RegisterRoutes(r)
 
 	// ── Voices ────────────────────────────────────────────────────────────────
@@ -159,7 +159,7 @@ func New(pool *pgxpool.Pool, billingPool *pgxpool.Pool, cfg *config.Config) (htt
 	// ── Attachments ───────────────────────────────────────────────────────────
 	attachmentRepo := repository.NewAttachmentRepo(pool)
 	attachmentSvc := service.NewAttachmentService(attachmentRepo)
-	attachmentHandler := handler.NewAttachmentHandler(attachmentSvc, cfg.App.AssetStaticDir, sessionMasterStore)
+	attachmentHandler := handler.NewAttachmentHandler(attachmentSvc, cfg.App.AssetStaticDir, sessionMasterStore, sensitiveSvc, authSvc)
 	attachmentHandler.RegisterRoutes(r)
 
 	// ── Embeddings (local AI) ─────────────────────────────────────────────────
@@ -173,12 +173,14 @@ func New(pool *pgxpool.Pool, billingPool *pgxpool.Pool, cfg *config.Config) (htt
 		Pool:              pool,
 		SubjectConfigRepo: subjectConfigRepo,
 		SessionStore:      sessionMasterStore,
+		SensitiveSvc:      sensitiveSvc,
+		AuthSvc:           authSvc,
 		EmbeddingSvc:      embeddingSvc,
 	})
 	importerHandler.RegisterRoutes(r)
 
 	// ── Upload-based imports (Tier B ZIP upload, Tier C1 photo batch) ─────────
-	uploadImportHandler := handler.NewUploadImportHandler(pool, subjectConfigRepo, sessionMasterStore, cfg.Upload)
+	uploadImportHandler := handler.NewUploadImportHandler(pool, subjectConfigRepo, sessionMasterStore, sensitiveSvc, authSvc, cfg.Upload)
 	if err := uploadImportHandler.RegisterRoutes(r); err != nil {
 		return nil, err
 	}
@@ -197,7 +199,7 @@ func New(pool *pgxpool.Pool, billingPool *pgxpool.Pool, cfg *config.Config) (htt
 	adminHandler.WithBilling(billingRepo, userRepo)
 	adminHandler.RegisterRoutes(r)
 
-	importDataPurgeHandler := handler.NewImportDataPurgeHandler(pool, sessionMasterStore)
+	importDataPurgeHandler := handler.NewImportDataPurgeHandler(pool, sessionMasterStore, sensitiveSvc, authSvc)
 	importDataPurgeHandler.RegisterRoutes(r)
 
 	// ── Admin user management ──────────────────────────────────────────────────

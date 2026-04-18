@@ -2,20 +2,21 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 // ChatRepo accesses the chat_conversations and chat_turns tables.
 type ChatRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewChatRepo creates a ChatRepo.
-func NewChatRepo(pool *pgxpool.Pool) *ChatRepo {
+func NewChatRepo(pool *sql.DB) *ChatRepo {
 	return &ChatRepo{pool: pool}
 }
 
@@ -23,7 +24,7 @@ func NewChatRepo(pool *pgxpool.Pool) *ChatRepo {
 func (r *ChatRepo) CreateConversation(ctx context.Context, title, voice string) (*model.ChatConversation, error) {
 	uid := uidFromCtx(ctx)
 	var c model.ChatConversation
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`INSERT INTO chat_conversations (title, voice, user_id)
 		 VALUES ($1, $2, $3)
 		 RETURNING id, title, voice, created_at, updated_at, last_message_at`,
@@ -42,7 +43,7 @@ func (r *ChatRepo) GetConversation(ctx context.Context, id int64) (*model.ChatCo
 	      FROM chat_conversations WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetConversation %d: %w", id, err)
 	}
@@ -69,7 +70,7 @@ func (r *ChatRepo) ListConversations(ctx context.Context, limit *int) ([]*model.
 		args = append(args, *limit)
 		q += fmt.Sprintf(" LIMIT $%d", len(args))
 	}
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListConversations: %w", err)
 	}
@@ -88,7 +89,7 @@ func (r *ChatRepo) ListConversations(ctx context.Context, limit *int) ([]*model.
 // TurnCount returns the number of turns for a conversation.
 func (r *ChatRepo) TurnCount(ctx context.Context, conversationID int64) (int64, error) {
 	var n int64
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM chat_turns WHERE conversation_id = $1`, conversationID,
 	).Scan(&n)
 	return n, err
@@ -96,10 +97,11 @@ func (r *ChatRepo) TurnCount(ctx context.Context, conversationID int64) (int64, 
 
 // TurnCountsBatch returns a map of conversation_id → turn count for all given IDs in one query.
 func (r *ChatRepo) TurnCountsBatch(ctx context.Context, ids []int64) (map[int64]int64, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT conversation_id, COUNT(*) FROM chat_turns WHERE conversation_id = ANY($1) GROUP BY conversation_id`,
-		ids,
-	)
+	inCond, inArgs, _ := sqlutil.Int64IN("conversation_id", ids, 1)
+	q := fmt.Sprintf(
+		`SELECT conversation_id, COUNT(*) FROM chat_turns WHERE %s GROUP BY conversation_id`,
+		inCond)
+	rows, err := r.pool.QueryContext(ctx, q, inArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("TurnCountsBatch: %w", err)
 	}
@@ -119,13 +121,13 @@ func (r *ChatRepo) TurnCountsBatch(ctx context.Context, ids []int64) (map[int64]
 func (r *ChatRepo) UpdateConversation(ctx context.Context, id int64, title, voice *string) (*model.ChatConversation, error) {
 	uid := uidFromCtx(ctx)
 	q := `UPDATE chat_conversations
-	      SET title = COALESCE($1, title), voice = COALESCE($2, voice), updated_at = NOW()
+	      SET title = COALESCE($1, title), voice = COALESCE($2, voice), updated_at = CURRENT_TIMESTAMP
 	      WHERE id = $3`
 	args := []any{title, voice, id}
 	q, args = addUIDFilter(q, args, uid)
 	q += ` RETURNING id, title, voice, created_at, updated_at, last_message_at`
 	var c model.ChatConversation
-	err := r.pool.QueryRow(ctx, q, args...).
+	err := r.pool.QueryRowContext(ctx, q, args...).
 		Scan(&c.ID, &c.Title, &c.Voice, &c.CreatedAt, &c.UpdatedAt, &c.LastMessageAt)
 	if err != nil {
 		if isNoRows(err) {
@@ -142,13 +144,13 @@ func (r *ChatRepo) DeleteConversation(ctx context.Context, id int64) error {
 	q := `DELETE FROM chat_conversations WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	_, err := r.pool.Exec(ctx, q, args...)
+	_, err := r.pool.ExecContext(ctx, q, args...)
 	return err
 }
 
 // GetTurns returns the last N turns for a conversation, in chronological order.
 func (r *ChatRepo) GetTurns(ctx context.Context, conversationID int64, limit int) ([]*model.ChatTurn, error) {
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.pool.QueryContext(ctx,
 		`SELECT id, conversation_id, turn_number, user_input, response_text, voice, temperature, created_at
 		 FROM (
 		   SELECT id, conversation_id, turn_number, user_input, response_text, voice, temperature, created_at
@@ -174,13 +176,13 @@ func (r *ChatRepo) GetTurns(ctx context.Context, conversationID int64, limit int
 
 // SaveTurn inserts a new chat_turns row and updates last_message_at in a single transaction.
 func (r *ChatRepo) SaveTurn(ctx context.Context, conversationID int64, userInput, responseText, voice string, temperature float64) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("SaveTurn begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	defer tx.Rollback() //nolint:errcheck
 
-	_, err = tx.Exec(ctx,
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO chat_turns (conversation_id, turn_number, user_input, response_text, voice, temperature)
 		 VALUES ($1,
 		   COALESCE((SELECT MAX(turn_number) FROM chat_turns WHERE conversation_id = $1), 0) + 1,
@@ -190,11 +192,11 @@ func (r *ChatRepo) SaveTurn(ctx context.Context, conversationID int64, userInput
 	if err != nil {
 		return fmt.Errorf("SaveTurn insert: %w", err)
 	}
-	_, err = tx.Exec(ctx,
+	_, err = tx.ExecContext(ctx,
 		`UPDATE chat_conversations SET last_message_at = $1 WHERE id = $2`,
 		time.Now(), conversationID)
 	if err != nil {
 		return fmt.Errorf("SaveTurn update: %w", err)
 	}
-	return tx.Commit(ctx)
+	return tx.Commit()
 }

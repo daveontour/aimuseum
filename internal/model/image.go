@@ -1,6 +1,6 @@
 package model
 
-import "time"
+import "github.com/daveontour/aimuseum/internal/sqlutil"
 
 // MediaItem is the domain type for a row in media_items.
 type MediaItem struct {
@@ -15,8 +15,8 @@ type MediaItem struct {
 	AvailableForTask bool
 	MediaType        *string
 	Processed        bool
-	CreatedAt        *time.Time
-	UpdatedAt        *time.Time
+	CreatedAt        sqlutil.NullDBTime
+	UpdatedAt        sqlutil.NullDBTime
 	Embedding        *string
 	Year             *int
 	Month            *int
@@ -59,8 +59,8 @@ type MediaMetadataResponse struct {
 	AvailableForTask bool       `json:"available_for_task"`
 	MediaType        *string    `json:"media_type"`
 	Processed        bool       `json:"processed"`
-	CreatedAt        *time.Time `json:"created_at"`
-	UpdatedAt        *time.Time `json:"updated_at"`
+	CreatedAt        sqlutil.NullDBTime `json:"created_at"`
+	UpdatedAt        sqlutil.NullDBTime `json:"updated_at"`
 	Year             *int       `json:"year"`
 	Month            *int       `json:"month"`
 	Latitude         *float64   `json:"latitude"`
@@ -104,21 +104,21 @@ type ImageSearchParams struct {
 
 // LocationItem is the shape returned by GET /getLocations.
 type LocationItem struct {
-	ID             int64      `json:"id"`
-	Latitude       *float64   `json:"latitude"`
-	Longitude      *float64   `json:"longitude"`
-	Altitude       *float64   `json:"altitude"`
-	Title          *string    `json:"title"`
-	Description    *string    `json:"description"`
-	Year           *int       `json:"year"`
-	Month          *int       `json:"month"`
-	Tags           *string    `json:"tags"`
-	GoogleMapsURL  *string    `json:"google_maps_url"`
-	Region         *string    `json:"region"`
-	CreatedAt      *time.Time `json:"created_at"`
-	MediaType      *string    `json:"media_type"`
-	Source         *string    `json:"source"`
-	SourceReference *string   `json:"source_reference"`
+	ID              int64      `json:"id"`
+	Latitude        *float64   `json:"latitude"`
+	Longitude       *float64   `json:"longitude"`
+	Altitude        *float64   `json:"altitude"`
+	Title           *string    `json:"title"`
+	Description     *string    `json:"description"`
+	Year            *int       `json:"year"`
+	Month           *int       `json:"month"`
+	Tags            *string    `json:"tags"`
+	GoogleMapsURL   *string    `json:"google_maps_url"`
+	Region          *string    `json:"region"`
+	CreatedAt       sqlutil.NullDBTime `json:"created_at"`
+	MediaType       *string    `json:"media_type"`
+	Source          *string    `json:"source"`
+	SourceReference *string    `json:"source_reference"`
 }
 
 // FacebookAlbumResponse is the shape returned by GET /facebook/albums.
@@ -132,21 +132,21 @@ type FacebookAlbumResponse struct {
 
 // FacebookPostListItem is the shape for a single post in GET /facebook/posts.
 type FacebookPostListItem struct {
-	ID         int64      `json:"id"`
-	Timestamp  *time.Time  `json:"timestamp"`
-	Title      *string    `json:"title"`
-	PostText   *string    `json:"post_text"`
-	ExternalURL *string   `json:"external_url"`
-	PostType   *string    `json:"post_type"`
-	MediaCount int        `json:"media_count"`
+	ID          int64      `json:"id"`
+	Timestamp   sqlutil.NullDBTime `json:"timestamp"`
+	Title       *string    `json:"title"`
+	PostText    *string    `json:"post_text"`
+	ExternalURL *string    `json:"external_url"`
+	PostType    *string    `json:"post_type"`
+	MediaCount  int        `json:"media_count"`
 }
 
 // FacebookPostsResponse is the paginated response for GET /facebook/posts.
 type FacebookPostsResponse struct {
-	Total    int                     `json:"total"`
-	Page     int                     `json:"page"`
-	PageSize int                     `json:"page_size"`
-	Posts    []FacebookPostListItem  `json:"posts"`
+	Total    int                    `json:"total"`
+	Page     int                    `json:"page"`
+	PageSize int                    `json:"page_size"`
+	Posts    []FacebookPostListItem `json:"posts"`
 }
 
 // FacebookPostMediaItem is the shape for a media item in GET /facebook/posts/{id}/media.
@@ -172,9 +172,9 @@ type FacebookPlaceItem struct {
 
 // AlbumImageItem is the shape returned by GET /facebook/albums/{id}/images.
 type AlbumImageItem struct {
-	ID        int64   `json:"id"`
-	Title     *string `json:"title"`
+	ID          int64   `json:"id"`
+	Title       *string `json:"title"`
 	Description *string `json:"description"`
-	MediaType *string `json:"media_type"`
-	CreatedAt *string `json:"created_at"` // ISO string, matches Python .isoformat()
+	MediaType   *string `json:"media_type"`
+	CreatedAt   *string `json:"created_at"` // ISO string, matches Python .isoformat()
 }

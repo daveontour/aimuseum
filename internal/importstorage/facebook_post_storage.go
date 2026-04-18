@@ -2,12 +2,10 @@ package importstorage
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const facebookPostSource = "facebook_post"
@@ -27,23 +25,23 @@ type BatchPostImageItem struct {
 
 // FacebookPostStorage handles Facebook post storage operations.
 type FacebookPostStorage struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewFacebookPostStorage creates a new Facebook post storage instance.
-func NewFacebookPostStorage(pool *pgxpool.Pool) *FacebookPostStorage {
+func NewFacebookPostStorage(pool *sql.DB) *FacebookPostStorage {
 	return &FacebookPostStorage{pool: pool}
 }
 
 // FindPostByTimestampAndTitle looks up a post by its Unix timestamp and title.
 func (s *FacebookPostStorage) FindPostByTimestampAndTitle(ctx context.Context, ts *time.Time, title string) (int64, bool, error) {
 	var postID int64
-	err := s.pool.QueryRow(ctx,
+	err := s.pool.QueryRowContext(ctx,
 		`SELECT id FROM facebook_posts WHERE timestamp = $1 AND title = $2 LIMIT 1`,
 		ts, title,
 	).Scan(&postID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return 0, false, nil
 		}
 		return 0, false, fmt.Errorf("failed to find post: %w", err)
@@ -68,9 +66,9 @@ func (s *FacebookPostStorage) SaveOrUpdatePost(
 	}
 
 	var postID int64
-	err = s.pool.QueryRow(ctx,
+	err = s.pool.QueryRowContext(ctx,
 		`INSERT INTO facebook_posts (timestamp, title, post_text, external_url, post_type, user_id, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) RETURNING id`,
+		 VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) RETURNING id`,
 		ts,
 		nullIfEmpty(title),
 		nullIfEmpty(postText),
@@ -92,22 +90,22 @@ func (s *FacebookPostStorage) SavePostImagesBatch(ctx context.Context, items []B
 
 	uid := uidFromCtx(ctx)
 
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	imported := 0
 	for _, item := range items {
 		var blobID int64
 		if len(item.ImageData) > 0 {
-			err = tx.QueryRow(ctx,
+			err = tx.QueryRowContext(ctx,
 				`INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`,
 				item.ImageData, nil, uidVal(uid),
 			).Scan(&blobID)
 		} else {
-			err = tx.QueryRow(ctx,
+			err = tx.QueryRowContext(ctx,
 				`INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`,
 				nil, nil, uidVal(uid),
 			).Scan(&blobID)
@@ -130,12 +128,12 @@ func (s *FacebookPostStorage) SavePostImagesBatch(ctx context.Context, items []B
 		}
 
 		var mediaItemID int64
-		err = tx.QueryRow(ctx, `INSERT INTO media_items (
+		err = tx.QueryRowContext(ctx, `INSERT INTO media_items (
 			media_blob_id, tags, source, source_reference, title, description,
 			media_type, year, month, latitude, longitude, altitude, has_gps,
 			processed, available_for_task, rating, is_personal, is_business,
 			is_social, is_promotional, is_spam, is_important, user_id, created_at, updated_at, is_referenced
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW(), NOW(), FALSE)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, FALSE)
 		RETURNING id`,
 			blobID,
 			nullIfEmpty(item.PostTitle),
@@ -154,7 +152,7 @@ func (s *FacebookPostStorage) SavePostImagesBatch(ctx context.Context, items []B
 			return imported, fmt.Errorf("failed to insert media item for %s: %w", item.URI, err)
 		}
 
-		_, err = tx.Exec(ctx,
+		_, err = tx.ExecContext(ctx,
 			`INSERT INTO post_media (post_id, media_item_id) VALUES ($1, $2)`,
 			item.PostID, mediaItemID,
 		)
@@ -164,7 +162,7 @@ func (s *FacebookPostStorage) SavePostImagesBatch(ctx context.Context, items []B
 		imported++
 	}
 
-	if err = tx.Commit(ctx); err != nil {
+	if err = tx.Commit(); err != nil {
 		return 0, fmt.Errorf("failed to commit: %w", err)
 	}
 	return imported, nil

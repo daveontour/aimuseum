@@ -2,6 +2,7 @@ package facebookposts
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -15,7 +16,6 @@ import (
 	"github.com/daveontour/aimuseum/internal/import/facebook"
 	"github.com/daveontour/aimuseum/internal/import/facebookalbums"
 	"github.com/daveontour/aimuseum/internal/importstorage"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const postImageBatchSize = 25
@@ -104,7 +104,7 @@ type CancelledCheck func() bool
 // ImportFacebookPostsFromPath imports Facebook posts from a JSON file or directory.
 func ImportFacebookPostsFromPath(
 	ctx context.Context,
-	pool *pgxpool.Pool,
+	pool *sql.DB,
 	path string,
 	exportRootOverride string,
 	progressCallback ProgressCallback,

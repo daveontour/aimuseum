@@ -2,24 +2,23 @@ package thumbnails
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const progressCallbackInterval = 5
 
 // ImportStats holds statistics about the thumbnail processing.
 type ImportStats struct {
-	TotalItems   int
-	Processed    int64
-	Errors       int64
-	CurrentItem  string
-	mu           sync.Mutex
+	TotalItems  int
+	Processed   int64
+	Errors      int64
+	CurrentItem string
+	mu          sync.Mutex
 }
 
 func (s *ImportStats) copyStats() ImportStats {
@@ -56,7 +55,7 @@ type processResult struct {
 // ProcessThumbnailsAndExif processes media items: generates thumbnails and extracts EXIF.
 func ProcessThumbnailsAndExif(
 	ctx context.Context,
-	pool *pgxpool.Pool,
+	pool *sql.DB,
 	reprocess bool,
 	progressCallback ProgressCallback,
 	cancelledCheck CancelledCheck,
@@ -95,7 +94,7 @@ func ProcessThumbnailsAndExif(
 		`
 	}
 
-	rows, err := pool.Query(ctx, query)
+	rows, err := pool.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query media items: %w", err)
 	}
@@ -212,7 +211,7 @@ func ProcessThumbnailsAndExif(
 	return stats, nil
 }
 
-func processMediaItem(ctx context.Context, pool *pgxpool.Pool, processor *Processor, work mediaItemWork) processResult {
+func processMediaItem(ctx context.Context, pool *sql.DB, processor *Processor, work mediaItemWork) processResult {
 	var imageData []byte
 
 	if work.IsReferenced {
@@ -227,7 +226,7 @@ func processMediaItem(ctx context.Context, pool *pgxpool.Pool, processor *Proces
 		}
 	} else {
 		loadImageQuery := `SELECT image_data FROM media_blobs WHERE id = $1`
-		err := pool.QueryRow(ctx, loadImageQuery, work.BlobID).Scan(&imageData)
+		err := pool.QueryRowContext(ctx, loadImageQuery, work.BlobID).Scan(&imageData)
 		if err != nil {
 			return processResult{Success: false, Error: fmt.Errorf("failed to load image data for blob_id=%d: %w",
 				work.BlobID, err)}
@@ -244,15 +243,15 @@ func processMediaItem(ctx context.Context, pool *pgxpool.Pool, processor *Proces
 			work.MediaItemID, work.BlobID, err)}
 	}
 
-	tx, err := pool.Begin(ctx)
+	tx, err := pool.BeginTx(ctx, nil)
 	if err != nil {
 		return processResult{Success: false, Error: fmt.Errorf("failed to begin transaction: %w", err)}
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	if thumbData != nil {
 		updateBlobQuery := `UPDATE media_blobs SET thumbnail_data = $1 WHERE id = $2`
-		_, err = tx.Exec(ctx, updateBlobQuery, thumbData, work.BlobID)
+		_, err = tx.ExecContext(ctx, updateBlobQuery, thumbData, work.BlobID)
 		if err != nil {
 			return processResult{Success: false, Error: fmt.Errorf("failed to update thumbnail: %w", err)}
 		}
@@ -266,7 +265,7 @@ func processMediaItem(ctx context.Context, pool *pgxpool.Pool, processor *Proces
 			latitude = COALESCE($4, latitude),
 			longitude = COALESCE($5, longitude),
 			has_gps = COALESCE($6, has_gps),
-			updated_at = NOW()
+			updated_at = CURRENT_TIMESTAMP
 		WHERE id = $7`
 
 	var description *string
@@ -301,12 +300,12 @@ func processMediaItem(ctx context.Context, pool *pgxpool.Pool, processor *Proces
 		}
 	}
 
-	_, err = tx.Exec(ctx, updateItemQuery, description, year, month, latitude, longitude, hasGPS, work.MediaItemID)
+	_, err = tx.ExecContext(ctx, updateItemQuery, description, year, month, latitude, longitude, hasGPS, work.MediaItemID)
 	if err != nil {
 		return processResult{Success: false, Error: fmt.Errorf("failed to update media item: %w", err)}
 	}
 
-	if err = tx.Commit(ctx); err != nil {
+	if err = tx.Commit(); err != nil {
 		return processResult{Success: false, Error: fmt.Errorf("failed to commit transaction: %w", err)}
 	}
 

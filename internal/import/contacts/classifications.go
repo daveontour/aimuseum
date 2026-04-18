@@ -2,10 +2,9 @@ package contacts
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // EmailClassifications maps rel_type values to lists of contact names
@@ -18,8 +17,8 @@ var relTypeKeys = []string{
 
 // LoadEmailClassifications loads classifications from the email_classifications table.
 // Keys are rel_type values (friend, family, colleague, etc.).
-func LoadEmailClassifications(ctx context.Context, db *pgxpool.Pool) (EmailClassifications, error) {
-	rows, err := db.Query(ctx, "SELECT classification, name FROM email_classifications ORDER BY classification")
+func LoadEmailClassifications(ctx context.Context, db *sql.DB) (EmailClassifications, error) {
+	rows, err := db.QueryContext(ctx, "SELECT classification, name FROM email_classifications ORDER BY classification")
 	if err != nil {
 		return nil, fmt.Errorf("query email_classifications: %w", err)
 	}
@@ -47,7 +46,7 @@ func LoadEmailClassifications(ctx context.Context, db *pgxpool.Pool) (EmailClass
 
 // ApplyClassificationsToContacts updates contacts by name using the classification lists.
 // Matches against contact name and alternative_names (comma-separated). Case-insensitive.
-func ApplyClassificationsToContacts(ctx context.Context, db *pgxpool.Pool, classifications EmailClassifications) error {
+func ApplyClassificationsToContacts(ctx context.Context, db *sql.DB, classifications EmailClassifications) error {
 	if len(classifications) == 0 {
 		return nil
 	}
@@ -74,7 +73,7 @@ func ApplyClassificationsToContacts(ctx context.Context, db *pgxpool.Pool, class
 	}
 
 	// Fetch all contacts
-	rows, err := db.Query(ctx, "SELECT id, name, alternative_names FROM contacts")
+	rows, err := db.QueryContext(ctx, "SELECT id, name, alternative_names FROM contacts")
 	if err != nil {
 		return fmt.Errorf("query contacts: %w", err)
 	}
@@ -123,7 +122,7 @@ func ApplyClassificationsToContacts(ctx context.Context, db *pgxpool.Pool, class
 	}
 
 	// Reset all contacts to unknown
-	_, err = db.Exec(ctx, "UPDATE contacts SET rel_type = 'unknown' WHERE id != 0")
+	_, err = db.ExecContext(ctx, "UPDATE contacts SET rel_type = 'unknown' WHERE id != 0")
 	if err != nil {
 		return fmt.Errorf("update contacts: %w", err)
 	}
@@ -142,14 +141,14 @@ func ApplyClassificationsToContacts(ctx context.Context, db *pgxpool.Pool, class
 			args[i+1] = id
 		}
 		query := fmt.Sprintf("UPDATE contacts SET rel_type = $1 WHERE id IN (%s)", strings.Join(placeholders, ","))
-		_, err = db.Exec(ctx, query, args...)
+		_, err = db.ExecContext(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("update rel_type=%s: %w", relType, err)
 		}
 	}
 
 	// Ensure subject (id=0) always stays unknown
-	_, err = db.Exec(ctx, "UPDATE contacts SET rel_type = 'unknown' WHERE id = 0")
+	_, err = db.ExecContext(ctx, "UPDATE contacts SET rel_type = 'unknown' WHERE id = 0")
 	if err != nil {
 		return fmt.Errorf("reset subject rel_type: %w", err)
 	}

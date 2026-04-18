@@ -49,7 +49,7 @@ type UserLLMPatch struct {
 // GetUserLLMStored loads persisted LLM overrides for the user.
 func (r *UserRepo) GetUserLLMStored(ctx context.Context, userID int64) (*UserLLMStored, error) {
 	var s UserLLMStored
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRowContext(ctx, `
 		SELECT COALESCE(user_gemini_api_key, ''),
 		       COALESCE(user_anthropic_api_key, ''),
 		       COALESCE(user_gemini_model, ''),
@@ -72,7 +72,7 @@ func (r *UserRepo) PatchUserLLMSettings(ctx context.Context, userID int64, p Use
 		return err
 	}
 	next := mergeLLMStoredWithPatch(*cur, p)
-	_, err = r.pool.Exec(ctx, `
+	_, err = r.pool.ExecContext(ctx, `
 		UPDATE users SET
 			user_gemini_api_key = NULLIF($2, ''),
 			user_anthropic_api_key = NULLIF($3, ''),

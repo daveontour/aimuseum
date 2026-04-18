@@ -3,12 +3,11 @@ package gmail
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
@@ -32,7 +31,7 @@ func OAuthConfig(clientID, clientSecret, redirectURL string) *oauth2.Config {
 }
 
 // SaveToken stores a JSON-serialised oauth2.Token in app_configuration.
-func SaveToken(ctx context.Context, pool *pgxpool.Pool, tok *oauth2.Token) error {
+func SaveToken(ctx context.Context, pool *sql.DB, tok *oauth2.Token) error {
 	b, err := json.Marshal(tok)
 	if err != nil {
 		return fmt.Errorf("marshal token: %w", err)
@@ -43,7 +42,7 @@ func SaveToken(ctx context.Context, pool *pgxpool.Pool, tok *oauth2.Token) error
 
 // LoadToken retrieves and deserialises the stored token.
 // Returns nil, nil if no token has been saved.
-func LoadToken(ctx context.Context, pool *pgxpool.Pool) (*oauth2.Token, error) {
+func LoadToken(ctx context.Context, pool *sql.DB) (*oauth2.Token, error) {
 	v, err := getConfig(ctx, pool, tokenConfigKey)
 	if err != nil {
 		return nil, err
@@ -59,49 +58,49 @@ func LoadToken(ctx context.Context, pool *pgxpool.Pool) (*oauth2.Token, error) {
 }
 
 // DeleteToken removes the stored OAuth2 token.
-func DeleteToken(ctx context.Context, pool *pgxpool.Pool) error {
-	_, err := pool.Exec(ctx, `DELETE FROM app_configuration WHERE key = $1`, tokenConfigKey)
+func DeleteToken(ctx context.Context, pool *sql.DB) error {
+	_, err := pool.ExecContext(ctx, `DELETE FROM app_configuration WHERE key = $1`, tokenConfigKey)
 	return err
 }
 
 // SaveState stores the ephemeral CSRF state string.
-func SaveState(ctx context.Context, pool *pgxpool.Pool, state string) error {
+func SaveState(ctx context.Context, pool *sql.DB, state string) error {
 	return upsertConfig(ctx, pool, stateConfigKey, state)
 }
 
 // LoadState retrieves the stored CSRF state string. Returns "" if absent.
-func LoadState(ctx context.Context, pool *pgxpool.Pool) (string, error) {
+func LoadState(ctx context.Context, pool *sql.DB) (string, error) {
 	return getConfig(ctx, pool, stateConfigKey)
 }
 
 // DeleteState removes the stored CSRF state.
-func DeleteState(ctx context.Context, pool *pgxpool.Pool) error {
-	_, err := pool.Exec(ctx, `DELETE FROM app_configuration WHERE key = $1`, stateConfigKey)
+func DeleteState(ctx context.Context, pool *sql.DB) error {
+	_, err := pool.ExecContext(ctx, `DELETE FROM app_configuration WHERE key = $1`, stateConfigKey)
 	return err
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-func upsertConfig(ctx context.Context, pool *pgxpool.Pool, key, value string) error {
+func upsertConfig(ctx context.Context, pool *sql.DB, key, value string) error {
 	// Global config rows use user_id IS NULL; the unique constraint is partial
 	// (uq_app_config_global), so ON CONFLICT must specify the same predicate.
-	_, err := pool.Exec(ctx,
+	_, err := pool.ExecContext(ctx,
 		`INSERT INTO app_configuration (key, value, user_id)
 		 VALUES ($1, $2, NULL)
 		 ON CONFLICT (key) WHERE user_id IS NULL
-		 DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+		 DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
 		key, value,
 	)
 	return err
 }
 
-func getConfig(ctx context.Context, pool *pgxpool.Pool, key string) (string, error) {
+func getConfig(ctx context.Context, pool *sql.DB, key string) (string, error) {
 	var v *string
-	err := pool.QueryRow(ctx,
+	err := pool.QueryRowContext(ctx,
 		`SELECT value FROM app_configuration WHERE key = $1`, key,
 	).Scan(&v)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
 		}
 		return "", err

@@ -1,6 +1,6 @@
 package model
 
-import "time"
+import "github.com/daveontour/aimuseum/internal/sqlutil"
 
 // ── Reference Documents ────────────────────────────────────────────────────────
 
@@ -20,8 +20,8 @@ type ReferenceDocument struct {
 	IsPrivate        bool
 	IsSensitive      bool
 	IsEncrypted      bool
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	CreatedAt        sqlutil.DBTime
+	UpdatedAt        sqlutil.DBTime
 }
 
 // ── Custom Voices ──────────────────────────────────────────────────────────────
@@ -34,8 +34,8 @@ type CustomVoice struct {
 	Description  *string
 	Instructions string
 	Creativity   float64
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	CreatedAt    sqlutil.DBTime
+	UpdatedAt    sqlutil.DBTime
 }
 
 // ── Interests ──────────────────────────────────────────────────────────────────
@@ -44,8 +44,8 @@ type CustomVoice struct {
 type Interest struct {
 	ID        int64
 	Name      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	CreatedAt sqlutil.DBTime
+	UpdatedAt sqlutil.DBTime
 }
 
 // ── Visitor key hints (non-master keyring seats) ─────────────────────────────
@@ -53,17 +53,17 @@ type Interest struct {
 // VisitorKeyHint is a row from visitor_key_hints (plain-text hint for unlock UI).
 // KeyringID is set when listing for admin; omitted from the public unlock-dialog JSON.
 type VisitorKeyHint struct {
-	ID                       int64     `json:"id"`
-	KeyringID                int64     `json:"keyring_id,omitempty"`
-	Hint                     string    `json:"hint"`
-	CreatedAt                time.Time `json:"created_at"`
-	CanMessagesChat     bool `json:"can_messages_chat"`
-	CanEmails           bool `json:"can_emails"`
-	CanContacts         bool `json:"can_contacts"`
-	CanRelationships    bool `json:"can_relationships"`
-	CanSensitivePrivate bool `json:"can_sensitive_private"`
-	LLMAllowOwnerKeys   bool `json:"llm_allow_owner_keys"`
-	LLMAllowServerKeys       bool      `json:"llm_allow_server_keys"`
+	ID                  int64     `json:"id"`
+	KeyringID           int64     `json:"keyring_id,omitempty"`
+	Hint                string    `json:"hint"`
+	CreatedAt           sqlutil.DBTime `json:"created_at"`
+	CanMessagesChat     bool      `json:"can_messages_chat"`
+	CanEmails           bool      `json:"can_emails"`
+	CanContacts         bool      `json:"can_contacts"`
+	CanRelationships    bool      `json:"can_relationships"`
+	CanSensitivePrivate bool      `json:"can_sensitive_private"`
+	LLMAllowOwnerKeys   bool      `json:"llm_allow_owner_keys"`
+	LLMAllowServerKeys  bool      `json:"llm_allow_server_keys"`
 }
 
 // ── App Configuration ──────────────────────────────────────────────────────────
@@ -75,8 +75,8 @@ type AppConfiguration struct {
 	Value       *string
 	IsMandatory bool
 	Description *string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	CreatedAt   sqlutil.DBTime
+	UpdatedAt   sqlutil.DBTime
 }
 
 // ── Saved Responses ────────────────────────────────────────────────────────────
@@ -88,5 +88,5 @@ type SavedResponse struct {
 	Content     string
 	Voice       *string
 	LLMProvider *string
-	CreatedAt   time.Time
+	CreatedAt   sqlutil.DBTime
 }

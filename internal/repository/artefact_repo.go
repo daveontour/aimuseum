@@ -2,20 +2,20 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ArtefactRepo accesses artefacts, artefact_media, media_items, and media_blobs.
 type ArtefactRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewArtefactRepo creates an ArtefactRepo.
-func NewArtefactRepo(pool *pgxpool.Pool) *ArtefactRepo {
+func NewArtefactRepo(pool *sql.DB) *ArtefactRepo {
 	return &ArtefactRepo{pool: pool}
 }
 
@@ -34,7 +34,7 @@ func (r *ArtefactRepo) ListSummaries(ctx context.Context, search, tags string) (
 		        WHERE am.artefact_id = a.id
 		          AND (
 		            (mb.thumbnail_data IS NOT NULL AND octet_length(mb.thumbnail_data) > 0)
-		            OR (mi.media_type IS NOT NULL AND mi.media_type ILIKE 'image/%')
+		            OR (mi.media_type IS NOT NULL AND mi.media_type LIKE 'image/%')
 		          )
 		        ORDER BY am.sort_order
 		        LIMIT 1) AS primary_blob_id
@@ -45,14 +45,14 @@ func (r *ArtefactRepo) ListSummaries(ctx context.Context, search, tags string) (
 		args = append(args, "%"+search+"%")
 		idx := len(args)
 		conds = append(conds, fmt.Sprintf(
-			`(a.name ILIKE $%d OR a.description ILIKE $%d OR a.tags ILIKE $%d OR a.story ILIKE $%d)`,
+			`(a.name LIKE $%d OR a.description LIKE $%d OR a.tags LIKE $%d OR a.story LIKE $%d)`,
 			idx, idx, idx, idx,
 		))
 	}
 	if tags != "" {
 		args = append(args, "%"+tags+"%")
 		idx := len(args)
-		conds = append(conds, fmt.Sprintf("a.tags ILIKE $%d", idx))
+		conds = append(conds, fmt.Sprintf("a.tags LIKE $%d", idx))
 	}
 	if uid > 0 {
 		args = append(args, uid)
@@ -63,7 +63,7 @@ func (r *ArtefactRepo) ListSummaries(ctx context.Context, search, tags string) (
 	}
 	q += " ORDER BY a.updated_at DESC"
 
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListSummaries: %w", err)
 	}
@@ -94,7 +94,7 @@ func (r *ArtefactRepo) GetByID(ctx context.Context, id int64) (*model.Artefact, 
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
 	var a model.Artefact
-	err := r.pool.QueryRow(ctx, q, args...).
+	err := r.pool.QueryRowContext(ctx, q, args...).
 		Scan(&a.ID, &a.Name, &a.Description, &a.Tags, &a.Story, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		if isNoRows(err) {
@@ -107,9 +107,9 @@ func (r *ArtefactRepo) GetByID(ctx context.Context, id int64) (*model.Artefact, 
 
 // GetMediaItems returns all linked media items for an artefact, ordered by sort_order.
 func (r *ArtefactRepo) GetMediaItems(ctx context.Context, artefactID int64) ([]*model.ArtefactMediaItem, error) {
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.pool.QueryContext(ctx,
 		`SELECT am.id, am.media_item_id, mi.media_blob_id, am.sort_order, mi.media_type, mi.title,
-		        COALESCE(octet_length(mb.thumbnail_data), 0)::bigint AS thumb_len
+		        CAST(COALESCE(octet_length(mb.thumbnail_data), 0) AS INTEGER) AS thumb_len
 		 FROM artefact_media am
 		 JOIN media_items mi ON mi.id = am.media_item_id
 		 JOIN media_blobs mb ON mb.id = mi.media_blob_id
@@ -151,7 +151,7 @@ func (r *ArtefactRepo) GetMediaItems(ctx context.Context, artefactID int64) ([]*
 func (r *ArtefactRepo) Create(ctx context.Context, name string, description, tags, story *string) (*model.Artefact, error) {
 	uid := uidFromCtx(ctx)
 	var a model.Artefact
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`INSERT INTO artefacts (name, description, tags, story, user_id)
 		 VALUES ($1, $2, $3, $4, $5)
 		 RETURNING id, name, description, tags, story, created_at, updated_at`,
@@ -171,13 +171,13 @@ func (r *ArtefactRepo) Update(ctx context.Context, id int64, name *string, descr
 	          description = COALESCE($2, description),
 	          tags        = COALESCE($3, tags),
 	          story       = COALESCE($4, story),
-	          updated_at  = NOW()
+	          updated_at  = CURRENT_TIMESTAMP
 	      WHERE id = $5`
 	args := []any{name, description, tags, story, id}
 	q, args = addUIDFilter(q, args, uid)
 	q += ` RETURNING id, name, description, tags, story, created_at, updated_at`
 	var a model.Artefact
-	err := r.pool.QueryRow(ctx, q, args...).
+	err := r.pool.QueryRowContext(ctx, q, args...).
 		Scan(&a.ID, &a.Name, &a.Description, &a.Tags, &a.Story, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		if isNoRows(err) {
@@ -188,13 +188,13 @@ func (r *ArtefactRepo) Update(ctx context.Context, id int64, name *string, descr
 	return &a, nil
 }
 
-// TouchUpdatedAt sets updated_at = NOW() on an artefact.
+// TouchUpdatedAt sets updated_at = CURRENT_TIMESTAMP on an artefact.
 func (r *ArtefactRepo) TouchUpdatedAt(ctx context.Context, id int64) error {
 	uid := uidFromCtx(ctx)
-	q := `UPDATE artefacts SET updated_at = NOW() WHERE id = $1`
+	q := `UPDATE artefacts SET updated_at = CURRENT_TIMESTAMP WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	_, err := r.pool.Exec(ctx, q, args...)
+	_, err := r.pool.ExecContext(ctx, q, args...)
 	return err
 }
 
@@ -204,7 +204,7 @@ func (r *ArtefactRepo) Delete(ctx context.Context, id int64) error {
 	q := `DELETE FROM artefacts WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	_, err := r.pool.Exec(ctx, q, args...)
+	_, err := r.pool.ExecContext(ctx, q, args...)
 	return err
 }
 
@@ -213,7 +213,7 @@ func (r *ArtefactRepo) Delete(ctx context.Context, id int64) error {
 // MediaLinkExists reports whether a junction row already exists.
 func (r *ArtefactRepo) MediaLinkExists(ctx context.Context, artefactID, mediaItemID int64) (bool, error) {
 	var n int
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM artefact_media WHERE artefact_id=$1 AND media_item_id=$2`,
 		artefactID, mediaItemID,
 	).Scan(&n)
@@ -223,7 +223,7 @@ func (r *ArtefactRepo) MediaLinkExists(ctx context.Context, artefactID, mediaIte
 // MediaLinkCount returns the number of media items linked to an artefact.
 func (r *ArtefactRepo) MediaLinkCount(ctx context.Context, artefactID int64) (int, error) {
 	var n int
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM artefact_media WHERE artefact_id=$1`, artefactID,
 	).Scan(&n)
 	return n, err
@@ -231,7 +231,7 @@ func (r *ArtefactRepo) MediaLinkCount(ctx context.Context, artefactID int64) (in
 
 // LinkMedia creates a junction row.
 func (r *ArtefactRepo) LinkMedia(ctx context.Context, artefactID, mediaItemID int64, sortOrder int) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.pool.ExecContext(ctx,
 		`INSERT INTO artefact_media (artefact_id, media_item_id, sort_order)
 		 VALUES ($1, $2, $3)`,
 		artefactID, mediaItemID, sortOrder)
@@ -240,7 +240,7 @@ func (r *ArtefactRepo) LinkMedia(ctx context.Context, artefactID, mediaItemID in
 
 // UnlinkMedia removes a junction row.
 func (r *ArtefactRepo) UnlinkMedia(ctx context.Context, artefactID, mediaItemID int64) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.pool.ExecContext(ctx,
 		`DELETE FROM artefact_media WHERE artefact_id=$1 AND media_item_id=$2`,
 		artefactID, mediaItemID)
 	return err
@@ -249,7 +249,7 @@ func (r *ArtefactRepo) UnlinkMedia(ctx context.Context, artefactID, mediaItemID 
 // OtherArtefactLinkCount returns how many OTHER artefacts also link this media item.
 func (r *ArtefactRepo) OtherArtefactLinkCount(ctx context.Context, mediaItemID, excludeArtefactID int64) (int, error) {
 	var n int
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM artefact_media WHERE media_item_id=$1 AND artefact_id!=$2`,
 		mediaItemID, excludeArtefactID,
 	).Scan(&n)
@@ -261,7 +261,7 @@ func (r *ArtefactRepo) OtherArtefactLinkCount(ctx context.Context, mediaItemID, 
 // InsertMediaBlob inserts a new media_blobs row and returns the new id.
 func (r *ArtefactRepo) InsertMediaBlob(ctx context.Context, imageData, thumbnailData []byte) (int64, error) {
 	var id int64
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`INSERT INTO media_blobs (image_data, thumbnail_data) VALUES ($1, $2) RETURNING id`,
 		imageData, thumbnailData,
 	).Scan(&id)
@@ -275,7 +275,7 @@ func (r *ArtefactRepo) InsertMediaBlob(ctx context.Context, imageData, thumbnail
 func (r *ArtefactRepo) InsertMediaItem(ctx context.Context, blobID int64, title, mediaType, source, sourceRef string) (int64, error) {
 	uid := uidFromCtx(ctx)
 	var id int64
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`INSERT INTO media_items (media_blob_id, title, media_type, source, source_reference, processed, user_id)
 		 VALUES ($1, $2, $3, $4, $5, TRUE, $6) RETURNING id`,
 		blobID, title, mediaType, source, sourceRef, uidVal(uid),
@@ -293,7 +293,7 @@ func (r *ArtefactRepo) GetMediaItemSource(ctx context.Context, mediaItemID int64
 	args := []any{mediaItemID}
 	q, args = addUIDFilter(q, args, uid)
 	var source string
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&source)
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(&source)
 	if err != nil {
 		if isNoRows(err) {
 			return "", nil
@@ -310,7 +310,7 @@ func (r *ArtefactRepo) GetMediaItemBlobID(ctx context.Context, mediaItemID int64
 	args := []any{mediaItemID}
 	q, args = addUIDFilter(q, args, uid)
 	var blobID *int64
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&blobID)
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(&blobID)
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -326,13 +326,13 @@ func (r *ArtefactRepo) DeleteMediaItem(ctx context.Context, id int64) error {
 	q := `DELETE FROM media_items WHERE id=$1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	_, err := r.pool.Exec(ctx, q, args...)
+	_, err := r.pool.ExecContext(ctx, q, args...)
 	return err
 }
 
 // DeleteMediaBlob deletes a media_blobs row.
 func (r *ArtefactRepo) DeleteMediaBlob(ctx context.Context, id int64) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM media_blobs WHERE id=$1`, id)
+	_, err := r.pool.ExecContext(ctx, `DELETE FROM media_blobs WHERE id=$1`, id)
 	return err
 }
 
@@ -351,7 +351,7 @@ func (r *ArtefactRepo) GetPrimaryBlob(ctx context.Context, artefactID int64) ([]
 	      ORDER BY am.sort_order
 	      LIMIT 1`
 	var data, thumb []byte
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&data, &thumb)
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(&data, &thumb)
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -388,7 +388,7 @@ func (r *ArtefactRepo) ExportAll(ctx context.Context) ([]*ArtefactExportRow, err
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY id"
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -410,7 +410,7 @@ func (r *ArtefactRepo) ExportAll(ctx context.Context) ([]*ArtefactExportRow, err
 
 	// Load media refs for each artefact
 	for _, row := range out {
-		mrRows, err := r.pool.Query(ctx,
+		mrRows, err := r.pool.QueryContext(ctx,
 			`SELECT am.sort_order, mi.media_type, mi.title, mi.source, mi.source_reference
 			 FROM artefact_media am
 			 JOIN media_items mi ON mi.id = am.media_item_id
@@ -443,7 +443,7 @@ func (r *ArtefactRepo) FindMediaBySrcRef(ctx context.Context, source, sourceRef 
 	q, args = addUIDFilter(q, args, uid)
 	q += " LIMIT 1"
 	var id int64
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&id)
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(&id)
 	if err != nil {
 		if isNoRows(err) {
 			return 0, nil
@@ -456,7 +456,7 @@ func (r *ArtefactRepo) FindMediaBySrcRef(ctx context.Context, source, sourceRef 
 // GetOrphanArtefactMediaIDs returns media_item IDs that are linked only to the given artefact
 // and have source='artefact'.
 func (r *ArtefactRepo) GetOrphanArtefactMediaIDs(ctx context.Context, artefactID int64) ([]int64, error) {
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.pool.QueryContext(ctx,
 		`SELECT am.media_item_id
 		 FROM artefact_media am
 		 JOIN media_items mi ON mi.id = am.media_item_id

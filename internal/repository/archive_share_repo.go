@@ -2,20 +2,20 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"time"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ArchiveShareRepo accesses the archive_shares table.
 type ArchiveShareRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewArchiveShareRepo creates an ArchiveShareRepo.
-func NewArchiveShareRepo(pool *pgxpool.Pool) *ArchiveShareRepo {
+func NewArchiveShareRepo(pool *sql.DB) *ArchiveShareRepo {
 	return &ArchiveShareRepo{pool: pool}
 }
 
@@ -24,7 +24,7 @@ func (r *ArchiveShareRepo) GetByID(ctx context.Context, id string) (*model.Archi
 	var share model.ArchiveShare
 	var passwordHash *string
 	var policyJSON []byte
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT id, user_id, label, password_hash, expires_at, tool_access_policy, created_at
 		 FROM archive_shares WHERE id = $1`, id,
 	).Scan(&share.ID, &share.UserID, &share.Label, &passwordHash, &share.ExpiresAt, &policyJSON, &share.CreatedAt)
@@ -46,7 +46,7 @@ func (r *ArchiveShareRepo) GetByIDWithHash(ctx context.Context, id string) (*mod
 	var share model.ArchiveShare
 	var passwordHash *string
 	var policyJSON []byte
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT id, user_id, label, password_hash, expires_at, tool_access_policy, created_at
 		 FROM archive_shares WHERE id = $1`, id,
 	).Scan(&share.ID, &share.UserID, &share.Label, &passwordHash, &share.ExpiresAt, &policyJSON, &share.CreatedAt)
@@ -69,7 +69,7 @@ func (r *ArchiveShareRepo) GetByIDWithHash(ctx context.Context, id string) (*mod
 
 // ListByUser returns all shares owned by the given user, newest first.
 func (r *ArchiveShareRepo) ListByUser(ctx context.Context, userID int64) ([]*model.ArchiveShare, error) {
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.pool.QueryContext(ctx,
 		`SELECT id, user_id, label, password_hash, expires_at, tool_access_policy, created_at
 		 FROM archive_shares WHERE user_id = $1 ORDER BY created_at DESC`, userID)
 	if err != nil {
@@ -98,7 +98,7 @@ func (r *ArchiveShareRepo) Create(ctx context.Context, id string, userID int64, 
 	var share model.ArchiveShare
 	var ph *string
 	var policyJSON []byte
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`INSERT INTO archive_shares (id, user_id, label, password_hash, expires_at, tool_access_policy)
 		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING id, user_id, label, password_hash, expires_at, tool_access_policy, created_at`,
@@ -116,12 +116,12 @@ func (r *ArchiveShareRepo) Create(ctx context.Context, id string, userID int64, 
 
 // Delete removes a share token, scoped to the owning user.
 func (r *ArchiveShareRepo) Delete(ctx context.Context, id string, userID int64) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.pool.ExecContext(ctx,
 		`DELETE FROM archive_shares WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if rowsAffectedOrZero(tag) == 0 {
 		return nil // already gone
 	}
 	return nil
@@ -130,7 +130,7 @@ func (r *ArchiveShareRepo) Delete(ctx context.Context, id string, userID int64) 
 // GetOwnerDisplayName returns the display_name of the share's owner.
 func (r *ArchiveShareRepo) GetOwnerDisplayName(ctx context.Context, userID int64) (string, error) {
 	var name *string
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT display_name FROM users WHERE id = $1`, userID).Scan(&name)
 	if err != nil {
 		if isNoRows(err) {

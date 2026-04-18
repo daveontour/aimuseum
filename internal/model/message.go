@@ -1,16 +1,16 @@
 package model
 
-import "time"
+import "github.com/daveontour/aimuseum/internal/sqlutil"
 
 // Message is the domain type for a row in the messages table.
 type Message struct {
 	ID            int64
 	ChatSession   *string
-	MessageDate   *time.Time
+	MessageDate   sqlutil.NullDBTime
 	IsGroupChat   bool
-	DeliveredDate *time.Time
-	ReadDate      *time.Time
-	EditedDate    *time.Time
+	DeliveredDate sqlutil.NullDBTime
+	ReadDate      sqlutil.NullDBTime
+	EditedDate    sqlutil.NullDBTime
 	Service       *string
 	Type          *string
 	SenderID      *string
@@ -20,8 +20,8 @@ type Message struct {
 	Subject       *string
 	Text          *string
 	Processed     bool
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	CreatedAt     sqlutil.DBTime
+	UpdatedAt     sqlutil.DBTime
 }
 
 // ChatSessionRow is a single row from the chat-sessions aggregation query.
@@ -30,7 +30,7 @@ type ChatSessionRow struct {
 	MessageCount    int64
 	AttachmentCount int64
 	PrimaryService  *string
-	LastMessageDate *time.Time
+	LastMessageDate sqlutil.NullDBTime
 	IMessageCount   int64
 	SMSCount        int64
 	WhatsAppCount   int64
@@ -46,7 +46,7 @@ type ChatSessionInfo struct {
 	HasAttachments  bool       `json:"has_attachments"`
 	AttachmentCount int64      `json:"attachment_count"`
 	MessageType     string     `json:"message_type"`
-	LastMessageDate *time.Time `json:"last_message_date"`
+	LastMessageDate sqlutil.NullDBTime `json:"last_message_date"`
 }
 
 // ChatSessionsResponse is the shape returned by GET /imessages/chat-sessions.

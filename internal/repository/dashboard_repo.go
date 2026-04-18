@@ -2,20 +2,20 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // DashboardRepo runs the aggregate queries that power GET /api/dashboard.
 type DashboardRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewDashboardRepo creates a DashboardRepo.
-func NewDashboardRepo(pool *pgxpool.Pool) *DashboardRepo {
+func NewDashboardRepo(pool *sql.DB) *DashboardRepo {
 	return &DashboardRepo{pool: pool}
 }
 
@@ -47,7 +47,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	// ── Messages by service ─────────────────────────────────────────────────
 	{
 		uidCond, args := makeUIDCond(nil)
-		rows, err := r.pool.Query(ctx,
+		rows, err := r.pool.QueryContext(ctx,
 			`SELECT COALESCE(service, 'unknown'), COUNT(id) FROM messages WHERE TRUE`+uidCond+` GROUP BY service`,
 			args...)
 		if err != nil {
@@ -69,10 +69,11 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	}
 
 	// ── Messages by year ────────────────────────────────────────────────────
+	// strftime: SQLite (TEXT datetimes) and portable; avoids PostgreSQL-only EXTRACT.
 	{
 		uidCond, args := makeUIDCond(nil)
-		rows, err := r.pool.Query(ctx,
-			`SELECT EXTRACT(year FROM message_date)::int, COUNT(id)
+		rows, err := r.pool.QueryContext(ctx,
+			`SELECT CAST(strftime('%Y', message_date) AS INTEGER), COUNT(id)
 			 FROM messages
 			 WHERE message_date IS NOT NULL`+uidCond+`
 			 GROUP BY 1 ORDER BY 1`,
@@ -81,13 +82,15 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 			return nil, fmt.Errorf("messages by year: %w", err)
 		}
 		for rows.Next() {
-			var yr int
+			var yr sql.NullInt64
 			var cnt int64
 			if err := rows.Scan(&yr, &cnt); err != nil {
 				rows.Close()
 				return nil, err
 			}
-			out.MessagesByYear[yr] = cnt
+			if yr.Valid && yr.Int64 > 0 {
+				out.MessagesByYear[int(yr.Int64)] = cnt
+			}
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
@@ -98,8 +101,8 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	// ── Emails by year ──────────────────────────────────────────────────────
 	{
 		uidCond, args := makeUIDCond(nil)
-		rows, err := r.pool.Query(ctx,
-			`SELECT EXTRACT(year FROM date)::int, COUNT(id)
+		rows, err := r.pool.QueryContext(ctx,
+			`SELECT CAST(strftime('%Y', date) AS INTEGER), COUNT(id)
 			 FROM emails
 			 WHERE date IS NOT NULL`+uidCond+`
 			 GROUP BY 1 ORDER BY 1`,
@@ -108,13 +111,15 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 			return nil, fmt.Errorf("emails by year: %w", err)
 		}
 		for rows.Next() {
-			var yr int
+			var yr sql.NullInt64
 			var cnt int64
 			if err := rows.Scan(&yr, &cnt); err != nil {
 				rows.Close()
 				return nil, err
 			}
-			out.EmailsByYear[yr] = cnt
+			if yr.Valid && yr.Int64 > 0 {
+				out.EmailsByYear[int(yr.Int64)] = cnt
+			}
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
@@ -125,7 +130,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	// ── Top 100 senders (unfiltered — service layer removes subject names) ──
 	{
 		uidCond, args := makeUIDCond(nil)
-		rows, err := r.pool.Query(ctx,
+		rows, err := r.pool.QueryContext(ctx,
 			`SELECT sender_name, COUNT(id)
 			 FROM messages
 			 WHERE sender_name IS NOT NULL AND sender_name <> ''`+uidCond+`
@@ -153,7 +158,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	// ── Contacts count ──────────────────────────────────────────────────────
 	{
 		uidCond, args := makeUIDCond(nil)
-		if err := r.pool.QueryRow(ctx,
+		if err := r.pool.QueryRowContext(ctx,
 			`SELECT COUNT(id) FROM contacts WHERE TRUE`+uidCond, args...,
 		).Scan(&out.ContactsCount); err != nil {
 			return nil, fmt.Errorf("contacts count: %w", err)
@@ -163,7 +168,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	// ── Contacts by category ────────────────────────────────────────────────
 	{
 		uidCond, args := makeUIDCond(nil)
-		rows, err := r.pool.Query(ctx,
+		rows, err := r.pool.QueryContext(ctx,
 			`SELECT COALESCE(NULLIF(TRIM(rel_type), ''), 'unknown'), COUNT(id)
 			 FROM contacts
 			 WHERE TRUE`+uidCond+`
@@ -190,7 +195,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	// ── Image counts ────────────────────────────────────────────────────────
 	{
 		uidCond, args := makeUIDCond(nil)
-		if err := r.pool.QueryRow(ctx,
+		if err := r.pool.QueryRowContext(ctx,
 			`SELECT COUNT(id) FROM media_items WHERE media_type LIKE 'image/%'`+uidCond, args...,
 		).Scan(&out.TotalImages); err != nil {
 			return nil, fmt.Errorf("total images: %w", err)
@@ -200,7 +205,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 		uidCond, args := makeUIDCond(nil)
 		// Count all filesystem-sourced rows (browser upload and directory import). Do not require
 		// media_type LIKE 'image/%' — uploads often store application/octet-stream until sniffed.
-		if err := r.pool.QueryRow(ctx,
+		if err := r.pool.QueryRowContext(ctx,
 			`SELECT COUNT(id) FROM media_items WHERE source = 'filesystem'`+uidCond, args...,
 		).Scan(&out.FilesystemImagesCount); err != nil {
 			return nil, fmt.Errorf("filesystem images: %w", err)
@@ -208,7 +213,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	}
 	{
 		uidCond, args := makeUIDCond(nil)
-		if err := r.pool.QueryRow(ctx,
+		if err := r.pool.QueryRowContext(ctx,
 			`SELECT COUNT(id) FROM media_items WHERE source = 'filesystem' AND is_referenced = FALSE`+uidCond, args...,
 		).Scan(&out.FilesystemImagesEmbeddedCount); err != nil {
 			return nil, fmt.Errorf("filesystem embedded images: %w", err)
@@ -216,7 +221,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	}
 	{
 		uidCond, args := makeUIDCond(nil)
-		if err := r.pool.QueryRow(ctx,
+		if err := r.pool.QueryRowContext(ctx,
 			`SELECT COUNT(id) FROM media_items WHERE source = 'filesystem' AND is_referenced = TRUE`+uidCond, args...,
 		).Scan(&out.FilesystemImagesReferencedCount); err != nil {
 			return nil, fmt.Errorf("filesystem referenced images: %w", err)
@@ -224,7 +229,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	}
 	{
 		uidCond, args := makeUIDCond(nil)
-		if err := r.pool.QueryRow(ctx,
+		if err := r.pool.QueryRowContext(ctx,
 			`SELECT COUNT(id) FROM media_items WHERE media_type LIKE 'image/%' AND is_referenced = FALSE`+uidCond, args...,
 		).Scan(&out.ImportedImages); err != nil {
 			return nil, fmt.Errorf("imported images: %w", err)
@@ -232,7 +237,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	}
 	{
 		uidCond, args := makeUIDCond(nil)
-		if err := r.pool.QueryRow(ctx,
+		if err := r.pool.QueryRowContext(ctx,
 			`SELECT COUNT(id) FROM media_items WHERE media_type LIKE 'image/%' AND is_referenced = TRUE`+uidCond, args...,
 		).Scan(&out.ReferenceImages); err != nil {
 			return nil, fmt.Errorf("reference images: %w", err)
@@ -246,7 +251,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 			args = append(args, uid)
 			uidCond = fmt.Sprintf(" AND mi.user_id = $%d", len(args))
 		}
-		if err := r.pool.QueryRow(ctx,
+		if err := r.pool.QueryRowContext(ctx,
 			`SELECT COUNT(mi.id)
 			 FROM media_items mi
 			 JOIN media_blobs mb ON mb.id = mi.media_blob_id
@@ -260,7 +265,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	// ── Images by region ────────────────────────────────────────────────────
 	{
 		uidCond, args := makeUIDCond(nil)
-		rows, err := r.pool.Query(ctx,
+		rows, err := r.pool.QueryContext(ctx,
 			`SELECT COALESCE(NULLIF(TRIM(region), ''), 'Unknown'), COUNT(id)
 			 FROM media_items
 			 WHERE media_type LIKE 'image/%'`+uidCond+`
@@ -304,7 +309,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 			{&out.CompleteProfilesCount, `SELECT COUNT(id) FROM complete_profiles WHERE NOT generation_pending` + uidCond, "complete_profiles"},
 		}
 		for _, s := range scalars {
-			if err := r.pool.QueryRow(ctx, s.query, args...).Scan(s.dest); err != nil {
+			if err := r.pool.QueryRowContext(ctx, s.query, args...).Scan(s.dest); err != nil {
 				return nil, fmt.Errorf("%s count: %w", s.label, err)
 			}
 		}
@@ -313,7 +318,7 @@ func (r *DashboardRepo) GetStats(ctx context.Context) (*model.DashboardRaw, erro
 	// ── Emails by import source (gmail, IMAP hostname, legacy, …) ─────────────
 	{
 		uidCond, args := makeUIDCond(nil)
-		rows, err := r.pool.Query(ctx,
+		rows, err := r.pool.QueryContext(ctx,
 			`SELECT COALESCE(NULLIF(TRIM(source), ''), 'legacy'), COUNT(id) FROM emails WHERE TRUE`+uidCond+` GROUP BY 1`,
 			args...)
 		if err != nil {
@@ -345,7 +350,7 @@ func (r *DashboardRepo) GetSubjectContactNames(ctx context.Context) ([]string, e
 	q := `SELECT name FROM contacts WHERE (is_subject = TRUE OR id = 0) AND name IS NOT NULL`
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("subject contact names: %w", err)
 	}
@@ -371,13 +376,18 @@ func (r *DashboardRepo) HasCompleteProfileForNames(ctx context.Context, namesLow
 		return false, nil
 	}
 	uid := uidFromCtx(ctx)
+	ph := make([]string, len(namesLower))
+	args := make([]any, 0, len(namesLower)+1)
+	for i, n := range namesLower {
+		ph[i] = "?"
+		args = append(args, n)
+	}
 	q := `SELECT profile FROM complete_profiles
-	      WHERE LOWER(name) = ANY($1) AND profile IS NOT NULL AND NOT generation_pending`
-	args := []any{namesLower}
+	      WHERE LOWER(name) IN (` + strings.Join(ph, ",") + `) AND profile IS NOT NULL AND NOT generation_pending`
 	q, args = addUIDFilter(q, args, uid)
 	q += ` LIMIT 1`
 	var profile *string
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&profile)
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(&profile)
 	if err != nil {
 		if isNoRows(err) {
 			return false, nil

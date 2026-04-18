@@ -2,25 +2,24 @@ package importstorage
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/daveontour/aimuseum/internal/repository"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // MessageStorage handles message storage operations for imports.
 type MessageStorage struct {
-	pool            *pgxpool.Pool
+	pool            *sql.DB
 	subjectFullName string
 }
 
 // NewMessageStorage creates a new message storage instance.
 // Subject name is loaded from subject_configuration via the repo.
-func NewMessageStorage(ctx context.Context, pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo) *MessageStorage {
+func NewMessageStorage(ctx context.Context, pool *sql.DB, subjectRepo *repository.SubjectConfigRepo) *MessageStorage {
 	s := &MessageStorage{pool: pool}
 	if subjectRepo != nil {
 		if cfg, err := subjectRepo.GetFirst(ctx); err == nil && cfg != nil {
@@ -80,27 +79,23 @@ type BatchSaveResult struct {
 func (s *MessageStorage) SaveIMessage(ctx context.Context, data MessageData, attachmentData []byte, attachmentFilename, attachmentType, source string) (int64, bool, error) {
 	uid := uidFromCtx(ctx)
 
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
-
-	if _, err = tx.Exec(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
-		return 0, false, fmt.Errorf("failed to set synchronous_commit: %w", err)
-	}
+	defer tx.Rollback()
 
 	var existingID int64
 	var isUpdate bool
 
 	checkQuery := `SELECT id FROM messages 
-		WHERE chat_session = $1 
-		AND message_date = $2 
-		AND sender_id = $3 
-		AND type = $4 
+		WHERE chat_session = ? 
+		AND message_date = ? 
+		AND sender_id = ? 
+		AND type = ? 
 		LIMIT 1`
 
-	err = tx.QueryRow(ctx, checkQuery,
+	err = tx.QueryRowContext(ctx, checkQuery,
 		data.ChatSession,
 		data.MessageDate,
 		data.SenderID,
@@ -110,20 +105,20 @@ func (s *MessageStorage) SaveIMessage(ctx context.Context, data MessageData, att
 	if err == nil {
 		isUpdate = true
 		updateQuery := `UPDATE messages SET
-			delivered_date = $1,
-			read_date = $2,
-			edited_date = $3,
-			service = $4,
-			sender_name = $5,
-			status = $6,
-			replying_to = $7,
-			subject = $8,
-			text = $9,
-			is_group_chat = $10,
-			updated_at = NOW()
-			WHERE id = $11`
+			delivered_date = ?,
+			read_date = ?,
+			edited_date = ?,
+			service = ?,
+			sender_name = ?,
+			status = ?,
+			replying_to = ?,
+			subject = ?,
+			text = ?,
+			is_group_chat = ?,
+			updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?`
 
-		_, err = tx.Exec(ctx, updateQuery,
+		_, err = tx.ExecContext(ctx, updateQuery,
 			data.DeliveredDate,
 			data.ReadDate,
 			data.EditedDate,
@@ -140,21 +135,21 @@ func (s *MessageStorage) SaveIMessage(ctx context.Context, data MessageData, att
 			return 0, false, fmt.Errorf("failed to update message: %w", err)
 		}
 
-		_, err = tx.Exec(ctx, "DELETE FROM message_attachments WHERE message_id = $1", existingID)
+		_, err = tx.ExecContext(ctx, "DELETE FROM message_attachments WHERE message_id = ?", existingID)
 		if err != nil {
 			return 0, false, fmt.Errorf("failed to delete existing attachments: %w", err)
 		}
 
-	} else if err == pgx.ErrNoRows {
+	} else if err == sql.ErrNoRows {
 		isUpdate = false
 		insertQuery := `INSERT INTO messages (
 			chat_session, message_date, delivered_date, read_date, edited_date,
 			service, type, sender_id, sender_name, status, replying_to,
 			subject, text, is_group_chat, processed, user_id, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		RETURNING id`
 
-		err = tx.QueryRow(ctx, insertQuery,
+		err = tx.QueryRowContext(ctx, insertQuery,
 			data.ChatSession,
 			data.MessageDate,
 			data.DeliveredDate,
@@ -186,19 +181,19 @@ func (s *MessageStorage) SaveIMessage(ctx context.Context, data MessageData, att
 		}
 	}
 
-	if err = tx.Commit(ctx); err != nil {
+	if err = tx.Commit(); err != nil {
 		return 0, false, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return existingID, isUpdate, nil
 }
 
-func (s *MessageStorage) saveAttachment(ctx context.Context, tx pgx.Tx, messageID int64, attachmentData []byte, attachmentFilename, attachmentType, source string, messageData MessageData, uid int64) error {
+func (s *MessageStorage) saveAttachment(ctx context.Context, tx *sql.Tx, messageID int64, attachmentData []byte, attachmentFilename, attachmentType, source string, messageData MessageData, uid int64) error {
 	var thumbnailData []byte
 
 	var blobID int64
-	insertBlobQuery := `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`
-	err := tx.QueryRow(ctx, insertBlobQuery, attachmentData, thumbnailData, uidVal(uid)).Scan(&blobID)
+	insertBlobQuery := `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES (?, ?, ?) RETURNING id`
+	err := tx.QueryRowContext(ctx, insertBlobQuery, attachmentData, thumbnailData, uidVal(uid)).Scan(&blobID)
 	if err != nil {
 		return fmt.Errorf("failed to insert media blob (filename: %s, size: %d bytes, type: %s): %w",
 			attachmentFilename, len(attachmentData), attachmentType, err)
@@ -227,11 +222,11 @@ func (s *MessageStorage) saveAttachment(ctx context.Context, tx pgx.Tx, messageI
 		media_type, year, month, latitude, longitude, altitude, has_gps,
 		processed, available_for_task, rating, is_personal, is_business,
 		is_social, is_promotional, is_spam, is_important, user_id, created_at, updated_at, is_referenced
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW(), NOW(), FALSE)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, FALSE)
 	RETURNING id`
 
 	var mediaItemID int64
-	err = tx.QueryRow(ctx, insertMetaQuery,
+	err = tx.QueryRowContext(ctx, insertMetaQuery,
 		blobID,
 		chatSessionStr,
 		source,
@@ -256,8 +251,8 @@ func (s *MessageStorage) saveAttachment(ctx context.Context, tx pgx.Tx, messageI
 			blobID, attachmentFilename, attachmentType, err)
 	}
 
-	insertJunctionQuery := `INSERT INTO message_attachments (message_id, media_item_id) VALUES ($1, $2)`
-	_, err = tx.Exec(ctx, insertJunctionQuery, messageID, mediaItemID)
+	insertJunctionQuery := `INSERT INTO message_attachments (message_id, media_item_id) VALUES (?, ?)`
+	_, err = tx.ExecContext(ctx, insertJunctionQuery, messageID, mediaItemID)
 	if err != nil {
 		return fmt.Errorf("failed to insert message attachment junction (message_id: %d, media_item_id: %d, filename: %s): %w",
 			messageID, mediaItemID, attachmentFilename, err)
@@ -280,7 +275,7 @@ func (s *MessageStorage) SetIsGroupChat(ctx context.Context) error {
 	FROM GroupSessions gs
 	WHERE m.chat_session = gs.chat_session AND m.service = gs.service`
 
-	_, err := s.pool.Exec(ctx, query)
+	_, err := s.pool.ExecContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("failed to set is_group_chat flag: %w", err)
 	}
@@ -293,7 +288,7 @@ func (s *MessageStorage) DeleteOrphanFacebookConversations(ctx context.Context) 
 		SELECT chat_session FROM messages WHERE service = 'Facebook Messenger'
 		GROUP BY chat_session HAVING COUNT(*) < 2
 	)`
-	_, err := s.pool.Exec(ctx, query)
+	_, err := s.pool.ExecContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("failed to delete orphan Facebook conversations: %w", err)
 	}
@@ -309,15 +304,11 @@ func (s *MessageStorage) SaveMessagesBatch(ctx context.Context, messages []Messa
 	uid := uidFromCtx(ctx)
 
 	result := &BatchSaveResult{}
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
-
-	if _, err = tx.Exec(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
-		return nil, fmt.Errorf("failed to set synchronous_commit: %w", err)
-	}
+	defer tx.Rollback()
 
 	type messageKey struct {
 		chatSession string
@@ -358,7 +349,7 @@ func (s *MessageStorage) SaveMessagesBatch(ctx context.Context, messages []Messa
 		if len(placeholders) > 0 {
 			checkQuery.WriteString(strings.Join(placeholders, ", "))
 			checkQuery.WriteString(")")
-			rows, err := tx.Query(ctx, checkQuery.String(), args...)
+			rows, err := tx.QueryContext(ctx, checkQuery.String(), args...)
 			if err == nil {
 				defer rows.Close()
 				for rows.Next() {
@@ -459,7 +450,7 @@ func (s *MessageStorage) SaveMessagesBatch(ctx context.Context, messages []Messa
 		}
 
 		for _, item := range toUpdate {
-			_, _ = tx.Exec(ctx, "DELETE FROM message_attachments WHERE message_id = $1", item.id)
+			_, _ = tx.ExecContext(ctx, "DELETE FROM message_attachments WHERE message_id = ?", item.id)
 
 			if len(item.msg.AttachmentData) > 0 {
 				if err := s.saveAttachment(ctx, tx, item.id, item.msg.AttachmentData,
@@ -481,14 +472,14 @@ func (s *MessageStorage) SaveMessagesBatch(ctx context.Context, messages []Messa
 		result.Updated = len(toUpdate)
 	}
 
-	if err = tx.Commit(ctx); err != nil {
+	if err = tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return result, nil
 }
 
-func (s *MessageStorage) batchInsertMessages(ctx context.Context, tx pgx.Tx, messages []MessageWithAttachment) ([]int64, error) {
+func (s *MessageStorage) batchInsertMessages(ctx context.Context, tx *sql.Tx, messages []MessageWithAttachment) ([]int64, error) {
 	if len(messages) == 0 {
 		return []int64{}, nil
 	}
@@ -507,7 +498,7 @@ func (s *MessageStorage) batchInsertMessages(ctx context.Context, tx pgx.Tx, mes
 	argIndex := 1
 
 	for _, msg := range messages {
-		placeholder := fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, NOW(), NOW())",
+		placeholder := fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
 			argIndex, argIndex+1, argIndex+2, argIndex+3, argIndex+4, argIndex+5, argIndex+6, argIndex+7,
 			argIndex+8, argIndex+9, argIndex+10, argIndex+11, argIndex+12, argIndex+13, argIndex+14, argIndex+15)
 		placeholders = append(placeholders, placeholder)
@@ -536,7 +527,7 @@ func (s *MessageStorage) batchInsertMessages(ctx context.Context, tx pgx.Tx, mes
 	insertQuery.WriteString(strings.Join(placeholders, ", "))
 	insertQuery.WriteString(" RETURNING id")
 
-	rows, err := tx.Query(ctx, insertQuery.String(), args...)
+	rows, err := tx.QueryContext(ctx, insertQuery.String(), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -554,7 +545,7 @@ func (s *MessageStorage) batchInsertMessages(ctx context.Context, tx pgx.Tx, mes
 	return ids, rows.Err()
 }
 
-func (s *MessageStorage) batchUpdateMessages(ctx context.Context, tx pgx.Tx, updates []struct {
+func (s *MessageStorage) batchUpdateMessages(ctx context.Context, tx *sql.Tx, updates []struct {
 	msg MessageWithAttachment
 	id  int64
 }) error {
@@ -563,21 +554,21 @@ func (s *MessageStorage) batchUpdateMessages(ctx context.Context, tx pgx.Tx, upd
 	}
 
 	updateQuery := `UPDATE messages SET
-		delivered_date = $1,
-		read_date = $2,
-		edited_date = $3,
-		service = $4,
-		sender_name = $5,
-		status = $6,
-		replying_to = $7,
-		subject = $8,
-		text = $9,
-		is_group_chat = $10,
-		updated_at = NOW()
-		WHERE id = $11`
+		delivered_date = ?,
+		read_date = ?,
+		edited_date = ?,
+		service = ?,
+		sender_name = ?,
+		status = ?,
+		replying_to = ?,
+		subject = ?,
+		text = ?,
+		is_group_chat = ?,
+		updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`
 
 	for _, item := range updates {
-		_, err := tx.Exec(ctx, updateQuery,
+		_, err := tx.ExecContext(ctx, updateQuery,
 			item.msg.MessageData.DeliveredDate,
 			item.msg.MessageData.ReadDate,
 			item.msg.MessageData.EditedDate,

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -26,8 +27,8 @@ import (
 	"github.com/daveontour/aimuseum/internal/importstorage"
 	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/repository"
+	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ── Upload job singleton ───────────────────────────────────────────────────────
@@ -43,15 +44,17 @@ var uploadJob = appimporter.NewImportJob("ZIP upload import", map[string]any{
 
 // UploadImportHandler handles web-based upload import endpoints.
 type UploadImportHandler struct {
-	pool              *pgxpool.Pool
+	pool              *sql.DB
 	subjectConfigRepo *repository.SubjectConfigRepo
 	sessionStore      *keystore.SessionMasterStore
+	sensitiveSvc      *service.SensitiveService
+	authSvc           *service.AuthService
 	uploadCfg         config.UploadConfig
 }
 
 // NewUploadImportHandler creates an UploadImportHandler.
-func NewUploadImportHandler(pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, sessionStore *keystore.SessionMasterStore, uploadCfg config.UploadConfig) *UploadImportHandler {
-	return &UploadImportHandler{pool: pool, subjectConfigRepo: subjectRepo, sessionStore: sessionStore, uploadCfg: uploadCfg}
+func NewUploadImportHandler(pool *sql.DB, subjectRepo *repository.SubjectConfigRepo, sessionStore *keystore.SessionMasterStore, sensitiveSvc *service.SensitiveService, authSvc *service.AuthService, uploadCfg config.UploadConfig) *UploadImportHandler {
+	return &UploadImportHandler{pool: pool, subjectConfigRepo: subjectRepo, sessionStore: sessionStore, sensitiveSvc: sensitiveSvc, authSvc: authSvc, uploadCfg: uploadCfg}
 }
 
 // RegisterRoutes mounts upload import routes.
@@ -70,7 +73,7 @@ func (h *UploadImportHandler) RegisterRoutes(r chi.Router) error {
 
 // Upload accepts a ZIP file and starts a background import.
 func (h *UploadImportHandler) Upload(w http.ResponseWriter, r *http.Request) {
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	if err := uploadJob.AssertNotRunning(); err != nil {
@@ -187,7 +190,7 @@ func (h *UploadImportHandler) UploadStatus(w http.ResponseWriter, r *http.Reques
 
 // UploadCancel handles POST /import/upload/cancel (ZIP/TUS upload import job).
 func (h *UploadImportHandler) UploadCancel(w http.ResponseWriter, r *http.Request) {
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	writeJSON(w, uploadJob.Cancel())
@@ -202,7 +205,7 @@ func normalizeUploadSourceRef(s string) string {
 
 // PhotoBatch accepts multipart image files and inserts them with the user_id from context.
 func (h *UploadImportHandler) PhotoBatch(w http.ResponseWriter, r *http.Request) {
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	if err := r.ParseMultipartForm(100 << 20); err != nil {
@@ -366,7 +369,7 @@ func (h *UploadImportHandler) Jobs(w http.ResponseWriter, r *http.Request) {
 
 // ── Upload run functions ───────────────────────────────────────────────────────
 
-func runUploadWhatsApp(ctx context.Context, pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *appimporter.ImportJob, directoryPath string) {
+func runUploadWhatsApp(ctx context.Context, pool *sql.DB, subjectRepo *repository.SubjectConfigRepo, job *appimporter.ImportJob, directoryPath string) {
 	defer job.Finish()
 
 	storage := importstorage.NewMessageStorage(ctx, pool, subjectRepo)
@@ -413,7 +416,7 @@ func runUploadWhatsApp(ctx context.Context, pool *pgxpool.Pool, subjectRepo *rep
 	job.Broadcast("completed", job.GetState())
 }
 
-func runUploadIMessage(ctx context.Context, pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *appimporter.ImportJob, directoryPath string) {
+func runUploadIMessage(ctx context.Context, pool *sql.DB, subjectRepo *repository.SubjectConfigRepo, job *appimporter.ImportJob, directoryPath string) {
 	defer job.Finish()
 
 	storage := importstorage.NewMessageStorage(ctx, pool, subjectRepo)
@@ -463,7 +466,7 @@ func runUploadIMessage(ctx context.Context, pool *pgxpool.Pool, subjectRepo *rep
 	job.Broadcast("completed", job.GetState())
 }
 
-func runUploadInstagram(ctx context.Context, pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *appimporter.ImportJob, directoryPath string) {
+func runUploadInstagram(ctx context.Context, pool *sql.DB, subjectRepo *repository.SubjectConfigRepo, job *appimporter.ImportJob, directoryPath string) {
 	defer job.Finish()
 
 	storage := importstorage.NewMessageStorage(ctx, pool, subjectRepo)
@@ -512,7 +515,7 @@ func runUploadInstagram(ctx context.Context, pool *pgxpool.Pool, subjectRepo *re
 	job.Broadcast("completed", job.GetState())
 }
 
-func runUploadFacebook(ctx context.Context, pool *pgxpool.Pool, subjectRepo *repository.SubjectConfigRepo, job *appimporter.ImportJob, directoryPath string) {
+func runUploadFacebook(ctx context.Context, pool *sql.DB, subjectRepo *repository.SubjectConfigRepo, job *appimporter.ImportJob, directoryPath string) {
 	defer job.Finish()
 
 	storage := importstorage.NewMessageStorage(ctx, pool, subjectRepo)

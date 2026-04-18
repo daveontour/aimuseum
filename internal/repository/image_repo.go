@@ -2,20 +2,21 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 // ImageRepo runs queries against media_items, media_blobs, and facebook_albums tables.
 type ImageRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewImageRepo creates an ImageRepo backed by the given pool.
-func NewImageRepo(pool *pgxpool.Pool) *ImageRepo {
+func NewImageRepo(pool *sql.DB) *ImageRepo {
 	return &ImageRepo{pool: pool}
 }
 
@@ -42,14 +43,14 @@ func (r *ImageRepo) GetMediaItemByID(ctx context.Context, id int64) (*model.Medi
 	q := `SELECT ` + mediaItemColumns + ` FROM media_items WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	row := r.pool.QueryRow(ctx, q, args...)
+	row := r.pool.QueryRowContext(ctx, q, args...)
 	return scanMediaItem(row)
 }
 
 // GetBlobByID returns a media_blobs row by primary key.
 func (r *ImageRepo) GetBlobByID(ctx context.Context, blobID int64) (*model.MediaBlob, error) {
 	b := &model.MediaBlob{}
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT id, image_data, thumbnail_data FROM media_blobs WHERE id = $1`, blobID,
 	).Scan(&b.ID, &b.ImageData, &b.ThumbnailData)
 	if err != nil {
@@ -72,7 +73,7 @@ func (r *ImageRepo) GetBlobByMetadataID(ctx context.Context, metaID int64) (*mod
 	args := []any{metaID}
 	q, args = addUIDFilterQualified(q, args, uid, "mi")
 	b := &model.MediaBlob{}
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&b.ID, &b.ImageData, &b.ThumbnailData)
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(&b.ID, &b.ImageData, &b.ThumbnailData)
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -88,7 +89,7 @@ func (r *ImageRepo) GetMediaItemByBlobID(ctx context.Context, blobID int64) (*mo
 	q := `SELECT ` + mediaItemColumns + ` FROM media_items WHERE media_blob_id = $1`
 	args := []any{blobID}
 	q, args = addUIDFilter(q, args, uid)
-	row := r.pool.QueryRow(ctx, q, args...)
+	row := r.pool.QueryRowContext(ctx, q, args...)
 	return scanMediaItem(row)
 }
 
@@ -101,12 +102,12 @@ func (r *ImageRepo) Search(ctx context.Context, p model.ImageSearchParams) ([]*m
 	n := 1
 
 	addLike := func(col, val string) {
-		conds = append(conds, fmt.Sprintf("%s ILIKE $%d", col, n))
+		conds = append(conds, fmt.Sprintf("%s LIKE $%d", col, n))
 		args = append(args, "%"+val+"%")
 		n++
 	}
 	addExact := func(col, val string) {
-		conds = append(conds, fmt.Sprintf("%s ILIKE $%d", col, n))
+		conds = append(conds, fmt.Sprintf("%s LIKE $%d", col, n))
 		args = append(args, val) // no wildcards — mirrors Python .ilike(filters.source)
 		n++
 	}
@@ -131,7 +132,7 @@ func (r *ImageRepo) Search(ctx context.Context, p model.ImageSearchParams) ([]*m
 		if len(tagList) > 0 {
 			var orParts []string
 			for _, tag := range tagList {
-				orParts = append(orParts, fmt.Sprintf("tags ILIKE $%d", n))
+				orParts = append(orParts, fmt.Sprintf("tags LIKE $%d", n))
 				args = append(args, "%"+tag+"%")
 				n++
 			}
@@ -197,7 +198,7 @@ func (r *ImageRepo) Search(ctx context.Context, p model.ImageSearchParams) ([]*m
 	}
 	sql += " ORDER BY created_at DESC"
 
-	rows, err := r.pool.Query(ctx, sql, args...)
+	rows, err := r.pool.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("image Search: %w", err)
 	}
@@ -212,7 +213,7 @@ func (r *ImageRepo) GetDistinctYears(ctx context.Context) ([]int, error) {
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY year DESC"
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetDistinctYears: %w", err)
 	}
@@ -236,7 +237,7 @@ func (r *ImageRepo) GetAllTagStrings(ctx context.Context) ([]string, error) {
 	q := `SELECT tags FROM media_items WHERE tags IS NOT NULL AND tags != ''`
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetAllTagStrings: %w", err)
 	}
@@ -261,7 +262,7 @@ func (r *ImageRepo) GetLocations(ctx context.Context) ([]*model.MediaItem, error
 	         OR (latitude IS NOT NULL AND longitude IS NOT NULL)`
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetLocations: %w", err)
 	}
@@ -271,7 +272,7 @@ func (r *ImageRepo) GetLocations(ctx context.Context) ([]*model.MediaItem, error
 
 // GetFacebookPlaces returns all locations with source='facebook'.
 func (r *ImageRepo) GetFacebookPlaces(ctx context.Context) ([]model.FacebookPlaceItem, error) {
-	rows, err := r.pool.Query(ctx, `
+	rows, err := r.pool.QueryContext(ctx, `
 		SELECT id, name, description, address, latitude, longitude, region, source_reference
 		FROM locations
 		WHERE source = 'facebook'
@@ -301,7 +302,7 @@ func (r *ImageRepo) UpdateTags(ctx context.Context, id int64, newTags string) (b
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
 	var existing *string
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&existing)
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(&existing)
 	if err != nil {
 		if isNoRows(err) {
 			return false, nil
@@ -312,14 +313,14 @@ func (r *ImageRepo) UpdateTags(ctx context.Context, id int64, newTags string) (b
 	if existing != nil && strings.TrimSpace(*existing) != "" {
 		merged = strings.TrimSpace(*existing) + ", " + strings.TrimSpace(newTags)
 	}
-	uq := `UPDATE media_items SET tags = $2, updated_at = NOW() WHERE id = $1`
+	uq := `UPDATE media_items SET tags = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1`
 	uargs := []any{id, merged}
 	uq, uargs = addUIDFilter(uq, uargs, uid)
-	res, err := r.pool.Exec(ctx, uq, uargs...)
+	res, err := r.pool.ExecContext(ctx, uq, uargs...)
 	if err != nil {
 		return false, fmt.Errorf("UpdateTags: %w", err)
 	}
-	return res.RowsAffected() > 0, nil
+	return rowsAffectedOrZero(res) > 0, nil
 }
 
 // UpdateMetadata updates description, tags, and/or rating for a media item.
@@ -352,14 +353,14 @@ func (r *ImageRepo) UpdateMetadata(ctx context.Context, id int64, description, t
 	if len(setParts) == 0 {
 		return true, nil
 	}
-	setParts = append(setParts, "updated_at = NOW()")
+	setParts = append(setParts, "updated_at = CURRENT_TIMESTAMP")
 	sql := fmt.Sprintf(`UPDATE media_items SET %s WHERE id = $1`, strings.Join(setParts, ", "))
 	sql, args = addUIDFilter(sql, args, uid)
-	res, err := r.pool.Exec(ctx, sql, args...)
+	res, err := r.pool.ExecContext(ctx, sql, args...)
 	if err != nil {
 		return false, fmt.Errorf("UpdateMetadata: %w", err)
 	}
-	return res.RowsAffected() > 0, nil
+	return rowsAffectedOrZero(res) > 0, nil
 }
 
 // DeleteByMetadataID deletes a media_items row and its media_blobs row.
@@ -369,7 +370,7 @@ func (r *ImageRepo) DeleteByMetadataID(ctx context.Context, id int64) (bool, err
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
 	var blobID int64
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&blobID)
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(&blobID)
 	if err != nil {
 		if isNoRows(err) {
 			return false, nil
@@ -379,11 +380,11 @@ func (r *ImageRepo) DeleteByMetadataID(ctx context.Context, id int64) (bool, err
 	dq := `DELETE FROM media_items WHERE id = $1`
 	dargs := []any{id}
 	dq, dargs = addUIDFilter(dq, dargs, uid)
-	_, err = r.pool.Exec(ctx, dq, dargs...)
+	_, err = r.pool.ExecContext(ctx, dq, dargs...)
 	if err != nil {
 		return false, fmt.Errorf("DeleteByMetadataID: %w", err)
 	}
-	_, _ = r.pool.Exec(ctx, `DELETE FROM media_blobs WHERE id = $1`, blobID)
+	_, _ = r.pool.ExecContext(ctx, `DELETE FROM media_blobs WHERE id = $1`, blobID)
 	return true, nil
 }
 
@@ -422,7 +423,7 @@ func (r *ImageRepo) DeleteByIDRange(ctx context.Context, all bool, startID, endI
 	}
 	q := `SELECT id, media_blob_id FROM media_items WHERE ` + cond
 	q, args = addUIDFilter(q, args, uid)
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return 0, fmt.Errorf("DeleteByIDRange: %w", err)
 	}
@@ -439,11 +440,15 @@ func (r *ImageRepo) DeleteByIDRange(ctx context.Context, all bool, startID, endI
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	_, err = r.pool.Exec(ctx, `DELETE FROM media_items WHERE id = ANY($1)`, ids)
+	miCond, miArgs, _ := sqlutil.Int64IN("id", ids, 1)
+	delMI := fmt.Sprintf(`DELETE FROM media_items WHERE %s`, miCond)
+	_, err = r.pool.ExecContext(ctx, delMI, miArgs...)
 	if err != nil {
 		return 0, fmt.Errorf("DeleteByIDRange: %w", err)
 	}
-	_, err = r.pool.Exec(ctx, `DELETE FROM media_blobs WHERE id = ANY($1)`, blobIDs)
+	mbCond, mbArgs, _ := sqlutil.Int64IN("id", blobIDs, 1)
+	delMB := fmt.Sprintf(`DELETE FROM media_blobs WHERE %s`, mbCond)
+	_, err = r.pool.ExecContext(ctx, delMB, mbArgs...)
 	if err != nil {
 		return 0, fmt.Errorf("DeleteByIDRange: %w", err)
 	}
@@ -464,7 +469,7 @@ func (r *ImageRepo) ListReferencedItems(ctx context.Context) ([]ReferencedItem, 
 	      WHERE is_referenced = TRUE AND source_reference IS NOT NULL AND source_reference != ''`
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListReferencedItems: %w", err)
 	}
@@ -483,21 +488,21 @@ func (r *ImageRepo) ListReferencedItems(ctx context.Context) ([]ReferencedItem, 
 // UpdateBlobImageDataAndClearReferenced updates media_blobs.image_data and sets media_items.is_referenced=false
 // in a single transaction so both updates are atomic.
 func (r *ImageRepo) UpdateBlobImageDataAndClearReferenced(ctx context.Context, itemID, blobID int64, data []byte) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("UpdateBlobImageDataAndClearReferenced begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	defer tx.Rollback() //nolint:errcheck
 
-	_, err = tx.Exec(ctx, `UPDATE media_blobs SET image_data = $2 WHERE id = $1`, blobID, data)
+	_, err = tx.ExecContext(ctx, `UPDATE media_blobs SET image_data = $2 WHERE id = $1`, blobID, data)
 	if err != nil {
 		return fmt.Errorf("UpdateBlobImageData: %w", err)
 	}
-	_, err = tx.Exec(ctx, `UPDATE media_items SET is_referenced = FALSE, updated_at = NOW() WHERE id = $1`, itemID)
+	_, err = tx.ExecContext(ctx, `UPDATE media_items SET is_referenced = FALSE, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, itemID)
 	if err != nil {
 		return fmt.Errorf("SetItemNotReferenced: %w", err)
 	}
-	return tx.Commit(ctx)
+	return tx.Commit()
 }
 
 // ExportItem holds fields needed for image export.
@@ -516,7 +521,7 @@ func (r *ImageRepo) ListMediaItemsForExport(ctx context.Context) ([]ExportItem, 
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY id"
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListMediaItemsForExport: %w", err)
 	}
@@ -535,7 +540,7 @@ func (r *ImageRepo) ListMediaItemsForExport(ctx context.Context) ([]ExportItem, 
 // GetBlobImageData returns image_data for a blob. Returns nil if not found or empty.
 func (r *ImageRepo) GetBlobImageData(ctx context.Context, blobID int64) ([]byte, error) {
 	var data []byte
-	err := r.pool.QueryRow(ctx, `SELECT image_data FROM media_blobs WHERE id = $1`, blobID).Scan(&data)
+	err := r.pool.QueryRowContext(ctx, `SELECT image_data FROM media_blobs WHERE id = $1`, blobID).Scan(&data)
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -561,7 +566,7 @@ func (r *ImageRepo) GetFacebookAlbums(ctx context.Context) ([]model.FacebookAlbu
 	q += `
 		GROUP BY fa.id, fa.name, fa.description, fa.cover_photo_uri
 		ORDER BY fa.name`
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetFacebookAlbums: %w", err)
 	}
@@ -588,7 +593,7 @@ func (r *ImageRepo) GetAlbumImages(ctx context.Context, albumID int64) ([]*model
 	args := []any{albumID}
 	q, args = addUIDFilterQualified(q, args, uid, "mi")
 	q += ` ORDER BY mi.created_at ASC`
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetAlbumImages: %w", err)
 	}
@@ -606,13 +611,13 @@ func (r *ImageRepo) GetAlbumImageByID(ctx context.Context, imageID int64) (*mode
 	args := []any{imageID}
 	q, args = addUIDFilterQualified(q, args, uid, "mi")
 	q += ` LIMIT 1`
-	row := r.pool.QueryRow(ctx, q, args...)
+	row := r.pool.QueryRowContext(ctx, q, args...)
 	return scanMediaItem(row)
 }
 
 // GetFacebookPostsParams holds optional filters for GetFacebookPosts.
 type GetFacebookPostsParams struct {
-	Search   string  // ILIKE on post_text and title
+	Search   string  // LIKE on post_text and title
 	PostIDs  []int64 // filter to these IDs
 	Page     int     // 1-based
 	PageSize int     // 1-200
@@ -634,7 +639,7 @@ func (r *ImageRepo) GetFacebookPosts(ctx context.Context, p GetFacebookPostsPara
 
 	baseQuery := `
 		SELECT fp.id, fp.timestamp, fp.title, fp.post_text, fp.external_url, fp.post_type,
-		       COUNT(DISTINCT pm.id)::int AS media_count
+		       CAST(COUNT(DISTINCT pm.id) AS INTEGER) AS media_count
 		FROM facebook_posts fp
 		LEFT JOIN post_media pm ON fp.id = pm.post_id
 		WHERE TRUE
@@ -645,14 +650,15 @@ func (r *ImageRepo) GetFacebookPosts(ctx context.Context, p GetFacebookPostsPara
 	argNum := 1
 
 	if p.Search != "" {
-		conds = append(conds, fmt.Sprintf("(fp.post_text ILIKE $%d OR fp.title ILIKE $%d)", argNum, argNum))
+		conds = append(conds, fmt.Sprintf("(fp.post_text LIKE $%d OR fp.title LIKE $%d)", argNum, argNum))
 		args = append(args, "%"+p.Search+"%")
 		argNum++
 	}
 	if len(p.PostIDs) > 0 {
-		conds = append(conds, fmt.Sprintf("fp.id = ANY($%d)", argNum))
-		args = append(args, p.PostIDs)
-		argNum++
+		inCond, inArgs, next := sqlutil.Int64IN("fp.id", p.PostIDs, argNum)
+		conds = append(conds, inCond)
+		args = append(args, inArgs...)
+		argNum = next
 	}
 
 	if len(conds) > 0 {
@@ -671,7 +677,7 @@ func (r *ImageRepo) GetFacebookPosts(ctx context.Context, p GetFacebookPostsPara
 	// Count total
 	countQuery := `SELECT COUNT(*) FROM (` + baseQuery + `) AS sub`
 	var total int
-	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+	if err := r.pool.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("GetFacebookPosts count: %w", err)
 	}
 
@@ -680,7 +686,7 @@ func (r *ImageRepo) GetFacebookPosts(ctx context.Context, p GetFacebookPostsPara
 	args = append(args, p.PageSize, offset)
 	pageQuery := baseQuery + fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(args)-1, len(args))
 
-	rows, err := r.pool.Query(ctx, pageQuery, args...)
+	rows, err := r.pool.QueryContext(ctx, pageQuery, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetFacebookPosts: %w", err)
 	}
@@ -719,7 +725,7 @@ func (r *ImageRepo) GetPostMediaByID(ctx context.Context, mediaID int64) (*model
 	args := []any{mediaID}
 	q, args = addUIDFilterQualified(q, args, uid, "mi")
 	q += ` LIMIT 1`
-	row := r.pool.QueryRow(ctx, q, args...)
+	row := r.pool.QueryRowContext(ctx, q, args...)
 	return scanMediaItem(row)
 }
 
@@ -733,7 +739,7 @@ func (r *ImageRepo) GetPostMedia(ctx context.Context, postID int64) ([]*model.Me
 	args := []any{postID}
 	q, args = addUIDFilterQualified(q, args, uid, "mi")
 	q += ` ORDER BY mi.created_at ASC`
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetPostMedia: %w", err)
 	}

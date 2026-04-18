@@ -2,19 +2,19 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // InterestRepo accesses the interests table.
 type InterestRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewInterestRepo creates an InterestRepo.
-func NewInterestRepo(pool *pgxpool.Pool) *InterestRepo {
+func NewInterestRepo(pool *sql.DB) *InterestRepo {
 	return &InterestRepo{pool: pool}
 }
 
@@ -34,7 +34,7 @@ func (r *InterestRepo) List(ctx context.Context) ([]*model.Interest, error) {
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY name"
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListInterests: %w", err)
 	}
@@ -56,7 +56,7 @@ func (r *InterestRepo) GetByID(ctx context.Context, id int64) (*model.Interest, 
 	q := `SELECT id, name, created_at, updated_at FROM interests WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	i, err := scanInterest(r.pool.QueryRow(ctx, q, args...))
+	i, err := scanInterest(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -72,7 +72,7 @@ func (r *InterestRepo) GetByName(ctx context.Context, name string) (*model.Inter
 	q := `SELECT id, name, created_at, updated_at FROM interests WHERE name = $1`
 	args := []any{name}
 	q, args = addUIDFilter(q, args, uid)
-	i, err := scanInterest(r.pool.QueryRow(ctx, q, args...))
+	i, err := scanInterest(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -89,14 +89,14 @@ func (r *InterestRepo) NameExistsExcluding(ctx context.Context, name string, exc
 	args := []any{name, excludeID}
 	q, args = addUIDFilter(q, args, uid)
 	var n int
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&n)
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(&n)
 	return n > 0, err
 }
 
 // Create inserts a new interest.
 func (r *InterestRepo) Create(ctx context.Context, name string) (*model.Interest, error) {
 	uid := uidFromCtx(ctx)
-	i, err := scanInterest(r.pool.QueryRow(ctx,
+	i, err := scanInterest(r.pool.QueryRowContext(ctx,
 		`INSERT INTO interests (name, user_id) VALUES ($1, $2)
 		 RETURNING id, name, created_at, updated_at`, name, uidVal(uid)))
 	if err != nil {
@@ -108,11 +108,11 @@ func (r *InterestRepo) Create(ctx context.Context, name string) (*model.Interest
 // Update modifies an interest name.
 func (r *InterestRepo) Update(ctx context.Context, id int64, name string) (*model.Interest, error) {
 	uid := uidFromCtx(ctx)
-	q := `UPDATE interests SET name=$1, updated_at=NOW() WHERE id=$2`
+	q := `UPDATE interests SET name=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2`
 	args := []any{name, id}
 	q, args = addUIDFilter(q, args, uid)
 	q += ` RETURNING id, name, created_at, updated_at`
-	i, err := scanInterest(r.pool.QueryRow(ctx, q, args...))
+	i, err := scanInterest(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -128,6 +128,6 @@ func (r *InterestRepo) Delete(ctx context.Context, id int64) error {
 	q := `DELETE FROM interests WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	_, err := r.pool.Exec(ctx, q, args...)
+	_, err := r.pool.ExecContext(ctx, q, args...)
 	return err
 }

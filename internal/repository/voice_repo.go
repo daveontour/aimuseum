@@ -2,19 +2,19 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // VoiceRepo accesses the custom_voices table.
 type VoiceRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewVoiceRepo creates a VoiceRepo.
-func NewVoiceRepo(pool *pgxpool.Pool) *VoiceRepo {
+func NewVoiceRepo(pool *sql.DB) *VoiceRepo {
 	return &VoiceRepo{pool: pool}
 }
 
@@ -37,7 +37,7 @@ func (r *VoiceRepo) List(ctx context.Context) ([]*model.CustomVoice, error) {
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY name"
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListVoices: %w", err)
 	}
@@ -59,7 +59,7 @@ func (r *VoiceRepo) GetByID(ctx context.Context, id int64) (*model.CustomVoice, 
 	q := `SELECT ` + voiceCols + ` FROM custom_voices WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	v, err := scanVoice(r.pool.QueryRow(ctx, q, args...))
+	v, err := scanVoice(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -75,7 +75,7 @@ func (r *VoiceRepo) GetByKey(ctx context.Context, key string) (*model.CustomVoic
 	q := `SELECT ` + voiceCols + ` FROM custom_voices WHERE key = $1`
 	args := []any{key}
 	q, args = addUIDFilter(q, args, uid)
-	v, err := scanVoice(r.pool.QueryRow(ctx, q, args...))
+	v, err := scanVoice(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -92,14 +92,14 @@ func (r *VoiceRepo) KeyExistsExcluding(ctx context.Context, key string, excludeI
 	args := []any{key, excludeID}
 	q, args = addUIDFilter(q, args, uid)
 	var n int
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&n)
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(&n)
 	return n > 0, err
 }
 
 // Create inserts a new custom voice.
 func (r *VoiceRepo) Create(ctx context.Context, key, name string, description *string, instructions string, creativity float64) (*model.CustomVoice, error) {
 	uid := uidFromCtx(ctx)
-	v, err := scanVoice(r.pool.QueryRow(ctx,
+	v, err := scanVoice(r.pool.QueryRowContext(ctx,
 		`INSERT INTO custom_voices (key, name, description, instructions, creativity, user_id)
 		 VALUES ($1,$2,$3,$4,$5,$6) RETURNING `+voiceCols,
 		key, name, description, instructions, creativity, uidVal(uid),
@@ -119,12 +119,12 @@ func (r *VoiceRepo) Update(ctx context.Context, id int64, key, name *string, des
 	      description  = COALESCE($3, description),
 	      instructions = COALESCE($4, instructions),
 	      creativity   = COALESCE($5, creativity),
-	      updated_at   = NOW()
+	      updated_at   = CURRENT_TIMESTAMP
 	      WHERE id = $6`
 	args := []any{key, name, description, instructions, creativity, id}
 	q, args = addUIDFilter(q, args, uid)
 	q += ` RETURNING ` + voiceCols
-	v, err := scanVoice(r.pool.QueryRow(ctx, q, args...))
+	v, err := scanVoice(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -140,6 +140,6 @@ func (r *VoiceRepo) Delete(ctx context.Context, id int64) error {
 	q := `DELETE FROM custom_voices WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	_, err := r.pool.Exec(ctx, q, args...)
+	_, err := r.pool.ExecContext(ctx, q, args...)
 	return err
 }

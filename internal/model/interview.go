@@ -2,24 +2,25 @@ package model
 
 import (
 	"strings"
-	"time"
+
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 // Interview is a row from the interviews table.
 type Interview struct {
-	ID            int64      `json:"id"`
-	Title         string     `json:"title"`
-	Style         string     `json:"style"`
-	Purpose       string     `json:"purpose"`
-	PurposeDetail string     `json:"purpose_detail,omitempty"`
-	State         string     `json:"state"`
-	Provider      string     `json:"provider,omitempty"`
-	Writeup       *string    `json:"writeup,omitempty"`
+	ID            int64   `json:"id"`
+	Title         string  `json:"title"`
+	Style         string  `json:"style"`
+	Purpose       string  `json:"purpose"`
+	PurposeDetail string  `json:"purpose_detail,omitempty"`
+	State         string  `json:"state"`
+	Provider      string  `json:"provider,omitempty"`
+	Writeup       *string `json:"writeup,omitempty"`
 	// HasWriteup is true when a non-empty writeup exists (set on list and detail responses).
-	HasWriteup bool `json:"has_writeup"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	LastTurnAt *time.Time `json:"last_turn_at,omitempty"`
+	HasWriteup bool       `json:"has_writeup"`
+	CreatedAt  sqlutil.DBTime     `json:"created_at"`
+	UpdatedAt  sqlutil.DBTime     `json:"updated_at"`
+	LastTurnAt sqlutil.NullDBTime `json:"last_turn_at,omitempty"`
 	TurnCount  int        `json:"turn_count,omitempty"`
 }
 
@@ -42,7 +43,7 @@ type InterviewTurn struct {
 	Question    string    `json:"question"`
 	Answer      *string   `json:"answer,omitempty"`
 	TurnNumber  int       `json:"turn_number"`
-	CreatedAt   time.Time `json:"created_at"`
+	CreatedAt   sqlutil.DBTime `json:"created_at"`
 }
 
 // StartInterviewRequest is the JSON body for POST /interview/start.
@@ -80,7 +81,7 @@ type EndInterviewResponse struct {
 
 // InterviewDetailResponse is the JSON response for GET /interview/{id}.
 type InterviewDetailResponse struct {
-	Interview *Interview      `json:"interview"`
+	Interview *Interview       `json:"interview"`
 	Turns     []*InterviewTurn `json:"turns"`
 }
 

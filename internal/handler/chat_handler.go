@@ -298,8 +298,8 @@ func conversationResponse(c *model.ChatConversation, turnCount int64) map[string
 		"last_message_at": nil,
 		"turn_count":      turnCount,
 	}
-	if c.LastMessageAt != nil {
-		m["last_message_at"] = c.LastMessageAt.Format("2006-01-02T15:04:05.999999")
+	if c.LastMessageAt.Valid {
+		m["last_message_at"] = c.LastMessageAt.Time.Format("2006-01-02T15:04:05.999999")
 	}
 	return m
 }

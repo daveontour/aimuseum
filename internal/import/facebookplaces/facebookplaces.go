@@ -2,6 +2,7 @@ package facebookplaces
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -11,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/daveontour/aimuseum/internal/importstorage"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const facebookSource = "facebook"
@@ -50,7 +50,7 @@ func ExtractPlacesFromData(data interface{}, placesList *[]map[string]interface{
 }
 
 // ImportFacebookPlacesFromFile imports places from a single Facebook posts JSON file.
-func ImportFacebookPlacesFromFile(ctx context.Context, pool *pgxpool.Pool, filePath string) (*ImportStats, error) {
+func ImportFacebookPlacesFromFile(ctx context.Context, pool *sql.DB, filePath string) (*ImportStats, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
@@ -123,7 +123,7 @@ func ImportFacebookPlacesFromFile(ctx context.Context, pool *pgxpool.Pool, fileP
 }
 
 // ImportFacebookPlacesFromDirectory imports places from all JSON files in a directory.
-func ImportFacebookPlacesFromDirectory(ctx context.Context, pool *pgxpool.Pool, directoryPath string, progressCallback ProgressCallback, cancelledCheck CancelledCheck) (*ImportStats, error) {
+func ImportFacebookPlacesFromDirectory(ctx context.Context, pool *sql.DB, directoryPath string, progressCallback ProgressCallback, cancelledCheck CancelledCheck) (*ImportStats, error) {
 	var jsonFiles []string
 	err := filepath.WalkDir(directoryPath, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {

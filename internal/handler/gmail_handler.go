@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,8 +17,8 @@ import (
 	appgmail "github.com/daveontour/aimuseum/internal/gmail"
 	appimporter "github.com/daveontour/aimuseum/internal/importer"
 	"github.com/daveontour/aimuseum/internal/keystore"
+	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
 )
 
@@ -26,17 +27,21 @@ const gmailAttachmentSource = "gmail_attachment"
 
 // GmailHandler handles all /gmail/* routes.
 type GmailHandler struct {
-	pool         *pgxpool.Pool
+	pool         *sql.DB
 	oauthCfg     *oauth2.Config
 	job          *appimporter.ImportJob
 	sessionStore *keystore.SessionMasterStore
+	sensitiveSvc *service.SensitiveService
+	authSvc      *service.AuthService
 }
 
 // NewGmailHandler creates a GmailHandler.
-func NewGmailHandler(pool *pgxpool.Pool, clientID, clientSecret, redirectURL string, sessionStore *keystore.SessionMasterStore) *GmailHandler {
+func NewGmailHandler(pool *sql.DB, clientID, clientSecret, redirectURL string, sessionStore *keystore.SessionMasterStore, sensitiveSvc *service.SensitiveService, authSvc *service.AuthService) *GmailHandler {
 	return &GmailHandler{
 		pool:         pool,
 		sessionStore: sessionStore,
+		sensitiveSvc: sensitiveSvc,
+		authSvc:      authSvc,
 		oauthCfg:     appgmail.OAuthConfig(clientID, clientSecret, redirectURL),
 		job: appimporter.NewImportJob("Gmail import", map[string]any{
 			"status":              "idle",
@@ -77,7 +82,7 @@ func (h *GmailHandler) AuthStart(w http.ResponseWriter, r *http.Request) {
 	if !requireVisitorEmails(w, r) {
 		return
 	}
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	if h.oauthCfg.ClientID == "" || h.oauthCfg.ClientSecret == "" {
@@ -107,7 +112,7 @@ func (h *GmailHandler) AuthCallback(w http.ResponseWriter, r *http.Request) {
 	if !requireVisitorEmails(w, r) {
 		return
 	}
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	ctx := r.Context()
@@ -170,7 +175,7 @@ func (h *GmailHandler) AuthRevoke(w http.ResponseWriter, r *http.Request) {
 	if !requireVisitorEmails(w, r) {
 		return
 	}
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	if err := appgmail.DeleteToken(r.Context(), h.pool); err != nil {
@@ -233,7 +238,7 @@ func (h *GmailHandler) StartProcess(w http.ResponseWriter, r *http.Request) {
 	if !requireVisitorEmails(w, r) {
 		return
 	}
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	if err := h.job.AssertNotRunning(); err != nil {
@@ -331,7 +336,7 @@ func (h *GmailHandler) CancelProcess(w http.ResponseWriter, r *http.Request) {
 	if !requireVisitorEmails(w, r) {
 		return
 	}
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	writeJSON(w, h.job.Cancel())
@@ -392,8 +397,8 @@ func (h *GmailHandler) runGmailImport(ctx context.Context, tok *oauth2.Token, la
 		if uid != 0 {
 			uidArg = uid
 		}
-		rows, err := h.pool.Query(ctx,
-			`SELECT uid FROM emails WHERE user_id = $1 OR ($1::bigint IS NULL AND user_id IS NULL)`,
+		rows, err := h.pool.QueryContext(ctx,
+			`SELECT uid FROM emails WHERE user_id = $1 OR ($1 IS NULL AND user_id IS NULL)`,
 			uidArg)
 		if err == nil {
 			defer rows.Close()
@@ -549,14 +554,14 @@ func (h *GmailHandler) storeGmailEmail(ctx context.Context, msg *appgmail.Messag
 		userIDVal = userID
 	}
 
-	tx, err := h.pool.Begin(ctx)
+	tx, err := h.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	var emailID int64
-	err = tx.QueryRow(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		INSERT INTO emails (uid, folder, subject, from_address, to_addresses,
 		                    date, raw_message, plain_text, snippet, has_attachments,
 		                    user_deleted, is_personal, is_business, is_social, is_promotional,
@@ -567,7 +572,7 @@ func (h *GmailHandler) storeGmailEmail(ctx context.Context, msg *appgmail.Messag
 			date=EXCLUDED.date, raw_message=EXCLUDED.raw_message, plain_text=EXCLUDED.plain_text, snippet=EXCLUDED.snippet,
 			has_attachments=EXCLUDED.has_attachments,
 			source=EXCLUDED.source,
-			updated_at=NOW()
+			updated_at=CURRENT_TIMESTAMP
 		RETURNING id`,
 		uid, folder, subject, fromAddr, toAddr,
 		date, rawMessage, plainText, snippet, hasAttach, userIDVal,
@@ -578,7 +583,7 @@ func (h *GmailHandler) storeGmailEmail(ctx context.Context, msg *appgmail.Messag
 
 	ref := fmt.Sprintf("%d", emailID)
 	// Remove prior Gmail rows and any legacy rows wrongly tagged email_attachment for this email (same emails.id).
-	if _, err = tx.Exec(ctx, `DELETE FROM media_items WHERE source_reference = $1 AND source IN ($2, $3)`, ref, gmailAttachmentSource, "email_attachment"); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM media_items WHERE source_reference = $1 AND source IN ($2, $3)`, ref, gmailAttachmentSource, "email_attachment"); err != nil {
 		return err
 	}
 
@@ -596,10 +601,10 @@ func (h *GmailHandler) storeGmailEmail(ctx context.Context, msg *appgmail.Messag
 			mt = mt[:255]
 		}
 		var blobID int64
-		if err = tx.QueryRow(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, NULL, $2) RETURNING id`, att.Data, userIDVal).Scan(&blobID); err != nil {
+		if err = tx.QueryRowContext(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, NULL, $2) RETURNING id`, att.Data, userIDVal).Scan(&blobID); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `
+		if _, err = tx.ExecContext(ctx, `
 			INSERT INTO media_items (
 				media_blob_id, title, media_type, source, source_reference, user_id,
 				processed, available_for_task, rating, has_gps, is_referenced,
@@ -612,5 +617,5 @@ func (h *GmailHandler) storeGmailEmail(ctx context.Context, msg *appgmail.Messag
 		}
 	}
 
-	return tx.Commit(ctx)
+	return tx.Commit()
 }

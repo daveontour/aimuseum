@@ -296,9 +296,12 @@ func (s *AuthService) CreateVisitorKeySession(ctx context.Context, ownerUserID i
 // ── Admin bootstrapping ──────────────────────────────────────────────────────
 
 // EnsureAdminUser creates an admin user from env-var credentials if no admin
-// exists yet.  It is idempotent — safe to call on every startup.
-// Once the row exists in the database the env vars are no longer consulted.
+// exists yet. It is idempotent — safe to call on every startup.
+// If the admin email is already registered without the admin flag (e.g. a prior
+// normal signup), that user is promoted to admin; password is unchanged.
+// Once an admin row exists, env vars are not used to alter existing users.
 func (s *AuthService) EnsureAdminUser(ctx context.Context, email, password string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" || password == "" {
 		return nil
 	}
@@ -307,6 +310,16 @@ func (s *AuthService) EnsureAdminUser(ctx context.Context, email, password strin
 		return fmt.Errorf("check admin exists: %w", err)
 	}
 	if exists {
+		return nil
+	}
+	// Same email may already exist without is_admin — promote instead of INSERT.
+	if u, ferr := s.users.FindByEmail(ctx, email); ferr != nil {
+		return fmt.Errorf("look up admin email: %w", ferr)
+	} else if u != nil {
+		if err := s.users.SetIsAdmin(ctx, u.ID, true); err != nil {
+			return fmt.Errorf("promote existing user to admin: %w", err)
+		}
+		slog.Info("existing user promoted to admin", "email", email)
 		return nil
 	}
 	if len(password) < minPasswordLength {

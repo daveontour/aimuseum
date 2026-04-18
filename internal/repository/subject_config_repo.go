@@ -2,51 +2,50 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // SubjectConfigRepo reads the singleton subject_configuration table.
 type SubjectConfigRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewSubjectConfigRepo creates a SubjectConfigRepo.
-func NewSubjectConfigRepo(pool *pgxpool.Pool) *SubjectConfigRepo {
+func NewSubjectConfigRepo(pool *sql.DB) *SubjectConfigRepo {
 	return &SubjectConfigRepo{pool: pool}
 }
 
 // UpdateWritingStyleAI sets the writing_style_ai field on the first config row.
 func (r *SubjectConfigRepo) UpdateWritingStyleAI(ctx context.Context, summary string) error {
 	uid := uidFromCtx(ctx)
-	q := `UPDATE subject_configuration SET writing_style_ai = $1, updated_at = NOW()
+	q := `UPDATE subject_configuration SET writing_style_ai = ?, updated_at = CURRENT_TIMESTAMP
 	      WHERE id = (SELECT id FROM subject_configuration WHERE TRUE`
 	args := []any{summary}
 	if uid > 0 {
 		args = append(args, uid)
-		q += fmt.Sprintf(" AND user_id = $%d", len(args))
+		q += " AND user_id = ?"
 	}
 	q += " LIMIT 1)"
-	_, err := r.pool.Exec(ctx, q, args...)
+	_, err := r.pool.ExecContext(ctx, q, args...)
 	return err
 }
 
 // UpdatePsychologicalProfileAI sets the psychological_profile_ai field on the first config row.
 func (r *SubjectConfigRepo) UpdatePsychologicalProfileAI(ctx context.Context, profile string) error {
 	uid := uidFromCtx(ctx)
-	q := `UPDATE subject_configuration SET psychological_profile_ai = $1, updated_at = NOW()
+	q := `UPDATE subject_configuration SET psychological_profile_ai = ?, updated_at = CURRENT_TIMESTAMP
 	      WHERE id = (SELECT id FROM subject_configuration WHERE TRUE`
 	args := []any{profile}
 	if uid > 0 {
 		args = append(args, uid)
-		q += fmt.Sprintf(" AND user_id = $%d", len(args))
+		q += " AND user_id = ?"
 	}
 	q += " LIMIT 1)"
-	_, err := r.pool.Exec(ctx, q, args...)
+	_, err := r.pool.ExecContext(ctx, q, args...)
 	return err
 }
 
@@ -77,19 +76,19 @@ func (r *SubjectConfigRepo) Upsert(ctx context.Context, p UpsertSubjectConfigPar
 	q, args = addUIDFilter(q, args, uid)
 	q += " LIMIT 1"
 	var id int64
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&id)
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(&id)
 	noRow := isNoRows(err)
 	if err != nil && !noRow {
 		return nil, fmt.Errorf("Upsert check: %w", err)
 	}
 
 	if noRow {
-		err = r.pool.QueryRow(ctx, `
+		err = r.pool.QueryRowContext(ctx, `
 			INSERT INTO subject_configuration
 				(subject_name, gender,
 				 family_name, other_names, email_addresses, phone_numbers,
 				 whatsapp_handle, instagram_handle, user_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			VALUES (?,?,?,?,?,?,?,?,?)
 			RETURNING id`,
 			p.SubjectName, gender,
 			p.FamilyName, p.OtherNames, p.EmailAddresses,
@@ -100,15 +99,13 @@ func (r *SubjectConfigRepo) Upsert(ctx context.Context, p UpsertSubjectConfigPar
 		}
 	} else {
 		// Always update the required fields; only overwrite optional fields when provided.
-		set := []string{"subject_name = $1", "gender = $2", "updated_at = NOW()"}
+		set := []string{"subject_name = ?", "gender = ?", "updated_at = CURRENT_TIMESTAMP"}
 		args := []any{p.SubjectName, gender}
-		idx := 3
 
 		addOpt := func(col string, v *string) {
 			if v != nil {
-				set = append(set, fmt.Sprintf("%s = $%d", col, idx))
+				set = append(set, col+" = ?")
 				args = append(args, *v)
-				idx++
 			}
 		}
 		addOpt("family_name", p.FamilyName)
@@ -119,8 +116,8 @@ func (r *SubjectConfigRepo) Upsert(ctx context.Context, p UpsertSubjectConfigPar
 		addOpt("instagram_handle", p.InstagramHandle)
 
 		args = append(args, id)
-		_, err = r.pool.Exec(ctx,
-			fmt.Sprintf(`UPDATE subject_configuration SET %s WHERE id = $%d`, strings.Join(set, ", "), idx),
+		_, err = r.pool.ExecContext(ctx,
+			fmt.Sprintf(`UPDATE subject_configuration SET %s WHERE id = ?`, strings.Join(set, ", ")),
 			args...)
 		if err != nil {
 			return nil, fmt.Errorf("Upsert update: %w", err)
@@ -145,7 +142,7 @@ func (r *SubjectConfigRepo) GetFirst(ctx context.Context) (*model.SubjectConfig,
 	q, args = addUIDFilter(q, args, uid)
 	q += " LIMIT 1"
 
-	row := r.pool.QueryRow(ctx, q, args...)
+	row := r.pool.QueryRowContext(ctx, q, args...)
 
 	cfg := &model.SubjectConfig{}
 	err := row.Scan(
@@ -168,9 +165,9 @@ func (r *SubjectConfigRepo) GetFirst(ctx context.Context) (*model.SubjectConfig,
 // found=false means no row matched. found=true with userID=0 means the row exists
 // but has no user_id (legacy single-tenant row).
 func (r *SubjectConfigRepo) FindUserIDBySubjectName(ctx context.Context, name string) (int64, bool, error) {
-	var uid pgtype.Int8
-	err := r.pool.QueryRow(ctx,
-		`SELECT user_id FROM subject_configuration WHERE LOWER(subject_name) = LOWER($1) LIMIT 1`,
+	var uid sql.NullInt64
+	err := r.pool.QueryRowContext(ctx,
+		`SELECT user_id FROM subject_configuration WHERE LOWER(subject_name) = LOWER(?) LIMIT 1`,
 		name).Scan(&uid)
 	if isNoRows(err) {
 		return 0, false, nil

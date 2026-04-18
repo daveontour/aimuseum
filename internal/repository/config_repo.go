@@ -2,20 +2,20 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ConfigRepo accesses the app_configuration table.
 type ConfigRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewConfigRepo creates a ConfigRepo.
-func NewConfigRepo(pool *pgxpool.Pool) *ConfigRepo {
+func NewConfigRepo(pool *sql.DB) *ConfigRepo {
 	return &ConfigRepo{pool: pool}
 }
 
@@ -61,7 +61,7 @@ func (r *ConfigRepo) List(ctx context.Context) ([]*model.AppConfiguration, error
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY key"
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListConfig: %w", err)
 	}
@@ -100,14 +100,14 @@ func (r *ConfigRepo) Upsert(ctx context.Context, key string, value *string, isMa
 		description = defDesc
 	}
 
-	c, err := scanConfig(r.pool.QueryRow(ctx,
+	c, err := scanConfig(r.pool.QueryRowContext(ctx,
 		`INSERT INTO app_configuration (key, value, is_mandatory, description, user_id)
 		 VALUES ($1, $2, $3, $4, $5)
 		 ON CONFLICT (key) DO UPDATE SET
 		   value        = EXCLUDED.value,
 		   is_mandatory = COALESCE(EXCLUDED.is_mandatory, app_configuration.is_mandatory),
 		   description  = COALESCE(EXCLUDED.description, app_configuration.description),
-		   updated_at   = NOW()
+		   updated_at   = CURRENT_TIMESTAMP
 		 RETURNING `+configCols,
 		key, value, isMandatory, description, uidVal(uid),
 	))
@@ -123,11 +123,11 @@ func (r *ConfigRepo) Delete(ctx context.Context, key string) (bool, error) {
 	q := `DELETE FROM app_configuration WHERE key = $1`
 	args := []any{key}
 	q, args = addUIDFilter(q, args, uid)
-	tag, err := r.pool.Exec(ctx, q, args...)
+	tag, err := r.pool.ExecContext(ctx, q, args...)
 	if err != nil {
 		return false, err
 	}
-	return tag.RowsAffected() > 0, nil
+	return rowsAffectedOrZero(tag) > 0, nil
 }
 
 // SeedFromEnv inserts KNOWN_KEYS not yet in the DB, using env values or documented defaults.
@@ -138,7 +138,7 @@ func (r *ConfigRepo) SeedFromEnv(ctx context.Context) (int, error) {
 	q := `SELECT key, description FROM app_configuration WHERE TRUE`
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -166,7 +166,7 @@ func (r *ConfigRepo) SeedFromEnv(ctx context.Context) (int, error) {
 				uq := `UPDATE app_configuration SET description=$1 WHERE key=$2 AND description IS NULL`
 				uargs := []any{kk.Description, kk.Key}
 				uq, uargs = addUIDFilter(uq, uargs, uid)
-				_, err := r.pool.Exec(ctx, uq, uargs...)
+				_, err := r.pool.ExecContext(ctx, uq, uargs...)
 				if err != nil {
 					return inserted, err
 				}
@@ -181,7 +181,7 @@ func (r *ConfigRepo) SeedFromEnv(ctx context.Context) (int, error) {
 			value = kk.EnvDefault
 		}
 		desc := kk.Description
-		_, err := r.pool.Exec(ctx,
+		_, err := r.pool.ExecContext(ctx,
 			`INSERT INTO app_configuration (key, value, is_mandatory, description, user_id)
 			 VALUES ($1, $2, $3, $4, $5)
 			 ON CONFLICT (key) DO NOTHING`,

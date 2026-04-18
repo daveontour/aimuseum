@@ -1,15 +1,15 @@
 package model
 
-import "time"
+import "github.com/daveontour/aimuseum/internal/sqlutil"
 
 // ChatConversation is a row from chat_conversations.
 type ChatConversation struct {
 	ID            int64
 	Title         string
 	Voice         string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	LastMessageAt *time.Time
+	CreatedAt     sqlutil.DBTime
+	UpdatedAt     sqlutil.DBTime
+	LastMessageAt sqlutil.NullDBTime
 }
 
 // ChatTurn is a row from chat_turns.
@@ -21,7 +21,7 @@ type ChatTurn struct {
 	ResponseText   string
 	Voice          string
 	Temperature    float64
-	CreatedAt      time.Time
+	CreatedAt      sqlutil.DBTime
 }
 
 // ChatRequest is the JSON body for POST /chat/generate.

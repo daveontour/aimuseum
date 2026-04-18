@@ -2,10 +2,10 @@ package importstorage
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 const filesystemSource = "filesystem"
@@ -22,11 +22,11 @@ type BatchImageItem struct {
 
 // ImageStorage handles filesystem image storage operations for imports.
 type ImageStorage struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewImageStorage creates a new image storage instance
-func NewImageStorage(pool *pgxpool.Pool) *ImageStorage {
+func NewImageStorage(pool *sql.DB) *ImageStorage {
 	return &ImageStorage{pool: pool}
 }
 
@@ -35,11 +35,11 @@ func NewImageStorage(pool *pgxpool.Pool) *ImageStorage {
 func (s *ImageStorage) FilesystemMediaItemExists(ctx context.Context, sourceRef string) (bool, error) {
 	const q = `SELECT 1 FROM media_items WHERE source = $1 AND source_reference = $2 LIMIT 1`
 	var one int
-	err := s.pool.QueryRow(ctx, q, filesystemSource, sourceRef).Scan(&one)
+	err := s.pool.QueryRowContext(ctx, q, filesystemSource, sourceRef).Scan(&one)
 	if err == nil {
 		return true, nil
 	}
-	if err == pgx.ErrNoRows {
+	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	return false, err
@@ -51,49 +51,49 @@ func (s *ImageStorage) FilesystemMediaItemExists(ctx context.Context, sourceRef 
 func (s *ImageStorage) SaveImage(ctx context.Context, sourceRef string, imageData []byte, mediaType, title, tags string, isReferenced bool) (int64, bool, error) {
 	uid := uidFromCtx(ctx)
 
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
-	if _, err = tx.Exec(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
+	if _, err = tx.ExecContext(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
 		return 0, false, fmt.Errorf("failed to set synchronous_commit: %w", err)
 	}
 
 	var existingID int64
 	var existingBlobID int64
 	checkQuery := `SELECT id, media_blob_id FROM media_items WHERE source = $1 AND source_reference = $2 LIMIT 1`
-	err = tx.QueryRow(ctx, checkQuery, filesystemSource, sourceRef).Scan(&existingID, &existingBlobID)
+	err = tx.QueryRowContext(ctx, checkQuery, filesystemSource, sourceRef).Scan(&existingID, &existingBlobID)
 
 	if err == nil {
 		if !isReferenced {
-			updateBlobQuery := `UPDATE media_blobs SET image_data = $1, thumbnail_data = NULL, updated_at = NOW() WHERE id = $2`
-			_, err = tx.Exec(ctx, updateBlobQuery, imageData, existingBlobID)
+			updateBlobQuery := `UPDATE media_blobs SET image_data = $1, thumbnail_data = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $2`
+			_, err = tx.ExecContext(ctx, updateBlobQuery, imageData, existingBlobID)
 			if err != nil {
 				return 0, false, fmt.Errorf("failed to update media blob: %w", err)
 			}
 		}
 
-		updateMetaQuery := `UPDATE media_items SET title = $1, tags = $2, media_type = $3, is_referenced = $4, updated_at = NOW() WHERE id = $5`
-		_, err = tx.Exec(ctx, updateMetaQuery, title, nullIfEmpty(tags), nullIfEmpty(mediaType), isReferenced, existingID)
+		updateMetaQuery := `UPDATE media_items SET title = $1, tags = $2, media_type = $3, is_referenced = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5`
+		_, err = tx.ExecContext(ctx, updateMetaQuery, title, nullIfEmpty(tags), nullIfEmpty(mediaType), isReferenced, existingID)
 		if err != nil {
 			return 0, false, fmt.Errorf("failed to update media item: %w", err)
 		}
 
-		if err = tx.Commit(ctx); err != nil {
+		if err = tx.Commit(); err != nil {
 			return 0, false, fmt.Errorf("failed to commit: %w", err)
 		}
 		return existingID, true, nil
 	}
 
-	if err != pgx.ErrNoRows {
+	if err != sql.ErrNoRows {
 		return 0, false, fmt.Errorf("failed to check for existing image: %w", err)
 	}
 
 	var blobID int64
 	insertBlobQuery := `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`
-	err = tx.QueryRow(ctx, insertBlobQuery, imageData, nil, uidVal(uid)).Scan(&blobID)
+	err = tx.QueryRowContext(ctx, insertBlobQuery, imageData, nil, uidVal(uid)).Scan(&blobID)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to insert media blob: %w", err)
 	}
@@ -104,10 +104,10 @@ func (s *ImageStorage) SaveImage(ctx context.Context, sourceRef string, imageDat
 		media_type, year, month, latitude, longitude, altitude, has_gps,
 		processed, available_for_task, rating, is_personal, is_business,
 		is_social, is_promotional, is_spam, is_important, is_referenced, user_id, created_at, updated_at
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, NOW(), NOW())
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	RETURNING id`
 
-	err = tx.QueryRow(ctx, insertMetaQuery,
+	err = tx.QueryRowContext(ctx, insertMetaQuery,
 		blobID,
 		nullIfEmpty(tags),
 		filesystemSource,
@@ -125,7 +125,7 @@ func (s *ImageStorage) SaveImage(ctx context.Context, sourceRef string, imageDat
 		return 0, false, fmt.Errorf("failed to insert media item: %w", err)
 	}
 
-	if err = tx.Commit(ctx); err != nil {
+	if err = tx.Commit(); err != nil {
 		return 0, false, fmt.Errorf("failed to commit: %w", err)
 	}
 	return mediaItemID, false, nil
@@ -140,14 +140,16 @@ func (s *ImageStorage) SaveImagesBatch(ctx context.Context, items []BatchImageIt
 
 	uid := uidFromCtx(ctx)
 
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
-	if _, err = tx.Exec(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
-		return 0, 0, fmt.Errorf("failed to set synchronous_commit: %w", err)
+	if !sqlutil.IsSQLite(ctx, s.pool) {
+		if _, err = tx.ExecContext(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
+			return 0, 0, fmt.Errorf("failed to set synchronous_commit: %w", err)
+		}
 	}
 
 	sourceRefs := make([]string, len(items))
@@ -156,9 +158,12 @@ func (s *ImageStorage) SaveImagesBatch(ctx context.Context, items []BatchImageIt
 	}
 
 	existing := make(map[string]struct{ id, blobID int64 })
-	rows, err := tx.Query(ctx,
-		`SELECT source_reference, id, media_blob_id FROM media_items WHERE source = $1 AND source_reference = ANY($2)`,
-		filesystemSource, sourceRefs)
+	inCond, inArgs, _ := sqlutil.StringIN("source_reference", sourceRefs, 2)
+	batchQ := fmt.Sprintf(
+		`SELECT source_reference, id, media_blob_id FROM media_items WHERE source = $1 AND %s`,
+		inCond)
+	args := append([]any{filesystemSource}, inArgs...)
+	rows, err := tx.QueryContext(ctx, batchQ, args...)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to check existing images: %w", err)
 	}
@@ -179,13 +184,13 @@ func (s *ImageStorage) SaveImagesBatch(ctx context.Context, items []BatchImageIt
 	for _, item := range items {
 		if ex, ok := existing[item.SourceRef]; ok {
 			if !item.IsReferenced {
-				_, err = tx.Exec(ctx, `UPDATE media_blobs SET image_data = $1, thumbnail_data = NULL, updated_at = NOW() WHERE id = $2`,
+				_, err = tx.ExecContext(ctx, `UPDATE media_blobs SET image_data = $1, thumbnail_data = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
 					item.ImageData, ex.blobID)
 				if err != nil {
 					return 0, 0, fmt.Errorf("failed to update media blob for %s: %w", item.SourceRef, err)
 				}
 			}
-			_, err = tx.Exec(ctx, `UPDATE media_items SET title = $1, tags = $2, media_type = $3, is_referenced = $4, updated_at = NOW() WHERE id = $5`,
+			_, err = tx.ExecContext(ctx, `UPDATE media_items SET title = $1, tags = $2, media_type = $3, is_referenced = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5`,
 				nullIfEmpty(item.Title), nullIfEmpty(item.Tags), nullIfEmpty(item.MediaType), item.IsReferenced, ex.id)
 			if err != nil {
 				return 0, 0, fmt.Errorf("failed to update media item for %s: %w", item.SourceRef, err)
@@ -193,17 +198,17 @@ func (s *ImageStorage) SaveImagesBatch(ctx context.Context, items []BatchImageIt
 			updated++
 		} else {
 			var blobID int64
-			err = tx.QueryRow(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`,
+			err = tx.QueryRowContext(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, $2, $3) RETURNING id`,
 				item.ImageData, nil, uidVal(uid)).Scan(&blobID)
 			if err != nil {
 				return 0, 0, fmt.Errorf("failed to insert media blob for %s: %w", item.SourceRef, err)
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO media_items (
+			_, err = tx.ExecContext(ctx, `INSERT INTO media_items (
 				media_blob_id, tags, source, source_reference, title, description,
 				media_type, year, month, latitude, longitude, altitude, has_gps,
 				processed, available_for_task, rating, is_personal, is_business,
 				is_social, is_promotional, is_spam, is_important, is_referenced, user_id, created_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, NOW(), NOW())`,
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
 				blobID,
 				nullIfEmpty(item.Tags),
 				filesystemSource,
@@ -224,7 +229,7 @@ func (s *ImageStorage) SaveImagesBatch(ctx context.Context, items []BatchImageIt
 		}
 	}
 
-	if err = tx.Commit(ctx); err != nil {
+	if err = tx.Commit(); err != nil {
 		return 0, 0, fmt.Errorf("failed to commit: %w", err)
 	}
 	return imported, updated, nil

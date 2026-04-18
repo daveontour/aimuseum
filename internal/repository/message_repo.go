@@ -2,19 +2,20 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 // MessageRepo runs queries against the messages and message_attachments tables.
 type MessageRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewMessageRepo creates a MessageRepo backed by the given pool.
-func NewMessageRepo(pool *pgxpool.Pool) *MessageRepo {
+func NewMessageRepo(pool *sql.DB) *MessageRepo {
 	return &MessageRepo{pool: pool}
 }
 
@@ -29,8 +30,8 @@ func (r *MessageRepo) GetChatSessionRows(ctx context.Context) ([]model.ChatSessi
 		    COUNT(DISTINCT ma.id)                                                          AS attachment_count,
 		    MAX(m.service)                                                                 AS primary_service,
 		    MAX(m.message_date)                                                            AS last_message_date,
-		    COUNT(DISTINCT CASE WHEN m.service ILIKE '%iMessage%' THEN m.id END)          AS imessage_count,
-		    COUNT(DISTINCT CASE WHEN m.service ILIKE '%SMS%'      THEN m.id END)          AS sms_count,
+		    COUNT(DISTINCT CASE WHEN m.service LIKE '%iMessage%' THEN m.id END)          AS imessage_count,
+		    COUNT(DISTINCT CASE WHEN m.service LIKE '%SMS%'      THEN m.id END)          AS sms_count,
 		    COUNT(DISTINCT CASE WHEN m.service = 'WhatsApp'       THEN m.id END)          AS whatsapp_count,
 		    COUNT(DISTINCT CASE WHEN m.service = 'Facebook Messenger' THEN m.id END)      AS facebook_count,
 		    COUNT(DISTINCT CASE WHEN m.service = 'Instagram'      THEN m.id END)          AS instagram_count,
@@ -44,7 +45,7 @@ func (r *MessageRepo) GetChatSessionRows(ctx context.Context) ([]model.ChatSessi
 	q += `
 		GROUP BY m.chat_session
 		ORDER BY MAX(m.message_date) DESC`
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetChatSessionRows: %w", err)
 	}
@@ -85,7 +86,7 @@ func (r *MessageRepo) GetConversationMessages(ctx context.Context, chatSession s
 	args := []any{chatSession}
 	q, args = addUIDFilter(q, args, uid)
 	q += ` ORDER BY message_date ASC`
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetConversationMessages: %w", err)
 	}
@@ -102,16 +103,18 @@ func (r *MessageRepo) GetFirstAttachmentForMessages(ctx context.Context, message
 		return result, nil
 	}
 
-	// DISTINCT ON gives the first (lowest id) attachment per message
-	rows, err := r.pool.Query(ctx, `
-		SELECT DISTINCT ON (ma.message_id)
-		    ma.message_id,
-		    mi.title,
-		    mi.media_type
-		FROM message_attachments ma
-		JOIN media_items mi ON mi.id = ma.media_item_id
-		WHERE ma.message_id = ANY($1)
-		ORDER BY ma.message_id, ma.id ASC`, messageIDs)
+	inCond, inArgs, _ := sqlutil.Int64IN("ma.message_id", messageIDs, 1)
+	q := fmt.Sprintf(`
+		SELECT message_id, title, media_type FROM (
+			SELECT ma.message_id,
+			       mi.title,
+			       mi.media_type,
+			       ROW_NUMBER() OVER (PARTITION BY ma.message_id ORDER BY ma.id ASC) AS rn
+			FROM message_attachments ma
+			JOIN media_items mi ON mi.id = ma.media_item_id
+			WHERE %s
+		) t WHERE rn = 1`, inCond)
+	rows, err := r.pool.QueryContext(ctx, q, inArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("GetFirstAttachmentForMessages: %w", err)
 	}
@@ -139,7 +142,7 @@ func (r *MessageRepo) GetMessageByID(ctx context.Context, id int64) (*model.Mess
 		WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetMessageByID %d: %w", id, err)
 	}
@@ -160,7 +163,7 @@ func (r *MessageRepo) GetMessageByID(ctx context.Context, id int64) (*model.Mess
 func (r *MessageRepo) GetAttachmentMediaForMessage(ctx context.Context, messageID int64) (*model.MediaItem, *model.MediaBlob, error) {
 	// Get the first attachment record
 	var mediaItemID int64
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRowContext(ctx, `
 		SELECT media_item_id FROM message_attachments
 		WHERE message_id = $1
 		ORDER BY id ASC
@@ -174,7 +177,7 @@ func (r *MessageRepo) GetAttachmentMediaForMessage(ctx context.Context, messageI
 	}
 
 	// Get media_item
-	itemRows, err := r.pool.Query(ctx,
+	itemRows, err := r.pool.QueryContext(ctx,
 		`SELECT `+mediaItemColsForMessage+` FROM media_items WHERE id = $1`, mediaItemID)
 	if err != nil {
 		return nil, nil, err
@@ -189,7 +192,7 @@ func (r *MessageRepo) GetAttachmentMediaForMessage(ctx context.Context, messageI
 
 	// Get blob
 	blob := &model.MediaBlob{}
-	err = r.pool.QueryRow(ctx,
+	err = r.pool.QueryRowContext(ctx,
 		`SELECT id, image_data, thumbnail_data FROM media_blobs WHERE id = $1`, item.MediaBlobID,
 	).Scan(&blob.ID, &blob.ImageData, &blob.ThumbnailData)
 	if err != nil {
@@ -205,11 +208,11 @@ func (r *MessageRepo) GetAttachmentMediaForMessage(ctx context.Context, messageI
 // Returns the number of messages deleted.
 func (r *MessageRepo) DeleteBySession(ctx context.Context, chatSession string) (int64, error) {
 	uid := uidFromCtx(ctx)
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("DeleteBySession begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	defer tx.Rollback() //nolint:errcheck
 
 	q := `
 		DELETE FROM message_attachments
@@ -221,7 +224,7 @@ func (r *MessageRepo) DeleteBySession(ctx context.Context, chatSession string) (
 		q += fmt.Sprintf(" AND user_id = $%d", len(args))
 	}
 	q += ")"
-	_, err = tx.Exec(ctx, q, args...)
+	_, err = tx.ExecContext(ctx, q, args...)
 	if err != nil {
 		return 0, fmt.Errorf("DeleteBySession attachments: %w", err)
 	}
@@ -229,14 +232,14 @@ func (r *MessageRepo) DeleteBySession(ctx context.Context, chatSession string) (
 	dq := `DELETE FROM messages WHERE chat_session = $1`
 	dargs := []any{chatSession}
 	dq, dargs = addUIDFilter(dq, dargs, uid)
-	tag, err := tx.Exec(ctx, dq, dargs...)
+	tag, err := tx.ExecContext(ctx, dq, dargs...)
 	if err != nil {
 		return 0, fmt.Errorf("DeleteBySession messages: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("DeleteBySession commit: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	return rowsAffectedOrZero(tag), nil
 }
 
 // ── scanners ──────────────────────────────────────────────────────────────────

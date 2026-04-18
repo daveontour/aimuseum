@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"database/sql"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -21,8 +22,6 @@ import (
 	"github.com/daveontour/aimuseum/internal/appctx"
 	goImap "github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/encoding/htmlindex"
 )
@@ -96,7 +95,7 @@ func normalizeIMAPHostSource(host string) string {
 // ImportFolders imports emails from the given folders into the database.
 // cancelFn is polled for cancellation; progressFn is called with progress updates.
 // Returns the total number of emails stored.
-func ImportFolders(ctx context.Context, pool *pgxpool.Pool, p ConnParams, folders []string, newOnly bool, cancelFn func() bool, progressFn ProgressFunc) (int, error) {
+func ImportFolders(ctx context.Context, pool *sql.DB, p ConnParams, folders []string, newOnly bool, cancelFn func() bool, progressFn ProgressFunc) (int, error) {
 	c, err := Connect(p)
 	if err != nil {
 		return 0, err
@@ -125,7 +124,7 @@ func ImportFolders(ctx context.Context, pool *pgxpool.Pool, p ConnParams, folder
 }
 
 // importFolder fetches and stores all messages in one IMAP folder.
-func importFolder(ctx context.Context, c *client.Client, pool *pgxpool.Pool, folder string, newOnly bool, cancelFn func() bool, mailSource string) (int, error) {
+func importFolder(ctx context.Context, c *client.Client, pool *sql.DB, folder string, newOnly bool, cancelFn func() bool, mailSource string) (int, error) {
 	mbox, err := c.Select(folder, true /* readonly */)
 	if err != nil {
 		return 0, fmt.Errorf("select: %w", err)
@@ -167,7 +166,7 @@ func importFolder(ctx context.Context, c *client.Client, pool *pgxpool.Pool, fol
 }
 
 // storeEmail persists one IMAP message to the database.
-func storeEmail(ctx context.Context, pool *pgxpool.Pool, folder string, msg *goImap.Message, newOnly bool, mailSource string) error {
+func storeEmail(ctx context.Context, pool *sql.DB, folder string, msg *goImap.Message, newOnly bool, mailSource string) error {
 	if msg.Envelope == nil {
 		return nil
 	}
@@ -181,8 +180,8 @@ func storeEmail(ctx context.Context, pool *pgxpool.Pool, folder string, msg *goI
 
 	if newOnly {
 		var exists bool
-		_ = pool.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM emails WHERE uid=$1 AND folder=$2 AND (user_id=$3 OR ($3::bigint IS NULL AND user_id IS NULL)))`,
+		_ = pool.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM emails WHERE uid=$1 AND folder=$2 AND (user_id=$3 OR ($3 IS NULL AND user_id IS NULL)))`,
 			emailUID, folder, userIDVal,
 		).Scan(&exists)
 		if exists {
@@ -225,28 +224,28 @@ func storeEmail(ctx context.Context, pool *pgxpool.Pool, folder string, msg *goI
 		}
 	}
 
-	tx, err := pool.Begin(ctx)
+	tx, err := pool.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	// Manual check+insert/update to handle nullable user_id correctly
 	// (ON CONFLICT doesn't work with NULL columns in unique constraints).
 	var emailID int64
-	checkErr := tx.QueryRow(ctx,
-		`SELECT id FROM emails WHERE uid=$1 AND folder=$2 AND (user_id=$3 OR ($3::bigint IS NULL AND user_id IS NULL)) LIMIT 1`,
+	checkErr := tx.QueryRowContext(ctx,
+		`SELECT id FROM emails WHERE uid=$1 AND folder=$2 AND (user_id=$3 OR ($3 IS NULL AND user_id IS NULL)) LIMIT 1`,
 		emailUID, folder, userIDVal,
 	).Scan(&emailID)
 
 	if checkErr == nil {
 		// Update existing row.
-		_, err = tx.Exec(ctx, `
+		_, err = tx.ExecContext(ctx, `
 			UPDATE emails SET
 				subject=$1, from_address=$2, to_addresses=$3, cc_addresses=$4, bcc_addresses=$5,
 				date=$6, raw_message=$7, plain_text=$8, snippet=$9, has_attachments=$10,
 				source=$11,
-				updated_at=NOW()
+				updated_at=CURRENT_TIMESTAMP
 			WHERE id=$12`,
 			ensureUTF8(env.Subject), ensureUTF8(from), ensureUTF8(to), ensureUTF8(cc), ensureUTF8(bcc),
 			date, ptrEnsureUTF8(rawMsg), ptrEnsureUTF8(plainText), ptrEnsureUTF8(snippet), hasAttach,
@@ -256,9 +255,9 @@ func storeEmail(ctx context.Context, pool *pgxpool.Pool, folder string, msg *goI
 		if err != nil {
 			return err
 		}
-	} else if checkErr == pgx.ErrNoRows {
+	} else if checkErr == sql.ErrNoRows {
 		// Insert new row.
-		err = tx.QueryRow(ctx, `
+		err = tx.QueryRowContext(ctx, `
 			INSERT INTO emails (uid, folder, subject, from_address, to_addresses, cc_addresses, bcc_addresses,
 			                    date, raw_message, plain_text, snippet, has_attachments, user_id, source,
 			                    user_deleted, is_personal, is_business, is_social, is_promotional,
@@ -276,7 +275,7 @@ func storeEmail(ctx context.Context, pool *pgxpool.Pool, folder string, msg *goI
 	}
 
 	ref := fmt.Sprintf("%d", emailID)
-	if _, err = tx.Exec(ctx, `DELETE FROM media_items WHERE source = 'email_attachment' AND source_reference = $1`, ref); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM media_items WHERE source = 'email_attachment' AND source_reference = $1`, ref); err != nil {
 		return err
 	}
 
@@ -294,10 +293,10 @@ func storeEmail(ctx context.Context, pool *pgxpool.Pool, folder string, msg *goI
 			mt = mt[:255]
 		}
 		var blobID int64
-		if err = tx.QueryRow(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, NULL, $2) RETURNING id`, att.Data, userIDVal).Scan(&blobID); err != nil {
+		if err = tx.QueryRowContext(ctx, `INSERT INTO media_blobs (image_data, thumbnail_data, user_id) VALUES ($1, NULL, $2) RETURNING id`, att.Data, userIDVal).Scan(&blobID); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `
+		if _, err = tx.ExecContext(ctx, `
 			INSERT INTO media_items (
 				media_blob_id, title, media_type, source, source_reference, user_id,
 				processed, available_for_task, rating, has_gps, is_referenced,
@@ -310,7 +309,7 @@ func storeEmail(ctx context.Context, pool *pgxpool.Pool, folder string, msg *goI
 		}
 	}
 
-	return tx.Commit(ctx)
+	return tx.Commit()
 }
 
 func addrList(addrs []*goImap.Address) string {

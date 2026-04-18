@@ -2,14 +2,13 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 
 	"github.com/daveontour/aimuseum/internal/appctx"
 	appcrypto "github.com/daveontour/aimuseum/internal/crypto"
 	"github.com/daveontour/aimuseum/internal/repository"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // notFound is a sentinel returned by ResolveUserID when no matching archive exists.
@@ -21,7 +20,7 @@ type VisitorService struct {
 	users      *repository.UserRepo
 	subjectCfg *repository.SubjectConfigRepo
 	sensitive  *SensitiveService
-	pool       *pgxpool.Pool
+	pool       *sql.DB
 	pepper     string
 }
 
@@ -30,7 +29,7 @@ func NewVisitorService(
 	users *repository.UserRepo,
 	subjectCfg *repository.SubjectConfigRepo,
 	sensitive *SensitiveService,
-	pool *pgxpool.Pool,
+	pool *sql.DB,
 	pepper string,
 ) *VisitorService {
 	return &VisitorService{
@@ -134,8 +133,8 @@ func (s *VisitorService) ResolveVisitorKeyHintID(ctx context.Context, userID int
 		return 0, false, err
 	}
 	var hid int64
-	err = s.pool.QueryRow(dCtx, `SELECT id FROM visitor_key_hints WHERE keyring_id = $1`, krID).Scan(&hid)
-	if errors.Is(err, pgx.ErrNoRows) {
+	err = s.pool.QueryRowContext(dCtx, `SELECT id FROM visitor_key_hints WHERE keyring_id = ?`, krID).Scan(&hid)
+	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}
 	if err != nil {

@@ -1,6 +1,6 @@
 package contacts
 
-import "github.com/jackc/pgx/v5/pgxpool"
+import "database/sql"
 
 // InputRecord represents a contact record from input (JSON or database)
 type InputRecord struct {
@@ -58,8 +58,8 @@ type RunOptions struct {
 	ExclusionsFile      string
 	ClassificationsFile string // JSON file for rel_type mappings (applied after DB write)
 	RelationshipQuery   string
-	ContactsDB          *pgxpool.Pool // DB pool for contacts and relationships
-	ProgressFunc        func(string)  // called with status messages; if nil, writes to os.Stderr
+	ContactsDB          *sql.DB      // DB pool for contacts and relationships
+	ProgressFunc        func(string) // called with status messages; if nil, writes to os.Stderr
 	// OwnerUserID is the authenticated archive owner when running from the HTTP handler; rows are stamped for List filtering.
 	OwnerUserID int64
 }

@@ -2,10 +2,9 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // VisitorSessionLLMPolicy controls whether a visitor-key session may use the archive owner's
@@ -23,16 +22,16 @@ func (r *UserRepo) GetVisitorSessionLLMPolicy(ctx context.Context, sessionID str
 		return &VisitorSessionLLMPolicy{AllowOwnerKeys: true, AllowServerKeys: true}, nil
 	}
 	var ao, as bool
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(h.llm_allow_owner_keys, TRUE),
 			COALESCE(h.llm_allow_server_keys, TRUE)
 		FROM sessions s
 		LEFT JOIN visitor_key_hints h ON h.id = s.visitor_key_hint_id
-		WHERE s.id = $1 AND s.expires_at > NOW() AND s.is_visitor = TRUE`,
+		WHERE s.id = $1 AND s.expires_at > CURRENT_TIMESTAMP AND s.is_visitor = TRUE`,
 		sessionID,
 	).Scan(&ao, &as)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return &VisitorSessionLLMPolicy{AllowOwnerKeys: true, AllowServerKeys: true}, nil
 	}
 	if err != nil {
@@ -80,13 +79,13 @@ func (r *UserRepo) GetSessionVisitorLLM(ctx context.Context, sessionID string) (
 		return &UserLLMStored{}, nil
 	}
 	var raw []byte
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRowContext(ctx, `
 		SELECT visitor_llm_overrides
 		FROM sessions
-		WHERE id = $1 AND expires_at > NOW() AND is_visitor = TRUE`,
+		WHERE id = $1 AND expires_at > CURRENT_TIMESTAMP AND is_visitor = TRUE`,
 		sessionID,
 	).Scan(&raw)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return &UserLLMStored{}, nil
 	}
 	if err != nil {
@@ -118,16 +117,16 @@ func (r *UserRepo) PatchSessionVisitorLLM(ctx context.Context, sessionID string,
 	if err != nil {
 		return err
 	}
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := r.pool.ExecContext(ctx, `
 		UPDATE sessions
 		SET visitor_llm_overrides = $2::jsonb
-		WHERE id = $1 AND expires_at > NOW() AND is_visitor = TRUE`,
+		WHERE id = $1 AND expires_at > CURRENT_TIMESTAMP AND is_visitor = TRUE`,
 		sessionID, string(payload),
 	)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if rowsAffectedOrZero(tag) == 0 {
 		return ErrVisitorSessionLLMNotUpdated
 	}
 	return nil

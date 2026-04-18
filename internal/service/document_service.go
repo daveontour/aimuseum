@@ -2,13 +2,13 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
 	appcrypto "github.com/daveontour/aimuseum/internal/crypto"
 	"github.com/daveontour/aimuseum/internal/model"
 	"github.com/daveontour/aimuseum/internal/repository"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ErrPasswordRequired is returned when an encrypted document is requested without a password.
@@ -17,13 +17,13 @@ var ErrPasswordRequired = errors.New("password required to access encrypted docu
 // DocumentService orchestrates reference document operations.
 type DocumentService struct {
 	repo   *repository.DocumentRepo
-	pool   *pgxpool.Pool
+	pool   *sql.DB
 	pepper string
 }
 
 // NewDocumentService creates a DocumentService.
 // pepper is used for keyring key derivation (same pepper used by SensitiveService).
-func NewDocumentService(repo *repository.DocumentRepo, pool *pgxpool.Pool, pepper string) *DocumentService {
+func NewDocumentService(repo *repository.DocumentRepo, pool *sql.DB, pepper string) *DocumentService {
 	return &DocumentService{repo: repo, pool: pool, pepper: pepper}
 }
 

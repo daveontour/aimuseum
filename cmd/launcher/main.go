@@ -115,7 +115,7 @@ func startServices() {
 	log.Println("Starting PostgreSQL...")
 	if err := runCmd(pgCtl, "start",
 		"-D", dataDir,
-		"-o", "-p 5433 -c shared_buffers=128MB -c autovacuum_vacuum_cost_delay=20ms -c autovacuum_vacuum_cost_limit=200 -c log_checkpoints=off -c log_min_messages=warning",
+		"-o", "-p 5432 -c shared_buffers=128MB -c autovacuum_vacuum_cost_delay=20ms -c autovacuum_vacuum_cost_limit=200 -c log_checkpoints=off -c log_min_messages=warning",
 	); err != nil {
 		log.Printf("pg_ctl start failed: %v", err)
 	}
@@ -204,8 +204,8 @@ func pngToICO(pngData []byte) ([]byte, error) {
 	entry := make([]byte, 16)
 	entry[0] = wb
 	entry[1] = hb
-	entry[2] = 0 // color count (0 = no palette)
-	entry[3] = 0 // reserved
+	entry[2] = 0                                                   // color count (0 = no palette)
+	entry[3] = 0                                                   // reserved
 	binary.LittleEndian.PutUint16(entry[4:], 1)                    // planes
 	binary.LittleEndian.PutUint16(entry[6:], 32)                   // bit count
 	binary.LittleEndian.PutUint32(entry[8:], uint32(len(pngData))) // image size

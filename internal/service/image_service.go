@@ -334,8 +334,8 @@ func (s *ImageService) GetPostMedia(ctx context.Context, postID int64) ([]model.
 	result := make([]model.FacebookPostMediaItem, len(items))
 	for i, item := range items {
 		var createdAt *string
-		if item.CreatedAt != nil {
-			s := item.CreatedAt.Format("2006-01-02T15:04:05.999999")
+		if item.CreatedAt.Valid {
+			s := item.CreatedAt.Time.Format("2006-01-02T15:04:05.999999")
 			createdAt = &s
 		}
 		result[i] = model.FacebookPostMediaItem{
@@ -358,8 +358,8 @@ func (s *ImageService) GetAlbumImages(ctx context.Context, albumID int64) ([]mod
 	result := make([]model.AlbumImageItem, len(items))
 	for i, item := range items {
 		var createdAt *string
-		if item.CreatedAt != nil {
-			s := item.CreatedAt.Format("2006-01-02T15:04:05.999999")
+		if item.CreatedAt.Valid {
+			s := item.CreatedAt.Time.Format("2006-01-02T15:04:05.999999")
 			createdAt = &s
 		}
 		result[i] = model.AlbumImageItem{

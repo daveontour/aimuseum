@@ -42,13 +42,7 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := database.EnsureDatabase(ctx, cfg.DB); err != nil {
-		return fmt.Errorf("ensure database: %w", err)
-	}
 	billingCfg := cfg.DB.BillingConfig()
-	if err := database.EnsureDatabase(ctx, billingCfg); err != nil {
-		return fmt.Errorf("ensure billing database: %w", err)
-	}
 
 	db, err := database.New(ctx, cfg.DB)
 	if err != nil {
@@ -56,7 +50,7 @@ func run() error {
 	}
 	defer db.Close()
 
-	billingDB, err := database.New(ctx, billingCfg)
+	billingDB, err := database.NewBilling(ctx, billingCfg)
 	if err != nil {
 		return fmt.Errorf("connect to billing database: %w", err)
 	}
@@ -65,17 +59,17 @@ func run() error {
 	migrateCtx, migrateCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer migrateCancel()
 
-	if err := database.Migrate(migrateCtx, db.Pool); err != nil {
+	if err := database.MigrateSQLite(migrateCtx, db.Std); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
 	}
-	if err := database.MigratePamBot(migrateCtx, db.Pool); err != nil {
+	if err := database.MigratePamBot(migrateCtx, db.Std); err != nil {
 		return fmt.Errorf("run pam bot migrations: %w", err)
 	}
-	if err := database.MigrateBilling(migrateCtx, billingDB.Pool); err != nil {
+	if err := database.MigrateBilling(migrateCtx, billingDB.Std); err != nil {
 		return fmt.Errorf("run billing migrations: %w", err)
 	}
 
-	userRepo := repository.NewUserRepo(db.Pool)
+	userRepo := repository.NewUserRepo(db.Std)
 	if n, err := userRepo.DeleteAllSessions(migrateCtx); err != nil {
 		return fmt.Errorf("clear sessions on startup: %w", err)
 	} else if n > 0 {
@@ -87,21 +81,21 @@ func run() error {
 		return fmt.Errorf("ensure admin user: %w", err)
 	}
 
-	if err := database.SeedEmailExclusionsFromJSON(migrateCtx, db.Pool, "static/data/exclusions.json"); err != nil {
+	if err := database.SeedEmailExclusionsFromJSON(migrateCtx, db.Std, "static/data/exclusions.json"); err != nil {
 		return fmt.Errorf("seed email exclusions: %w", err)
 	}
-	if err := database.SeedEmailMatchesFromJSON(migrateCtx, db.Pool, "static/data/email_matches.json"); err != nil {
+	if err := database.SeedEmailMatchesFromJSON(migrateCtx, db.Std, "static/data/email_matches.json"); err != nil {
 		return fmt.Errorf("seed email matches: %w", err)
 	}
-	if err := database.SeedEmailClassificationsFromJSON(migrateCtx, db.Pool, "static/data/email_classifications.json"); err != nil {
+	if err := database.SeedEmailClassificationsFromJSON(migrateCtx, db.Std, "static/data/email_classifications.json"); err != nil {
 		return fmt.Errorf("seed email classifications: %w", err)
 	}
-	if err := database.SeedAppSystemInstructionsFromFiles(migrateCtx, db.Pool, "static"); err != nil {
+	if err := database.SeedAppSystemInstructionsFromFiles(migrateCtx, db.Std, "static"); err != nil {
 		return fmt.Errorf("seed app system instructions: %w", err)
 	}
 
 	// ── HTTP server ────────────────────────────────────────────────────────────
-	handler, err := router.New(db.Pool, billingDB.Pool, cfg)
+	handler, err := router.New(db.Std, billingDB.Std, cfg)
 	if err != nil {
 		return fmt.Errorf("router: %w", err)
 	}

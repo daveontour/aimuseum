@@ -26,30 +26,25 @@ type Config struct {
 	Upload      UploadConfig
 }
 
-// DatabaseConfig holds PostgreSQL connection settings.
+// DatabaseConfig holds SQLite file paths (single-user build).
 type DatabaseConfig struct {
-	Host     string
-	Port     int
-	Name     string
-	User     string
-	Password string
+	SQLitePath        string
+	BillingSQLitePath string
 }
 
-// ConnectionString returns the pgx DSN.
-func (d DatabaseConfig) ConnectionString() string {
-	return fmt.Sprintf("postgresql://%s:%s@%s:%d/%s", d.User, d.Password, d.Host, d.Port, d.Name)
-}
-
-// AdminConnectionString returns a DSN targeting the postgres admin database (used to create databases).
-func (d DatabaseConfig) AdminConnectionString() string {
-	return fmt.Sprintf("postgresql://%s:%s@%s:%d/postgres", d.User, d.Password, d.Host, d.Port)
-}
-
-// BillingConfig returns a copy of the config with database name set to "{Name}_billing" for LLM usage accounting.
+// BillingConfig returns a copy with a default billing DB path next to the main file when unset.
 func (d DatabaseConfig) BillingConfig() DatabaseConfig {
 	b := d
-	b.Name = d.Name + "_billing"
+	if b.BillingSQLitePath == "" && b.SQLitePath != "" {
+		b.BillingSQLitePath = filepath.Join(filepath.Dir(b.SQLitePath), "billing.sqlite")
+	}
 	return b
+}
+
+// SQLiteDSN builds a modernc.org/sqlite connection string for the main database.
+func (d DatabaseConfig) SQLiteDSN() string {
+	p := filepath.Clean(d.SQLitePath)
+	return "file:" + filepath.ToSlash(p) + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
 }
 
 // ServerConfig holds HTTP server settings.
@@ -234,37 +229,21 @@ func Load() (*Config, error) {
 }
 
 func loadCryptoConfig() (CryptoConfig, error) {
-	pepper := os.Getenv("KEYRING_PEPPER")
-	if strings.TrimSpace(pepper) == "" {
-		return CryptoConfig{}, fmt.Errorf("missing required variable: set KEYRING_PEPPER")
-	}
-	return CryptoConfig{KeyringPepper: pepper}, nil
+	// Encryption / keyring removed in SQLite single-user build; pepper unused.
+	return CryptoConfig{KeyringPepper: ""}, nil
 }
 
 func loadDatabaseConfig() (DatabaseConfig, error) {
-	host := os.Getenv("DB_HOST")
-	name := os.Getenv("DB_NAME")
-	user := os.Getenv("DB_USER")
-	password := os.Getenv("DB_PASSWORD")
-
-	if host == "" || name == "" || user == "" || password == "" {
-		return DatabaseConfig{}, fmt.Errorf(
-			"missing required variables: set DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD",
-		)
+	main := strings.TrimSpace(os.Getenv("SQLITE_PATH"))
+	if main == "" {
+		return DatabaseConfig{}, fmt.Errorf("missing SQLITE_PATH (path to main .sqlite file)")
 	}
-
-	port, err := parseInt(getenv("DB_PORT", "5432"), "DB_PORT")
-	if err != nil {
-		return DatabaseConfig{}, err
+	main = filepath.Clean(main)
+	billing := strings.TrimSpace(os.Getenv("BILLING_SQLITE_PATH"))
+	if billing != "" {
+		billing = filepath.Clean(billing)
 	}
-
-	return DatabaseConfig{
-		Host:     host,
-		Port:     port,
-		Name:     name,
-		User:     user,
-		Password: password,
-	}, nil
+	return DatabaseConfig{SQLitePath: main, BillingSQLitePath: billing}, nil
 }
 
 func loadDefaultsConfig() DefaultsConfig {

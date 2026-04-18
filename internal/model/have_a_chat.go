@@ -10,15 +10,15 @@ type HaveAChatTurn struct {
 type HaveAChatRequest struct {
 	SpeakingSlot string `json:"speaking_slot"` // "a" or "b" — which voice speaks this turn
 
-	VoiceA    string `json:"voice_a"`     // voice personality key for slot A
-	VoiceB    string `json:"voice_b"`     // voice personality key for slot B
-	ProviderA string `json:"provider_a"`  // "claude" or "gemini" — LLM that powers voice A
-	ProviderB string `json:"provider_b"`  // "claude" or "gemini" — LLM that powers voice B
+	VoiceA    string `json:"voice_a"`    // voice personality key for slot A
+	VoiceB    string `json:"voice_b"`    // voice personality key for slot B
+	ProviderA string `json:"provider_a"` // "claude" or "gemini" — LLM that powers voice A
+	ProviderB string `json:"provider_b"` // "claude" or "gemini" — LLM that powers voice B
 
-	Topic      string          `json:"topic"`
-	History    []HaveAChatTurn `json:"history"`
-	Temperature float64        `json:"temperature"`
-	BanterMode  bool           `json:"banter_mode"`
+	Topic       string          `json:"topic"`
+	History     []HaveAChatTurn `json:"history"`
+	Temperature float64         `json:"temperature"`
+	BanterMode  bool            `json:"banter_mode"`
 }
 
 // HaveAChatResponse is the JSON response for one LLM turn.

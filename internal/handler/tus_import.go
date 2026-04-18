@@ -43,8 +43,7 @@ func (h *UploadImportHandler) tusSessionOK(ev tusdhandler.HookEvent) bool {
 		return false
 	}
 	req := tusRequestFromHook(ev)
-	unlocked, master := h.sessionStore.SessionStatus(req)
-	return unlocked && master
+	return OwnerMasterUnlockOK(req, h.sessionStore, h.sensitiveSvc, h.authSvc)
 }
 
 func (h *UploadImportHandler) tusPreCreate(ev tusdhandler.HookEvent) (tusdhandler.HTTPResponse, tusdhandler.FileInfoChanges, error) {
@@ -172,13 +171,13 @@ func (h *UploadImportHandler) mountTUS(r chi.Router) error {
 	tusfilestore.New(h.uploadCfg.TUSUploadDir).UseIn(composer)
 
 	uh, err := tusdhandler.NewUnroutedHandler(tusdhandler.Config{
-		BasePath:                 "/import/tus/",
-		StoreComposer:            composer,
-		MaxSize:                  h.uploadCfg.MaxUploadBytes,
-		RespectForwardedHeaders:  true,
-		DisableDownload:          true,
-		DisableTermination:       false,
-		PreUploadCreateCallback:  h.tusPreCreate,
+		BasePath:                  "/import/tus/",
+		StoreComposer:             composer,
+		MaxSize:                   h.uploadCfg.MaxUploadBytes,
+		RespectForwardedHeaders:   true,
+		DisableDownload:           true,
+		DisableTermination:        false,
+		PreUploadCreateCallback:   h.tusPreCreate,
 		PreFinishResponseCallback: h.tusPreFinish,
 	})
 	if err != nil {

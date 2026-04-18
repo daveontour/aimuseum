@@ -2,31 +2,36 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
 
 	"github.com/daveontour/aimuseum/internal/appctx"
-	appimporter "github.com/daveontour/aimuseum/internal/importer"
 	imapimport "github.com/daveontour/aimuseum/internal/import/imap"
+	appimporter "github.com/daveontour/aimuseum/internal/importer"
 	"github.com/daveontour/aimuseum/internal/keystore"
+	"github.com/daveontour/aimuseum/internal/service"
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // IMAPHandler handles all /imap/* routes.
 type IMAPHandler struct {
-	pool         *pgxpool.Pool
+	pool         *sql.DB
 	job          *appimporter.ImportJob
 	sessionStore *keystore.SessionMasterStore
+	sensitiveSvc *service.SensitiveService
+	authSvc      *service.AuthService
 }
 
 // NewIMAPHandler creates an IMAPHandler.
-func NewIMAPHandler(pool *pgxpool.Pool, sessionStore *keystore.SessionMasterStore) *IMAPHandler {
+func NewIMAPHandler(pool *sql.DB, sessionStore *keystore.SessionMasterStore, sensitiveSvc *service.SensitiveService, authSvc *service.AuthService) *IMAPHandler {
 	return &IMAPHandler{
 		pool:         pool,
 		sessionStore: sessionStore,
+		sensitiveSvc: sensitiveSvc,
+		authSvc:      authSvc,
 		job: appimporter.NewImportJob("IMAP import", map[string]any{
 			"status":               "idle",
 			"status_line":          nil,
@@ -88,7 +93,7 @@ func (h *IMAPHandler) StartProcess(w http.ResponseWriter, r *http.Request) {
 	if !requireVisitorEmails(w, r) {
 		return
 	}
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	if err := h.job.AssertNotRunning(); err != nil {
@@ -166,7 +171,7 @@ func (h *IMAPHandler) CancelProcess(w http.ResponseWriter, r *http.Request) {
 	if !requireVisitorEmails(w, r) {
 		return
 	}
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	writeJSON(w, h.job.Cancel())

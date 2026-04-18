@@ -27,7 +27,7 @@ var commonNameVariations = map[string][]string{
 	"chris": {"christopher", "chris"}, "christopher": {"chris", "christopher"},
 	"elle": {"ellen", "ellen"}, "ellie": {"elle", "ellie"},
 	"emma": {"emily", "emma"}, "emily": {"emma", "emily"},
-	"ella": {"ellie", "ella"},
+	"ella":      {"ellie", "ella"},
 	"elizabeth": {"liz", "elizabeth"}, "liz": {"elizabeth", "liz"},
 	"sarah": {"sarah", "sarah"},
 }

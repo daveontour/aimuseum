@@ -15,11 +15,12 @@ import (
 type SessionHandler struct {
 	sensitiveSvc *service.SensitiveService
 	sessionStore *keystore.SessionMasterStore
+	authSvc      *service.AuthService
 }
 
 // NewSessionHandler constructs a SessionHandler.
-func NewSessionHandler(sensitiveSvc *service.SensitiveService, sessionStore *keystore.SessionMasterStore) *SessionHandler {
-	return &SessionHandler{sensitiveSvc: sensitiveSvc, sessionStore: sessionStore}
+func NewSessionHandler(sensitiveSvc *service.SensitiveService, sessionStore *keystore.SessionMasterStore, authSvc *service.AuthService) *SessionHandler {
+	return &SessionHandler{sensitiveSvc: sensitiveSvc, sessionStore: sessionStore, authSvc: authSvc}
 }
 
 // RegisterRoutes mounts /api/session/* routes.
@@ -58,15 +59,29 @@ func (h *SessionHandler) MasterKeyClear(w http.ResponseWriter, r *http.Request) 
 
 // MasterKeyStatus reports whether a keyring exists and whether this browser session has unlock material.
 // master_unlocked is true only when the owner master key was used (visitor seat unlock sets unlocked but not master_unlocked).
+// When no keyring exists (e.g. SQLite build without encryption tables), a logged-in archive owner is treated as
+// master_unlocked for UI gating — there is no key material to unlock.
 func (h *SessionHandler) MasterKeyStatus(w http.ResponseWriter, r *http.Request) {
 	n, err := h.sensitiveSvc.KeyCount(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("error reading keyring: %s", err))
 		return
 	}
+	keyringConfigured := n > 0
 	unlocked, masterUnlocked := h.sessionStore.SessionStatus(r)
+	if !keyringConfigured && h.authSvc != nil {
+		var sid string
+		if c, err := r.Cookie(service.AuthSessionCookieName); err == nil && c != nil {
+			sid = strings.TrimSpace(c.Value)
+		}
+		if sid != "" {
+			if auth, err := h.authSvc.Authenticate(r.Context(), sid); err == nil && auth != nil && auth.User != nil && !auth.IsVisitor {
+				masterUnlocked = true
+			}
+		}
+	}
 	writeJSON(w, map[string]any{
-		"keyring_configured": n > 0,
+		"keyring_configured": keyringConfigured,
 		"unlocked":           unlocked,
 		"master_unlocked":    masterUnlocked,
 	})

@@ -2,9 +2,8 @@ package contacts
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // EmailMatchSet represents a set of emails that are the same person
@@ -71,8 +70,8 @@ func buildTransitiveClosure(emailSets []EmailMatchSet) (map[string]string, map[s
 
 // LoadEmailMatchSets loads email match sets from the email_matches table,
 // grouping by name to build sets of emails that belong to the same person.
-func LoadEmailMatchSets(ctx context.Context, db *pgxpool.Pool) (map[string]string, map[string]string, error) {
-	rows, err := db.Query(ctx, "SELECT primary_name, email FROM email_matches ORDER BY primary_name")
+func LoadEmailMatchSets(ctx context.Context, db *sql.DB) (map[string]string, map[string]string, error) {
+	rows, err := db.QueryContext(ctx, "SELECT primary_name, email FROM email_matches ORDER BY primary_name")
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to query email_matches table: %w", err)
 	}

@@ -1,6 +1,6 @@
 package model
 
-import "time"
+import "github.com/daveontour/aimuseum/internal/sqlutil"
 
 // Contact is a row from the contacts table (short version for list responses).
 type Contact struct {
@@ -39,8 +39,8 @@ type EmailMatch struct {
 	ID          int64
 	PrimaryName string
 	Email       string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	CreatedAt   sqlutil.DBTime
+	UpdatedAt   sqlutil.DBTime
 }
 
 // EmailExclusion is a row from the email_exclusions table.
@@ -49,8 +49,8 @@ type EmailExclusion struct {
 	Email     string
 	Name      string
 	NameEmail bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	CreatedAt sqlutil.DBTime
+	UpdatedAt sqlutil.DBTime
 }
 
 // EmailClassification is a row from the email_classifications table.
@@ -58,8 +58,8 @@ type EmailClassification struct {
 	ID             int64
 	Name           string
 	Classification string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	CreatedAt      sqlutil.DBTime
+	UpdatedAt      sqlutil.DBTime
 }
 
 // AttachmentInfo holds an email_attachment media_items row joined to its parent email.
@@ -71,6 +71,6 @@ type AttachmentInfo struct {
 	EmailID      int64
 	EmailSubject *string
 	EmailFrom    *string
-	EmailDate    *time.Time
+	EmailDate    sqlutil.NullDBTime
 	EmailFolder  *string
 }

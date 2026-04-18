@@ -2,19 +2,19 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // SavedResponseRepo accesses the saved_responses table.
 type SavedResponseRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewSavedResponseRepo creates a SavedResponseRepo.
-func NewSavedResponseRepo(pool *pgxpool.Pool) *SavedResponseRepo {
+func NewSavedResponseRepo(pool *sql.DB) *SavedResponseRepo {
 	return &SavedResponseRepo{pool: pool}
 }
 
@@ -35,7 +35,7 @@ func (r *SavedResponseRepo) List(ctx context.Context) ([]*model.SavedResponse, e
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY created_at DESC"
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListSavedResponses: %w", err)
 	}
@@ -58,7 +58,7 @@ func (r *SavedResponseRepo) GetByID(ctx context.Context, id int64) (*model.Saved
 	      FROM saved_responses WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	s, err := scanSavedResponse(r.pool.QueryRow(ctx, q, args...))
+	s, err := scanSavedResponse(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -71,7 +71,7 @@ func (r *SavedResponseRepo) GetByID(ctx context.Context, id int64) (*model.Saved
 // Create inserts a new saved response.
 func (r *SavedResponseRepo) Create(ctx context.Context, title, content string, voice, llmProvider *string) (*model.SavedResponse, error) {
 	uid := uidFromCtx(ctx)
-	s, err := scanSavedResponse(r.pool.QueryRow(ctx,
+	s, err := scanSavedResponse(r.pool.QueryRowContext(ctx,
 		`INSERT INTO saved_responses (title, content, voice, llm_provider, user_id)
 		 VALUES ($1,$2,$3,$4,$5)
 		 RETURNING id, title, content, voice, llm_provider, created_at`,
@@ -95,7 +95,7 @@ func (r *SavedResponseRepo) Update(ctx context.Context, id int64, title, content
 	args := []any{title, content, voice, llmProvider, id}
 	q, args = addUIDFilter(q, args, uid)
 	q += ` RETURNING id, title, content, voice, llm_provider, created_at`
-	s, err := scanSavedResponse(r.pool.QueryRow(ctx, q, args...))
+	s, err := scanSavedResponse(r.pool.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		if isNoRows(err) {
 			return nil, nil
@@ -111,9 +111,9 @@ func (r *SavedResponseRepo) Delete(ctx context.Context, id int64) (bool, error) 
 	q := `DELETE FROM saved_responses WHERE id = $1`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	tag, err := r.pool.Exec(ctx, q, args...)
+	tag, err := r.pool.ExecContext(ctx, q, args...)
 	if err != nil {
 		return false, err
 	}
-	return tag.RowsAffected() > 0, nil
+	return rowsAffectedOrZero(tag) > 0, nil
 }

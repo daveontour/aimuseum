@@ -6,21 +6,22 @@ import (
 	"time"
 
 	"github.com/daveontour/aimuseum/internal/repository"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 func TestRenderLLMUsageBill_Minimal(t *testing.T) {
 	meta := BillMeta{
-		UserID:      1,
-		Email:       "a@example.com",
-		DisplayName: "Test User",
-		GeneratedAt: time.Date(2026, 3, 28, 12, 0, 0, 0, time.UTC),
+		UserID:       1,
+		Email:        "a@example.com",
+		DisplayName:  "Test User",
+		GeneratedAt:  time.Date(2026, 3, 28, 12, 0, 0, 0, time.UTC),
 		MaxEventRows: repository.DefaultListEventsAllMax,
 	}
 	sum := repository.LLMUsageSummary{TotalInputTokens: 10, TotalOutputTokens: 20, EventCount: 1}
 	events := []repository.LLMUsageEvent{
 		{
 			ID:           1,
-			CreatedAt:    meta.GeneratedAt,
+			CreatedAt:    sqlutil.DBTime{Time: meta.GeneratedAt},
 			Provider:     "gemini",
 			IsVisitor:    false,
 			InputTokens:  10,

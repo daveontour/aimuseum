@@ -99,9 +99,9 @@ func (h *AdminUsersHandler) GetAdminSystemInstructions(w http.ResponseWriter, r 
 		return
 	}
 	writeJSON(w, map[string]string{
-		"system_instructions":            ins.ChatInstructions,
-		"core_system_instructions":       ins.CoreInstructions,
-		"question_system_instructions":   ins.QuestionInstructions,
+		"system_instructions":          ins.ChatInstructions,
+		"core_system_instructions":     ins.CoreInstructions,
+		"question_system_instructions": ins.QuestionInstructions,
 	})
 }
 

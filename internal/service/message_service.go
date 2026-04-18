@@ -11,6 +11,7 @@ import (
 	appai "github.com/daveontour/aimuseum/internal/ai"
 	"github.com/daveontour/aimuseum/internal/model"
 	"github.com/daveontour/aimuseum/internal/repository"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 // MessageService coordinates message read and write operations.
@@ -115,10 +116,10 @@ func (s *MessageService) GetConversationMessages(ctx context.Context, chatSessio
 		result[i] = model.ConversationMessage{
 			ID:                 m.ID,
 			ChatSession:        m.ChatSession,
-			MessageDate:        isoString(m.MessageDate),
-			DeliveredDate:      isoString(m.DeliveredDate),
-			ReadDate:           isoString(m.ReadDate),
-			EditedDate:         isoString(m.EditedDate),
+			MessageDate:        isoNullTime(m.MessageDate),
+			DeliveredDate:      isoNullTime(m.DeliveredDate),
+			ReadDate:           isoNullTime(m.ReadDate),
+			EditedDate:         isoNullTime(m.EditedDate),
 			Service:            m.Service,
 			Type:               m.Type,
 			SenderID:           m.SenderID,
@@ -148,7 +149,7 @@ func (s *MessageService) GetMessageMetadata(ctx context.Context, id int64) (*mod
 	resp := &model.MessageMetadataResponse{
 		ID:          msg.ID,
 		ChatSession: msg.ChatSession,
-		MessageDate: isoString(msg.MessageDate),
+		MessageDate: isoNullTime(msg.MessageDate),
 		Service:     msg.Service,
 		Type:        msg.Type,
 		SenderID:    msg.SenderID,
@@ -231,8 +232,8 @@ func (s *MessageService) conversationTranscript(ctx context.Context, chatSession
 			sender = *m.SenderName
 		}
 		date := ""
-		if m.MessageDate != nil {
-			date = m.MessageDate.Format("2006-01-02 15:04")
+		if m.MessageDate.Valid {
+			date = m.MessageDate.Time.Format("2006-01-02 15:04")
 		}
 		text := ""
 		if m.Text != nil {
@@ -370,6 +371,14 @@ func isPhoneNumber(s string) bool {
 		}
 	}
 	return digitCount >= 7 && len(cleaned) <= 20
+}
+
+// isoNullTime formats a NullDBTime like isoString; returns nil when invalid.
+func isoNullTime(n sqlutil.NullDBTime) *string {
+	if !n.Valid {
+		return nil
+	}
+	return isoString(&n.Time)
 }
 
 // isoString formats a *time.Time as a Python-compatible isoformat string

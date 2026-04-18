@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -10,8 +11,7 @@ import (
 	appcrypto "github.com/daveontour/aimuseum/internal/crypto"
 	"github.com/daveontour/aimuseum/internal/model"
 	"github.com/daveontour/aimuseum/internal/repository"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 const redacted = "*****************"
@@ -20,13 +20,13 @@ const redacted = "*****************"
 // Sensitive records are stored as reference_documents with is_sensitive=TRUE.
 type SensitiveService struct {
 	docRepo *repository.DocumentRepo
-	pool    *pgxpool.Pool
+	pool    *sql.DB
 	pepper  string
 }
 
 // NewSensitiveService creates a SensitiveService backed by DocumentRepo.
 // pepper is ATTACHMENT_ALLOWED_TYPES from config (used for key derivation).
-func NewSensitiveService(docRepo *repository.DocumentRepo, pool *pgxpool.Pool, pepper string) *SensitiveService {
+func NewSensitiveService(docRepo *repository.DocumentRepo, pool *sql.DB, pepper string) *SensitiveService {
 	return &SensitiveService{docRepo: docRepo, pool: pool, pepper: pepper}
 }
 
@@ -44,14 +44,18 @@ func (s *SensitiveService) uidFilter(ctx context.Context, q string, args []any) 
 func (s *SensitiveService) Count(ctx context.Context) (int64, error) {
 	q, args := s.uidFilter(ctx, `SELECT COUNT(*) FROM reference_documents WHERE is_sensitive = TRUE`, nil)
 	var n int64
-	err := s.pool.QueryRow(ctx, q, args...).Scan(&n)
+	err := s.pool.QueryRowContext(ctx, q, args...).Scan(&n)
 	return n, err
 }
 
 // KeyCount returns the total number of sensitive_keyring seats for this user.
+// The SQLite single-user build omits the sensitive_keyring table; that is treated as zero seats.
 func (s *SensitiveService) KeyCount(ctx context.Context) (int64, error) {
 	var n int64
-	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sensitive_keyring`).Scan(&n)
+	err := s.pool.QueryRowContext(ctx, `SELECT COUNT(*) FROM sensitive_keyring`).Scan(&n)
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table") {
+		return 0, nil
+	}
 	return n, err
 }
 
@@ -164,22 +168,22 @@ func (s *SensitiveService) AddUser(ctx context.Context, userPassword, masterPass
 	if len(hint) > maxVisitorKeyHintLen {
 		return fmt.Errorf("hint exceeds %d characters", maxVisitorKeyHintLen)
 	}
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 	keyringID, err := appcrypto.AddSensitiveKeyringSeatTx(ctx, tx, s.pool, userPassword, masterPassword, s.pepper)
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx,
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO visitor_key_hints (keyring_id, hint, can_messages_chat, can_emails, can_contacts, can_relationship_sensitive, can_sensitive_private, llm_allow_owner_keys, llm_allow_server_keys)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		keyringID, hint, flags.CanMessagesChat, flags.CanEmails, flags.CanContacts, flags.CanRelationships, flags.CanSensitivePrivate, flags.LLMAllowOwnerKeys, flags.LLMAllowServerKeys); err != nil {
 		return fmt.Errorf("save visitor hint: %w", err)
 	}
-	return tx.Commit(ctx)
+	return tx.Commit()
 }
 
 // ListVisitorKeyHints returns hints for non-master keyring seats for this user.
@@ -207,7 +211,7 @@ func (s *SensitiveService) ListVisitorKeyHints(ctx context.Context) ([]model.Vis
 			WHERE k.user_id IS NULL
 			ORDER BY h.created_at ASC`
 	}
-	rows, err := s.pool.Query(ctx, q, args...)
+	rows, err := s.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +248,7 @@ func (s *SensitiveService) ListOrphanVisitorKeyringIDs(ctx context.Context) ([]i
 			AND NOT EXISTS (SELECT 1 FROM visitor_key_hints h WHERE h.keyring_id = k.id)
 			ORDER BY k.id ASC`
 	}
-	rows, err := s.pool.Query(ctx, q, args...)
+	rows, err := s.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -273,17 +277,17 @@ func (s *SensitiveService) visitorHintOwnedByCtxUser(ctx context.Context, hintID
 	var exists bool
 	var err error
 	if uid > 0 {
-		err = s.pool.QueryRow(ctx, `
+		err = s.pool.QueryRowContext(ctx, `
 			SELECT TRUE FROM visitor_key_hints h
 			INNER JOIN sensitive_keyring k ON k.id = h.keyring_id AND k.is_master = FALSE
 			WHERE h.id = $1 AND k.user_id = $2`, hintID, uid).Scan(&exists)
 	} else {
-		err = s.pool.QueryRow(ctx, `
+		err = s.pool.QueryRowContext(ctx, `
 			SELECT TRUE FROM visitor_key_hints h
 			INNER JOIN sensitive_keyring k ON k.id = h.keyring_id AND k.is_master = FALSE
 			WHERE h.id = $1 AND k.user_id IS NULL`, hintID).Scan(&exists)
 	}
-	if err == pgx.ErrNoRows {
+	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	if err != nil {
@@ -328,7 +332,7 @@ func (s *SensitiveService) ListVisitorKeyReferenceDocPermissions(ctx context.Con
 			ORDER BY COALESCE(NULLIF(TRIM(d.title), ''), d.filename) ASC`
 		args = []any{hintID}
 	}
-	rows, err := s.pool.Query(ctx, q, args...)
+	rows, err := s.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -367,39 +371,39 @@ func (s *SensitiveService) ReplaceVisitorKeyHintReferenceDocuments(ctx context.C
 		uniq = append(uniq, id)
 	}
 	uid := appctx.UserIDFromCtx(ctx)
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `DELETE FROM visitor_key_hint_reference_documents WHERE visitor_key_hint_id = $1`, hintID); err != nil {
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM visitor_key_hint_reference_documents WHERE visitor_key_hint_id = $1`, hintID); err != nil {
 		return err
 	}
 	for _, docID := range uniq {
 		var inserted int64
 		if uid > 0 {
-			err = tx.QueryRow(ctx, `
+			err = tx.QueryRowContext(ctx, `
 				INSERT INTO visitor_key_hint_reference_documents (visitor_key_hint_id, reference_document_id, user_id)
-				SELECT $1, d.id, $3::bigint
+				SELECT $1, d.id, $3
 				FROM reference_documents d
 				WHERE d.id = $2 AND d.available_for_task = TRUE AND d.is_sensitive = FALSE AND d.user_id = $3
 				RETURNING reference_document_id`, hintID, docID, uid).Scan(&inserted)
 		} else {
-			err = tx.QueryRow(ctx, `
+			err = tx.QueryRowContext(ctx, `
 				INSERT INTO visitor_key_hint_reference_documents (visitor_key_hint_id, reference_document_id, user_id)
-				SELECT $1, d.id, NULL::bigint
+				SELECT $1, d.id, NULL
 				FROM reference_documents d
 				WHERE d.id = $2 AND d.available_for_task = TRUE AND d.is_sensitive = FALSE AND d.user_id IS NULL
 				RETURNING reference_document_id`, hintID, docID).Scan(&inserted)
 		}
-		if err == pgx.ErrNoRows {
+		if err == sql.ErrNoRows {
 			return fmt.Errorf("reference document %d is not eligible for this archive", docID)
 		}
 		if err != nil {
 			return err
 		}
 	}
-	return tx.Commit(ctx)
+	return tx.Commit()
 }
 
 // ListVisitorKeySensitiveReferenceDocPermissions returns sensitive reference_documents rows
@@ -438,7 +442,7 @@ func (s *SensitiveService) ListVisitorKeySensitiveReferenceDocPermissions(ctx co
 			ORDER BY COALESCE(NULLIF(TRIM(d.title), ''), d.filename) ASC`
 		args = []any{hintID}
 	}
-	rows, err := s.pool.Query(ctx, q, args...)
+	rows, err := s.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -477,39 +481,39 @@ func (s *SensitiveService) ReplaceVisitorKeyHintSensitiveReferenceDocuments(ctx 
 		uniq = append(uniq, id)
 	}
 	uid := appctx.UserIDFromCtx(ctx)
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `DELETE FROM visitor_key_hint_sensitive_reference_documents WHERE visitor_key_hint_id = $1`, hintID); err != nil {
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM visitor_key_hint_sensitive_reference_documents WHERE visitor_key_hint_id = $1`, hintID); err != nil {
 		return err
 	}
 	for _, docID := range uniq {
 		var inserted int64
 		if uid > 0 {
-			err = tx.QueryRow(ctx, `
+			err = tx.QueryRowContext(ctx, `
 				INSERT INTO visitor_key_hint_sensitive_reference_documents (visitor_key_hint_id, reference_document_id, user_id)
-				SELECT $1, d.id, $3::bigint
+				SELECT $1, d.id, $3
 				FROM reference_documents d
 				WHERE d.id = $2 AND d.is_sensitive = TRUE AND d.user_id = $3
 				RETURNING reference_document_id`, hintID, docID, uid).Scan(&inserted)
 		} else {
-			err = tx.QueryRow(ctx, `
+			err = tx.QueryRowContext(ctx, `
 				INSERT INTO visitor_key_hint_sensitive_reference_documents (visitor_key_hint_id, reference_document_id, user_id)
-				SELECT $1, d.id, NULL::bigint
+				SELECT $1, d.id, NULL
 				FROM reference_documents d
 				WHERE d.id = $2 AND d.is_sensitive = TRUE AND d.user_id IS NULL
 				RETURNING reference_document_id`, hintID, docID).Scan(&inserted)
 		}
-		if err == pgx.ErrNoRows {
+		if err == sql.ErrNoRows {
 			return fmt.Errorf("sensitive reference document %d is not eligible for this archive", docID)
 		}
 		if err != nil {
 			return err
 		}
 	}
-	return tx.Commit(ctx)
+	return tx.Commit()
 }
 
 // UpdateVisitorKeyHint updates plain-text hint text for a visitor seat (by visitor_key_hints.id).
@@ -521,7 +525,7 @@ func (s *SensitiveService) UpdateVisitorKeyHint(ctx context.Context, hintID int6
 	if len(hint) > maxVisitorKeyHintLen {
 		return fmt.Errorf("hint exceeds %d characters", maxVisitorKeyHintLen)
 	}
-	tag, err := s.pool.Exec(ctx, `
+	tag, err := s.pool.ExecContext(ctx, `
 		UPDATE visitor_key_hints SET hint = $1
 		WHERE id = $2
 		AND EXISTS (
@@ -531,7 +535,7 @@ func (s *SensitiveService) UpdateVisitorKeyHint(ctx context.Context, hintID int6
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if sqlutil.RowsAffected(tag) == 0 {
 		return fmt.Errorf("visitor hint not found")
 	}
 	return nil
@@ -541,9 +545,9 @@ func (s *SensitiveService) UpdateVisitorKeyHint(ctx context.Context, hintID int6
 func (s *SensitiveService) SetVisitorKeyFeatureFlags(ctx context.Context, hintID int64, f VisitorKeyFeatureFlags) error {
 	uid := appctx.UserIDFromCtx(ctx)
 	var err error
-	var tag interface{ RowsAffected() int64 }
+	var tag sql.Result
 	if uid > 0 {
-		tag, err = s.pool.Exec(ctx, `
+		tag, err = s.pool.ExecContext(ctx, `
 			UPDATE visitor_key_hints v SET
 				can_messages_chat = $1,
 				can_emails = $2,
@@ -556,7 +560,7 @@ func (s *SensitiveService) SetVisitorKeyFeatureFlags(ctx context.Context, hintID
 			WHERE v.id = $8 AND v.keyring_id = k.id AND k.is_master = FALSE AND k.user_id = $9`,
 			f.CanMessagesChat, f.CanEmails, f.CanContacts, f.CanRelationships, f.CanSensitivePrivate, f.LLMAllowOwnerKeys, f.LLMAllowServerKeys, hintID, uid)
 	} else {
-		tag, err = s.pool.Exec(ctx, `
+		tag, err = s.pool.ExecContext(ctx, `
 			UPDATE visitor_key_hints v SET
 				can_messages_chat = $1,
 				can_emails = $2,
@@ -572,7 +576,7 @@ func (s *SensitiveService) SetVisitorKeyFeatureFlags(ctx context.Context, hintID
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if sqlutil.RowsAffected(tag) == 0 {
 		return fmt.Errorf("visitor hint not found")
 	}
 	return nil
@@ -595,7 +599,7 @@ func (s *SensitiveService) CreateVisitorKeyHintForOrphanSeat(ctx context.Context
 		return fmt.Errorf("hint exceeds %d characters", maxVisitorKeyHintLen)
 	}
 	var isMaster bool
-	err = s.pool.QueryRow(ctx, `SELECT is_master FROM sensitive_keyring WHERE id = $1`, keyringID).Scan(&isMaster)
+	err = s.pool.QueryRowContext(ctx, `SELECT is_master FROM sensitive_keyring WHERE id = $1`, keyringID).Scan(&isMaster)
 	if err != nil {
 		return fmt.Errorf("keyring seat not found")
 	}
@@ -603,13 +607,13 @@ func (s *SensitiveService) CreateVisitorKeyHintForOrphanSeat(ctx context.Context
 		return fmt.Errorf("cannot attach hint to master seat")
 	}
 	var n int64
-	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM visitor_key_hints WHERE keyring_id = $1`, keyringID).Scan(&n); err != nil {
+	if err := s.pool.QueryRowContext(ctx, `SELECT COUNT(*) FROM visitor_key_hints WHERE keyring_id = $1`, keyringID).Scan(&n); err != nil {
 		return err
 	}
 	if n > 0 {
 		return fmt.Errorf("hint already exists for this seat")
 	}
-	_, err = s.pool.Exec(ctx, `
+	_, err = s.pool.ExecContext(ctx, `
 		INSERT INTO visitor_key_hints (keyring_id, hint, can_messages_chat, can_emails, can_contacts, can_relationship_sensitive, can_sensitive_private, llm_allow_owner_keys, llm_allow_server_keys)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		keyringID, hint, flags.CanMessagesChat, flags.CanEmails, flags.CanContacts, flags.CanRelationships, flags.CanSensitivePrivate, flags.LLMAllowOwnerKeys, flags.LLMAllowServerKeys)
@@ -619,7 +623,7 @@ func (s *SensitiveService) CreateVisitorKeyHintForOrphanSeat(ctx context.Context
 // DeleteVisitorSeatByHintID removes the visitor keyring seat linked to visitor_key_hints.id (hint row removed by CASCADE).
 func (s *SensitiveService) DeleteVisitorSeatByHintID(ctx context.Context, hintID int64, masterPassword string) error {
 	var keyringID int64
-	err := s.pool.QueryRow(ctx, `SELECT keyring_id FROM visitor_key_hints WHERE id = $1`, hintID).Scan(&keyringID)
+	err := s.pool.QueryRowContext(ctx, `SELECT keyring_id FROM visitor_key_hints WHERE id = $1`, hintID).Scan(&keyringID)
 	if err != nil {
 		return fmt.Errorf("visitor hint not found")
 	}

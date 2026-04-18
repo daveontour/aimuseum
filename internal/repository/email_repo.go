@@ -3,20 +3,21 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
 	"github.com/daveontour/aimuseum/internal/model"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 // EmailRepo runs queries against the emails and related tables.
 type EmailRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewEmailRepo creates an EmailRepo backed by the given pool.
-func NewEmailRepo(pool *pgxpool.Pool) *EmailRepo {
+func NewEmailRepo(pool *sql.DB) *EmailRepo {
 	return &EmailRepo{pool: pool}
 }
 
@@ -34,7 +35,7 @@ func (r *EmailRepo) GetByID(ctx context.Context, id int64) (*model.Email, error)
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
 
-	row := r.pool.QueryRow(ctx, q, args...)
+	row := r.pool.QueryRowContext(ctx, q, args...)
 
 	e := &model.Email{}
 	err := row.Scan(
@@ -57,6 +58,7 @@ func (r *EmailRepo) GetByID(ctx context.Context, id int64) (*model.Email, error)
 // All filters are AND-combined; within to_from the addresses are OR-combined.
 func (r *EmailRepo) Search(ctx context.Context, p model.EmailSearchParams) ([]*model.Email, error) {
 	uid := uidFromCtx(ctx)
+	isSQL := sqlutil.IsSQLite(ctx, r.pool)
 	var (
 		conds []string
 		args  []any
@@ -69,12 +71,12 @@ func (r *EmailRepo) Search(ctx context.Context, p model.EmailSearchParams) ([]*m
 		n++
 	}
 
-	// addILIKE appends a single-parameter OR clause across multiple columns.
+	// addLIKE appends a single-parameter OR clause across multiple columns.
 	// All fields share the same $n placeholder so only one arg is added.
-	addILIKE := func(fields []string, val string) {
+	addLIKE := func(fields []string, val string) {
 		parts := make([]string, len(fields))
 		for i, f := range fields {
-			parts[i] = fmt.Sprintf("%s ILIKE $%d", f, n)
+			parts[i] = fmt.Sprintf("%s LIKE $%d", f, n)
 		}
 		conds = append(conds, "("+strings.Join(parts, " OR ")+")")
 		args = append(args, "%"+val+"%")
@@ -82,19 +84,27 @@ func (r *EmailRepo) Search(ctx context.Context, p model.EmailSearchParams) ([]*m
 	}
 
 	if p.FromAddress != nil {
-		add("from_address ILIKE ?", "%"+*p.FromAddress+"%")
+		add("from_address LIKE ?", "%"+*p.FromAddress+"%")
 	}
 	if p.ToAddress != nil {
-		add("to_addresses ILIKE ?", "%"+*p.ToAddress+"%")
+		add("to_addresses LIKE ?", "%"+*p.ToAddress+"%")
 	}
 	if p.Month != nil {
-		add("EXTRACT(month FROM date) = ?", *p.Month)
+		if isSQL {
+			add("CAST(strftime('%m', date) AS INTEGER) = ?", *p.Month)
+		} else {
+			add("EXTRACT(month FROM date) = ?", *p.Month)
+		}
 	}
 	if p.Year != nil {
-		add("EXTRACT(year FROM date) = ?", *p.Year)
+		if isSQL {
+			add("CAST(strftime('%Y', date) AS INTEGER) = ?", *p.Year)
+		} else {
+			add("EXTRACT(year FROM date) = ?", *p.Year)
+		}
 	}
 	if p.Subject != nil {
-		addILIKE([]string{"subject", "snippet", "folder"}, *p.Subject)
+		addLIKE([]string{"subject", "snippet", "folder"}, *p.Subject)
 	}
 	if p.ToFrom != nil {
 		parts := splitTrim(*p.ToFrom, ',')
@@ -102,7 +112,7 @@ func (r *EmailRepo) Search(ctx context.Context, p model.EmailSearchParams) ([]*m
 			var orParts []string
 			for _, addr := range parts {
 				orParts = append(orParts,
-					fmt.Sprintf("(to_addresses ILIKE $%d OR from_address ILIKE $%d)", n, n+1),
+					fmt.Sprintf("(to_addresses LIKE $%d OR from_address LIKE $%d)", n, n+1),
 				)
 				args = append(args, "%"+addr+"%", "%"+addr+"%")
 				n += 2
@@ -144,7 +154,7 @@ func (r *EmailRepo) Search(ctx context.Context, p model.EmailSearchParams) ([]*m
 	}
 	sql += " ORDER BY date DESC"
 
-	rows, err := r.pool.Query(ctx, sql, args...)
+	rows, err := r.pool.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("email Search: %w", err)
 	}
@@ -187,7 +197,7 @@ func (r *EmailRepo) GetByLabels(ctx context.Context, labels []string) ([]*model.
 			WHERE (` + strings.Join(conds, " OR ") + `) AND user_deleted = FALSE`
 	sql, args = addUIDFilter(sql, args, uid)
 
-	rows, err := r.pool.Query(ctx, sql, args...)
+	rows, err := r.pool.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("email GetByLabels: %w", err)
 	}
@@ -210,12 +220,14 @@ func (r *EmailRepo) GetAttachmentIDsForEmails(ctx context.Context, emailIDs []in
 		result[id] = []int64{} // ensure key exists even if no attachments
 	}
 
-	rows, err := r.pool.Query(ctx, `
+	inCond, inArgs, _ := sqlutil.StringIN("source_reference", idStrs, 1)
+	q := fmt.Sprintf(`
 		SELECT source_reference, id
 		FROM media_items
 		WHERE source IN ('email_attachment', 'gmail_attachment')
-		  AND source_reference = ANY($1::text[])
-		ORDER BY id`, idStrs)
+		  AND %s
+		ORDER BY id`, inCond)
+	rows, err := r.pool.QueryContext(ctx, q, inArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("GetAttachmentIDsForEmails: %w", err)
 	}
@@ -269,7 +281,7 @@ func (r *EmailRepo) Update(ctx context.Context, id int64, isPersonal, isBusiness
 		q, args2 = addUIDFilter(q, args2, uid)
 		q += ")"
 		var exists bool
-		err := r.pool.QueryRow(ctx, q, args2...).Scan(&exists)
+		err := r.pool.QueryRowContext(ctx, q, args2...).Scan(&exists)
 		return exists, err
 	}
 
@@ -281,11 +293,11 @@ func (r *EmailRepo) Update(ctx context.Context, id int64, isPersonal, isBusiness
 	n++
 	args2 := args
 	q, args2 = addUIDFilter(q, args2, uid)
-	tag, err := r.pool.Exec(ctx, q, args2...)
+	tag, err := r.pool.ExecContext(ctx, q, args2...)
 	if err != nil {
 		return false, fmt.Errorf("email Update %d: %w", id, err)
 	}
-	return tag.RowsAffected() > 0, nil
+	return rowsAffectedOrZero(tag) > 0, nil
 }
 
 // SoftDelete nullifies message content and marks the email as deleted.
@@ -303,16 +315,16 @@ func (r *EmailRepo) SoftDelete(ctx context.Context, id int64) (bool, error) {
 		WHERE id = $1 AND user_deleted = FALSE`
 	args := []any{id}
 	q, args = addUIDFilter(q, args, uid)
-	tag, err := r.pool.Exec(ctx, q, args...)
+	tag, err := r.pool.ExecContext(ctx, q, args...)
 	if err != nil {
 		return false, fmt.Errorf("email SoftDelete %d: %w", id, err)
 	}
-	if tag.RowsAffected() == 0 {
+	if rowsAffectedOrZero(tag) == 0 {
 		return false, nil
 	}
 	// Remove IMAP/Gmail email attachment media_items for this email; delete blobs no longer referenced.
 	ref := fmt.Sprintf("%d", id)
-	_, _ = r.pool.Exec(ctx, `
+	_, _ = r.pool.ExecContext(ctx, `
 		WITH deleted AS (
 			DELETE FROM media_items
 			WHERE source IN ('email_attachment', 'gmail_attachment') AND source_reference = $1
@@ -331,7 +343,8 @@ func (r *EmailRepo) BulkSoftDelete(ctx context.Context, ids []int64) (int64, err
 		return 0, nil
 	}
 	uid := uidFromCtx(ctx)
-	q := `
+	idCond, idArgs, nextArg := sqlutil.Int64IN("id", ids, 1)
+	q := fmt.Sprintf(`
 		UPDATE emails
 		SET raw_message      = NULL,
 		    plain_text        = NULL,
@@ -339,11 +352,14 @@ func (r *EmailRepo) BulkSoftDelete(ctx context.Context, ids []int64) (int64, err
 		    embedding         = NULL,
 		    has_attachments   = FALSE,
 		    user_deleted      = TRUE
-		WHERE id = ANY($1::bigint[])
-		  AND user_deleted = FALSE`
-	args := []any{ids}
-	q, args = addUIDFilter(q, args, uid)
-	tag, err := r.pool.Exec(ctx, q, args...)
+		WHERE %s
+		  AND user_deleted = FALSE`, idCond)
+	args := idArgs
+	if uid > 0 {
+		args = append(args, uid)
+		q += fmt.Sprintf(" AND user_id = $%d", nextArg)
+	}
+	tag, err := r.pool.ExecContext(ctx, q, args...)
 	if err != nil {
 		return 0, fmt.Errorf("email BulkSoftDelete: %w", err)
 	}
@@ -351,16 +367,18 @@ func (r *EmailRepo) BulkSoftDelete(ctx context.Context, ids []int64) (int64, err
 	for i, id := range ids {
 		refs[i] = fmt.Sprintf("%d", id)
 	}
-	_, _ = r.pool.Exec(ctx, `
+	refCond, refArgs, _ := sqlutil.StringIN("source_reference", refs, 1)
+	delMediaQ := fmt.Sprintf(`
 		WITH deleted AS (
 			DELETE FROM media_items
-			WHERE source IN ('email_attachment', 'gmail_attachment') AND source_reference = ANY($1::text[])
+			WHERE source IN ('email_attachment', 'gmail_attachment') AND %s
 			RETURNING media_blob_id
 		)
 		DELETE FROM media_blobs b
 		WHERE b.id IN (SELECT DISTINCT media_blob_id FROM deleted WHERE media_blob_id IS NOT NULL)
-		  AND NOT EXISTS (SELECT 1 FROM media_items m WHERE m.media_blob_id = b.id)`, refs)
-	return tag.RowsAffected(), nil
+		  AND NOT EXISTS (SELECT 1 FROM media_items m WHERE m.media_blob_id = b.id)`, refCond)
+	_, _ = r.pool.ExecContext(ctx, delMediaQ, refArgs...)
+	return rowsAffectedOrZero(tag), nil
 }
 
 // GetThreadEmails returns non-deleted emails where from_address or to_addresses
@@ -373,12 +391,12 @@ func (r *EmailRepo) GetThreadEmails(ctx context.Context, participant string) ([]
 		       has_attachments, user_deleted, is_personal, is_business, is_social, is_promotional,
 		       is_spam, is_important, use_by_ai, source, created_at, updated_at
 		FROM emails
-		WHERE (from_address ILIKE $1 OR to_addresses ILIKE $1)
+		WHERE (from_address LIKE $1 OR to_addresses LIKE $1)
 		  AND user_deleted = FALSE`
 	args := []any{"%" + participant + "%"}
 	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY date ASC"
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetThreadEmails: %w", err)
 	}
@@ -397,7 +415,7 @@ func (r *EmailRepo) ListFolders(ctx context.Context) ([]string, error) {
 	args := []any{}
 	q, args = addUIDFilter(q, args, uid)
 	q += " ORDER BY f"
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ListFolders: %w", err)
 	}
@@ -438,11 +456,6 @@ func scanEmails(rows interface {
 		emails = append(emails, e)
 	}
 	return emails, rows.Err()
-}
-
-// isNoRows returns true for pgx "no rows in result set" error.
-func isNoRows(err error) bool {
-	return err != nil && err.Error() == "no rows in result set"
 }
 
 // splitTrim splits s by sep and trims whitespace from each element, omitting blanks.

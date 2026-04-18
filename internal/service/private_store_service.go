@@ -2,13 +2,13 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
 	appcrypto "github.com/daveontour/aimuseum/internal/crypto"
 	"github.com/daveontour/aimuseum/internal/model"
 	"github.com/daveontour/aimuseum/internal/repository"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // PrivateStoreService manages CRUD operations on the private_store table.
@@ -16,12 +16,12 @@ import (
 // with the master-only private DEK.
 type PrivateStoreService struct {
 	repo   *repository.PrivateStoreRepo
-	pool   *pgxpool.Pool
+	pool   *sql.DB
 	pepper string
 }
 
 // NewPrivateStoreService creates a PrivateStoreService.
-func NewPrivateStoreService(repo *repository.PrivateStoreRepo, pool *pgxpool.Pool, pepper string) *PrivateStoreService {
+func NewPrivateStoreService(repo *repository.PrivateStoreRepo, pool *sql.DB, pepper string) *PrivateStoreService {
 	return &PrivateStoreService{repo: repo, pool: pool, pepper: pepper}
 }
 

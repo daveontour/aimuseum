@@ -111,7 +111,7 @@ func (s *ArchiveShareService) GetSharePublic(ctx context.Context, token string) 
 	if share == nil {
 		return nil, ErrShareNotFound
 	}
-	if share.ExpiresAt != nil && time.Now().After(*share.ExpiresAt) {
+	if share.ExpiresAt.Valid && time.Now().After(share.ExpiresAt.Time) {
 		return nil, ErrShareExpired
 	}
 	ownerName, _ := s.repo.GetOwnerDisplayName(ctx, share.UserID)
@@ -135,7 +135,7 @@ func (s *ArchiveShareService) JoinShare(ctx context.Context, token, password str
 	if share == nil {
 		return "", ErrShareNotFound
 	}
-	if share.ExpiresAt != nil && time.Now().After(*share.ExpiresAt) {
+	if share.ExpiresAt.Valid && time.Now().After(share.ExpiresAt.Time) {
 		return "", ErrShareExpired
 	}
 	if share.HasPassword {

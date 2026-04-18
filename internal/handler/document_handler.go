@@ -18,12 +18,13 @@ import (
 type DocumentHandler struct {
 	svc          *service.DocumentService
 	sensitiveSvc *service.SensitiveService
+	authSvc      *service.AuthService
 	sessionStore *keystore.SessionMasterStore
 }
 
 // NewDocumentHandler creates a DocumentHandler.
-func NewDocumentHandler(svc *service.DocumentService, sensitiveSvc *service.SensitiveService, sessionStore *keystore.SessionMasterStore) *DocumentHandler {
-	return &DocumentHandler{svc: svc, sensitiveSvc: sensitiveSvc, sessionStore: sessionStore}
+func NewDocumentHandler(svc *service.DocumentService, sensitiveSvc *service.SensitiveService, authSvc *service.AuthService, sessionStore *keystore.SessionMasterStore) *DocumentHandler {
+	return &DocumentHandler{svc: svc, sensitiveSvc: sensitiveSvc, authSvc: authSvc, sessionStore: sessionStore}
 }
 
 // RegisterRoutes mounts all reference document routes.
@@ -230,7 +231,7 @@ func (h *DocumentHandler) Download(w http.ResponseWriter, r *http.Request) {
 // ── Create ────────────────────────────────────────────────────────────────────
 
 func (h *DocumentHandler) Create(w http.ResponseWriter, r *http.Request) {
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
@@ -304,7 +305,7 @@ func (h *DocumentHandler) Create(w http.ResponseWriter, r *http.Request) {
 // ── Update ────────────────────────────────────────────────────────────────────
 
 func (h *DocumentHandler) Update(w http.ResponseWriter, r *http.Request) {
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	id, ok := parseDocID(w, r)
@@ -348,7 +349,7 @@ func (h *DocumentHandler) Update(w http.ResponseWriter, r *http.Request) {
 // ── Delete ────────────────────────────────────────────────────────────────────
 
 func (h *DocumentHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	id, ok := parseDocID(w, r)
@@ -389,7 +390,7 @@ func (h *DocumentHandler) InitKeyring(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DocumentHandler) AddUser(w http.ResponseWriter, r *http.Request) {
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	var req struct {
@@ -437,7 +438,7 @@ func (h *DocumentHandler) AddUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DocumentHandler) RemoveUser(w http.ResponseWriter, r *http.Request) {
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	var req struct {
@@ -736,7 +737,7 @@ func (h *DocumentHandler) KeyringCount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DocumentHandler) EncryptExisting(w http.ResponseWriter, r *http.Request) {
-	if !RequireOwnerMasterUnlock(w, r, h.sessionStore) {
+	if !RequireOwnerMasterUnlockOrNoKeyring(w, r, h.sessionStore, h.sensitiveSvc, h.authSvc) {
 		return
 	}
 	var req struct {

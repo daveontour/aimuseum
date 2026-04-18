@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,13 +12,13 @@ import (
 	"github.com/daveontour/aimuseum/internal/keystore"
 	"github.com/daveontour/aimuseum/internal/repository"
 	"github.com/daveontour/aimuseum/internal/service"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // AdminHandler handles admin, control-panel, and AI summarization endpoints.
 type AdminHandler struct {
-	pool              *pgxpool.Pool
+	pool              *sql.DB
 	subjectConfigRepo *repository.SubjectConfigRepo
 	gemini            *appai.GeminiProvider
 	sessionStore      *keystore.SessionMasterStore
@@ -26,7 +27,7 @@ type AdminHandler struct {
 }
 
 // NewAdminHandler creates an AdminHandler.
-func NewAdminHandler(pool *pgxpool.Pool, subjectConfigRepo *repository.SubjectConfigRepo, sessionStore *keystore.SessionMasterStore) *AdminHandler {
+func NewAdminHandler(pool *sql.DB, subjectConfigRepo *repository.SubjectConfigRepo, sessionStore *keystore.SessionMasterStore) *AdminHandler {
 	return &AdminHandler{pool: pool, subjectConfigRepo: subjectConfigRepo, sessionStore: sessionStore}
 }
 
@@ -66,7 +67,7 @@ func (h *AdminHandler) GetImportControlLastRun(w http.ResponseWriter, r *http.Re
 
 	run := func(key, sql string, args ...any) (string, runInfo) {
 		var ts *string
-		_ = h.pool.QueryRow(ctx, sql, args...).Scan(&ts)
+		_ = h.pool.QueryRowContext(ctx, sql, args...).Scan(&ts)
 		if ts == nil || *ts == "" {
 			return key, runInfo{}
 		}
@@ -78,29 +79,29 @@ func (h *AdminHandler) GetImportControlLastRun(w http.ResponseWriter, r *http.Re
 	uidArg := []any{uid}
 	// Email / IMAP — same table, split by import source
 	for k, v := range map[string]string{
-		"email_processing": `SELECT MAX(created_at)::text FROM emails WHERE user_id = $1 AND source = 'gmail'`,
-		"imap_processing":  `SELECT MAX(created_at)::text FROM emails WHERE user_id = $1 AND (source IS NULL OR source <> 'gmail')`,
+		"email_processing": `SELECT CAST(MAX(created_at) AS TEXT) FROM emails WHERE user_id = $1 AND source = 'gmail'`,
+		"imap_processing":  `SELECT CAST(MAX(created_at) AS TEXT) FROM emails WHERE user_id = $1 AND (source IS NULL OR source <> 'gmail')`,
 	} {
 		key, info := run(k, v, uidArg...)
 		result[key] = info
 	}
 	// Message services
 	for k, v := range map[string]string{
-		"whatsapp":      `SELECT MAX(created_at)::text FROM messages WHERE user_id = $1 AND service = 'WhatsApp'`,
-		"instagram":     `SELECT MAX(created_at)::text FROM messages WHERE user_id = $1 AND service = 'Instagram'`,
-		"imessage":      `SELECT MAX(created_at)::text FROM messages WHERE user_id = $1 AND service IN ('iMessage', 'SMS', 'MMS')`,
-		"facebook":      `SELECT MAX(created_at)::text FROM messages WHERE user_id = $1 AND service = 'Facebook Messenger'`,
-		"zip_whatsapp":  `SELECT MAX(created_at)::text FROM messages WHERE user_id = $1 AND service = 'WhatsApp'`,
-		"zip_instagram": `SELECT MAX(created_at)::text FROM messages WHERE user_id = $1 AND service = 'Instagram'`,
-		"zip_imessage":  `SELECT MAX(created_at)::text FROM messages WHERE user_id = $1 AND service IN ('iMessage', 'SMS', 'MMS')`,
-		"upload_zip":    `SELECT MAX(created_at)::text FROM messages WHERE user_id = $1`,
+		"whatsapp":      `SELECT CAST(MAX(created_at) AS TEXT) FROM messages WHERE user_id = $1 AND service = 'WhatsApp'`,
+		"instagram":     `SELECT CAST(MAX(created_at) AS TEXT) FROM messages WHERE user_id = $1 AND service = 'Instagram'`,
+		"imessage":      `SELECT CAST(MAX(created_at) AS TEXT) FROM messages WHERE user_id = $1 AND service IN ('iMessage', 'SMS', 'MMS')`,
+		"facebook":      `SELECT CAST(MAX(created_at) AS TEXT) FROM messages WHERE user_id = $1 AND service = 'Facebook Messenger'`,
+		"zip_whatsapp":  `SELECT CAST(MAX(created_at) AS TEXT) FROM messages WHERE user_id = $1 AND service = 'WhatsApp'`,
+		"zip_instagram": `SELECT CAST(MAX(created_at) AS TEXT) FROM messages WHERE user_id = $1 AND service = 'Instagram'`,
+		"zip_imessage":  `SELECT CAST(MAX(created_at) AS TEXT) FROM messages WHERE user_id = $1 AND service IN ('iMessage', 'SMS', 'MMS')`,
+		"upload_zip":    `SELECT CAST(MAX(created_at) AS TEXT) FROM messages WHERE user_id = $1`,
 	} {
 		key, info := run(k, v, uidArg...)
 		result[key] = info
 	}
 	// Facebook ZIP / full — aggregate activity across Messenger + albums + posts + FB locations
 	fbAllSQL := `
-SELECT MAX(ts)::text FROM (
+SELECT CAST(MAX(ts) AS TEXT) FROM (
   SELECT MAX(m.created_at) AS ts FROM messages m WHERE m.user_id = $1 AND m.service = 'Facebook Messenger'
   UNION ALL
   SELECT MAX(fa.updated_at) FROM facebook_albums fa WHERE fa.user_id = $1
@@ -115,23 +116,23 @@ SELECT MAX(ts)::text FROM (
 	}
 	// Other path imports
 	for k, v := range map[string]string{
-		"facebook_albums":  `SELECT MAX(updated_at)::text FROM facebook_albums WHERE user_id = $1`,
-		"facebook_posts":   `SELECT MAX(updated_at)::text FROM facebook_posts WHERE user_id = $1`,
-		"facebook_places":  `SELECT MAX(created_at)::text FROM locations WHERE user_id = $1 AND source = 'facebook'`,
-		"filesystem":              `SELECT MAX(created_at)::text FROM media_items WHERE user_id = $1 AND source = 'filesystem'`,
-		"filesystem_reference":    `SELECT MAX(created_at)::text FROM media_items WHERE user_id = $1 AND source = 'filesystem'`,
-		"upload_photos":             `SELECT MAX(created_at)::text FROM media_items WHERE user_id = $1 AND source = 'filesystem'`,
-		"reference_import": `SELECT MAX(updated_at)::text FROM reference_documents WHERE user_id = $1`,
+		"facebook_albums":      `SELECT CAST(MAX(updated_at) AS TEXT) FROM facebook_albums WHERE user_id = $1`,
+		"facebook_posts":       `SELECT CAST(MAX(updated_at) AS TEXT) FROM facebook_posts WHERE user_id = $1`,
+		"facebook_places":      `SELECT CAST(MAX(created_at) AS TEXT) FROM locations WHERE user_id = $1 AND source = 'facebook'`,
+		"filesystem":           `SELECT CAST(MAX(created_at) AS TEXT) FROM media_items WHERE user_id = $1 AND source = 'filesystem'`,
+		"filesystem_reference": `SELECT CAST(MAX(created_at) AS TEXT) FROM media_items WHERE user_id = $1 AND source = 'filesystem'`,
+		"upload_photos":        `SELECT CAST(MAX(created_at) AS TEXT) FROM media_items WHERE user_id = $1 AND source = 'filesystem'`,
+		"reference_import":     `SELECT CAST(MAX(updated_at) AS TEXT) FROM reference_documents WHERE user_id = $1`,
 	} {
 		key, info := run(k, v, uidArg...)
 		result[key] = info
 	}
 	// Thumbnails processing (best-effort: last media row update)
-	key, info := run("thumbnails", `SELECT MAX(updated_at)::text FROM media_items WHERE user_id = $1`, uidArg...)
+	key, info := run("thumbnails", `SELECT CAST(MAX(updated_at) AS TEXT) FROM media_items WHERE user_id = $1`, uidArg...)
 	result[key] = info
-	key, info = run("contacts", `SELECT MAX(updated_at)::text FROM contacts WHERE user_id = $1 AND id <> 0`, uidArg...)
+	key, info = run("contacts", `SELECT CAST(MAX(updated_at) AS TEXT) FROM contacts WHERE user_id = $1 AND id <> 0`, uidArg...)
 	result[key] = info
-	key, info = run("image_export", `SELECT MAX(updated_at)::text FROM media_items WHERE user_id = $1`, uidArg...)
+	key, info = run("image_export", `SELECT CAST(MAX(updated_at) AS TEXT) FROM media_items WHERE user_id = $1`, uidArg...)
 	result[key] = info
 
 	writeJSON(w, result)
@@ -141,9 +142,9 @@ SELECT MAX(ts)::text FROM (
 // Returns app_configuration values useful for pre-filling import control forms.
 func (h *AdminHandler) GetControlDefaults(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	rows, err := h.pool.Query(ctx,
+	rows, err := h.pool.QueryContext(ctx,
 		`SELECT key, value FROM app_configuration
-		 WHERE key ILIKE '%PATH%' OR key ILIKE '%DIRECTORY%' OR key ILIKE '%IMPORT%'`)
+		 WHERE key LIKE '%PATH%' OR key LIKE '%DIRECTORY%' OR key LIKE '%IMPORT%'`)
 	if err != nil {
 		writeJSON(w, map[string]any{})
 		return
@@ -170,14 +171,14 @@ func (h *AdminHandler) DeleteEmptyMediaTables(w http.ResponseWriter, r *http.Req
 	}
 	ctx := r.Context()
 
-	blobTag, err := h.pool.Exec(ctx,
+	blobTag, err := h.pool.ExecContext(ctx,
 		`DELETE FROM media_blobs WHERE image_data IS NULL AND thumbnail_data IS NULL`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("error deleting empty blobs: %s", err))
 		return
 	}
 
-	itemTag, err := h.pool.Exec(ctx,
+	itemTag, err := h.pool.ExecContext(ctx,
 		`DELETE FROM media_items WHERE media_blob_id IS NULL`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("error deleting orphan items: %s", err))
@@ -186,8 +187,8 @@ func (h *AdminHandler) DeleteEmptyMediaTables(w http.ResponseWriter, r *http.Req
 
 	writeJSON(w, map[string]any{
 		"message":       "Empty media tables cleaned",
-		"blobs_deleted": blobTag.RowsAffected(),
-		"items_deleted": itemTag.RowsAffected(),
+		"blobs_deleted": sqlutil.RowsAffected(blobTag),
+		"items_deleted": sqlutil.RowsAffected(itemTag),
 	})
 }
 
@@ -312,7 +313,7 @@ Email samples:
 // sampleEmailsForAI returns a formatted block of recent email subjects + plain text
 // suitable for AI analysis. Each email body is capped at 500 characters.
 func (h *AdminHandler) sampleEmailsForAI(ctx context.Context, limit int) (string, error) {
-	rows, err := h.pool.Query(ctx, `
+	rows, err := h.pool.QueryContext(ctx, `
 		SELECT subject, plain_text
 		FROM emails
 		WHERE plain_text IS NOT NULL AND user_deleted = FALSE

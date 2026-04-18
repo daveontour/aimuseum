@@ -2,29 +2,21 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// MigratePamBot runs Pam Bot–specific data steps after the core schema in Migrate().
-// Table DDL lives in schemaDDL() in migrate.go; keep this function for seeds and future
-// incremental data backfills (similar to migrateAppSystemInstructions).
-func MigratePamBot(ctx context.Context, pool *pgxpool.Pool) error {
-	if pool == nil {
+// MigratePamBot runs Pam Bot–specific data steps after the core schema in MigrateSQLite.
+func MigratePamBot(ctx context.Context, db *sql.DB) error {
+	if db == nil {
 		return nil
 	}
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		return fmt.Errorf("acquire pambot connection: %w", err)
-	}
-	defer conn.Release()
 
 	// Seed default Pam Bot instructions if the singleton row exists but the column is empty.
-	if _, err := conn.Exec(ctx,
+	if _, err := db.ExecContext(ctx,
 		`UPDATE app_system_instructions
-		 SET pam_bot_instructions = $1
+		 SET pam_bot_instructions = ?
 		 WHERE id = 1 AND (pam_bot_instructions IS NULL OR pam_bot_instructions = '')`,
 		pamBotDefaultInstructions,
 	); err != nil {

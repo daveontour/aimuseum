@@ -1,227 +1,6 @@
 package database
 
-import (
-	"context"
-	"errors"
-	"fmt"
-	"log/slog"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-)
-
-// Migrate creates all tables, indexes, functions, and RLS policies.
-// Safe to call on an already-initialised database (all statements use IF NOT EXISTS).
-func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		return fmt.Errorf("acquire connection for migration: %w", err)
-	}
-	defer conn.Release()
-
-	// ── Extensions ────────────────────────────────────────────────────────────
-	if _, err := conn.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pgcrypto"); err != nil {
-		return fmt.Errorf("pgcrypto extension required for encryption: %w", err)
-	}
-
-	pgTrgmAvailable := true
-	if _, err := conn.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_trgm"); err != nil {
-		slog.Warn("pg_trgm extension unavailable — full-text search index will use btree fallback", "err", err)
-		pgTrgmAvailable = false
-	}
-
-	if _, err := conn.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS vector"); err != nil {
-		slog.Warn("pgvector extension unavailable — vector similarity / embedding features disabled", "err", err)
-	}
-
-	// ── Tables and indexes ────────────────────────────────────────────────────
-	for _, stmt := range schemaDDL() {
-		if _, err := conn.Exec(ctx, stmt); err != nil {
-			preview := stmt
-			if len(preview) > 100 {
-				preview = preview[:100] + "..."
-			}
-			return fmt.Errorf("migration statement failed (%s): %w", preview, err)
-		}
-	}
-
-	if _, err := conn.Exec(ctx, `ALTER TABLE emails ADD COLUMN IF NOT EXISTS embedding_vector vector(2560)`); err != nil {
-		return fmt.Errorf("alter emails.embedding_vector: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `ALTER TABLE messages ADD COLUMN IF NOT EXISTS embedding_vector vector(2560)`); err != nil {
-		return fmt.Errorf("alter messages.embedding_vector: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `ALTER TABLE facebook_albums ADD COLUMN IF NOT EXISTS embedding_vector vector(2560)`); err != nil {
-		return fmt.Errorf("alter facebook_albums.embedding_vector: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `ALTER TABLE facebook_posts ADD COLUMN IF NOT EXISTS embedding_vector vector(2560)`); err != nil {
-		return fmt.Errorf("alter facebook_posts.embedding_vector: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `ALTER TABLE emails ALTER COLUMN embedding_vector TYPE vector(2560)`); err != nil {
-		return fmt.Errorf("resize emails.embedding_vector to vector(2560): %w", err)
-	}
-	if _, err := conn.Exec(ctx, `ALTER TABLE messages ALTER COLUMN embedding_vector TYPE vector(2560)`); err != nil {
-		return fmt.Errorf("resize messages.embedding_vector to vector(2560): %w", err)
-	}
-	if _, err := conn.Exec(ctx, `ALTER TABLE facebook_albums ALTER COLUMN embedding_vector TYPE vector(2560)`); err != nil {
-		return fmt.Errorf("resize facebook_albums.embedding_vector to vector(2560): %w", err)
-	}
-	if _, err := conn.Exec(ctx, `ALTER TABLE facebook_posts ALTER COLUMN embedding_vector TYPE vector(2560)`); err != nil {
-		return fmt.Errorf("resize facebook_posts.embedding_vector to vector(2560): %w", err)
-	}
-
-	// Widen media_items.source_reference for long upload paths (VARCHAR(500) → TEXT on existing DBs).
-	if _, err := conn.Exec(ctx, `ALTER TABLE media_items ALTER COLUMN source_reference TYPE TEXT`); err != nil {
-		return fmt.Errorf("alter media_items.source_reference to TEXT: %w", err)
-	}
-
-	// Legacy rows imported before user scoping have user_id NULL; stats and image search filter by
-	// the logged-in user and would hide them. When this deployment has exactly one account,
-	// attach orphan media to that user so counts and search match a raw table count.
-	if _, err := conn.Exec(ctx, `
-		UPDATE media_items
-		SET user_id = (SELECT id FROM users ORDER BY id LIMIT 1)
-		WHERE user_id IS NULL
-		  AND (SELECT COUNT(*) FROM users) = 1
-	`); err != nil {
-		return fmt.Errorf("backfill media_items.user_id (single-user): %w", err)
-	}
-	if _, err := conn.Exec(ctx, `
-		UPDATE media_blobs
-		SET user_id = (SELECT id FROM users ORDER BY id LIMIT 1)
-		WHERE user_id IS NULL
-		  AND (SELECT COUNT(*) FROM users) = 1
-	`); err != nil {
-		return fmt.Errorf("backfill media_blobs.user_id (single-user): %w", err)
-	}
-
-	if _, err := conn.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS allow_server_llm_keys BOOLEAN NOT NULL DEFAULT TRUE`); err != nil {
-		return fmt.Errorf("alter users.allow_server_llm_keys: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `ALTER TABLE visitor_key_hints ADD COLUMN IF NOT EXISTS llm_allow_owner_keys BOOLEAN NOT NULL DEFAULT TRUE`); err != nil {
-		return fmt.Errorf("alter visitor_key_hints.llm_allow_owner_keys: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `ALTER TABLE visitor_key_hints ADD COLUMN IF NOT EXISTS llm_allow_server_keys BOOLEAN NOT NULL DEFAULT TRUE`); err != nil {
-		return fmt.Errorf("alter visitor_key_hints.llm_allow_server_keys: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `ALTER TABLE visitor_key_hints ADD COLUMN IF NOT EXISTS can_sensitive_private BOOLEAN NOT NULL DEFAULT FALSE`); err != nil {
-		return fmt.Errorf("alter visitor_key_hints.can_sensitive_private: %w", err)
-	}
-	// Split legacy combined flag: copy relationship permission into sensitive/private so behaviour is unchanged until owners adjust.
-	if _, err := conn.Exec(ctx, `UPDATE visitor_key_hints SET can_sensitive_private = can_relationship_sensitive WHERE can_sensitive_private IS DISTINCT FROM can_relationship_sensitive`); err != nil {
-		return fmt.Errorf("backfill visitor_key_hints.can_sensitive_private: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `ALTER TABLE complete_profiles ADD COLUMN IF NOT EXISTS generation_pending BOOLEAN NOT NULL DEFAULT FALSE`); err != nil {
-		return fmt.Errorf("alter complete_profiles.generation_pending: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `ALTER TABLE emails ADD COLUMN IF NOT EXISTS source VARCHAR(255)`); err != nil {
-		return fmt.Errorf("alter emails.source: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_emails_source ON emails (source)`); err != nil {
-		slog.Warn("could not create emails.source index", "err", err)
-	}
-
-	// ── Full-text search index for emails.plain_text ──────────────────────────
-	var ftsSql string
-	if pgTrgmAvailable {
-		ftsSql = "CREATE INDEX IF NOT EXISTS idx_plain_text_fts ON emails USING gin (plain_text gin_trgm_ops)"
-	} else {
-		ftsSql = "CREATE INDEX IF NOT EXISTS idx_plain_text_btree ON emails (plain_text)"
-	}
-	if _, err := conn.Exec(ctx, ftsSql); err != nil {
-		slog.Warn("could not create plain_text index — searches will work but may be slower", "err", err)
-	}
-
-	if err := migrateAppSystemInstructions(ctx, conn); err != nil {
-		return fmt.Errorf("migrate app_system_instructions: %w", err)
-	}
-
-	// ── Add writeup column to interviews (idempotent for existing DBs) ───────
-	if _, err := conn.Exec(ctx, `ALTER TABLE interviews ADD COLUMN IF NOT EXISTS writeup TEXT`); err != nil {
-		slog.Warn("could not add interviews.writeup column", "err", err)
-	}
-
-	// ── PL/pgSQL region functions ─────────────────────────────────────────────
-	for _, fnSQL := range regionFunctionsDDL() {
-		if _, err := conn.Exec(ctx, fnSQL); err != nil {
-			slog.Warn("could not create region function", "err", err)
-		}
-	}
-
-	// ── Row-Level Security ────────────────────────────────────────────────────
-	for _, stmt := range rlsDDL() {
-		if _, err := conn.Exec(ctx, stmt); err != nil {
-			slog.Warn("could not apply RLS statement", "err", err)
-		}
-	}
-
-	slog.Info("database migration complete")
-	return nil
-}
-
-// migrateAppSystemInstructions creates app_system_instructions, copies legacy
-// subject_configuration instruction columns into the singleton row once, then drops those columns.
-func migrateAppSystemInstructions(ctx context.Context, c *pgxpool.Conn) error {
-	if _, err := c.Exec(ctx, `CREATE TABLE IF NOT EXISTS app_system_instructions (
-		id                    SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-		chat_instructions     TEXT NOT NULL DEFAULT '',
-		core_instructions     TEXT NOT NULL DEFAULT '',
-		question_instructions TEXT NOT NULL DEFAULT '',
-		user_id               BIGINT REFERENCES users(id) ON DELETE SET NULL,
-		updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
-	)`); err != nil {
-		return fmt.Errorf("create app_system_instructions: %w", err)
-	}
-
-	var legacy bool
-	if err := c.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM information_schema.columns
-			WHERE table_schema = 'public' AND table_name = 'subject_configuration'
-			  AND column_name = 'system_instructions')`).Scan(&legacy); err != nil {
-		return fmt.Errorf("check legacy subject_configuration columns: %w", err)
-	}
-
-	if legacy {
-		var chat, core *string
-		err := c.QueryRow(ctx,
-			`SELECT system_instructions, core_system_instructions FROM subject_configuration ORDER BY id LIMIT 1`,
-		).Scan(&chat, &core)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("read legacy instructions: %w", err)
-		}
-		ch, co := "", ""
-		if chat != nil {
-			ch = *chat
-		}
-		if core != nil {
-			co = *core
-		}
-		if _, err := c.Exec(ctx, `
-			INSERT INTO app_system_instructions (id, chat_instructions, core_instructions, question_instructions, user_id)
-			VALUES (1, $1, $2, '', NULL)
-			ON CONFLICT (id) DO NOTHING`, ch, co); err != nil {
-			return fmt.Errorf("backfill app_system_instructions: %w", err)
-		}
-		if _, err := c.Exec(ctx, `ALTER TABLE subject_configuration DROP COLUMN IF EXISTS system_instructions`); err != nil {
-			return fmt.Errorf("drop system_instructions: %w", err)
-		}
-		if _, err := c.Exec(ctx, `ALTER TABLE subject_configuration DROP COLUMN IF EXISTS core_system_instructions`); err != nil {
-			return fmt.Errorf("drop core_system_instructions: %w", err)
-		}
-	}
-
-	if _, err := c.Exec(ctx, `
-		INSERT INTO app_system_instructions (id, chat_instructions, core_instructions, question_instructions, user_id)
-		VALUES (1, '', '', '', NULL)
-		ON CONFLICT (id) DO NOTHING`); err != nil {
-		return fmt.Errorf("ensure app_system_instructions row: %w", err)
-	}
-	if _, err := c.Exec(ctx, `ALTER TABLE app_system_instructions ADD COLUMN IF NOT EXISTS pam_bot_instructions TEXT`); err != nil {
-		return fmt.Errorf("alter app_system_instructions.pam_bot_instructions: %w", err)
-	}
-	return nil
-}
+import "fmt"
 
 // schemaDDL returns the complete CREATE TABLE and CREATE INDEX statements for a
 // fresh database (single source of truth for new installs). Incremental ALTERs
@@ -243,7 +22,7 @@ func schemaDDL() []string {
 			user_claude_model      TEXT,
 			user_tavily_api_key    TEXT,
 			allow_server_llm_keys  BOOLEAN      NOT NULL DEFAULT TRUE,
-			created_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+			created_at             TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			last_login_at          TIMESTAMPTZ,
 			is_active              BOOLEAN      NOT NULL DEFAULT TRUE,
 			is_admin               BOOLEAN      NOT NULL DEFAULT FALSE
@@ -256,7 +35,7 @@ func schemaDDL() []string {
 			encrypted_dek        BYTEA   NOT NULL,
 			encrypted_master_dek BYTEA,
 			is_master            BOOLEAN NOT NULL DEFAULT FALSE,
-			created_at           TIMESTAMP DEFAULT NOW(),
+			created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id              BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sensitive_keyring_user_id ON sensitive_keyring (user_id)`,
@@ -273,7 +52,7 @@ func schemaDDL() []string {
 			can_sensitive_private      BOOLEAN NOT NULL DEFAULT FALSE,
 			llm_allow_owner_keys       BOOLEAN NOT NULL DEFAULT TRUE,
 			llm_allow_server_keys      BOOLEAN NOT NULL DEFAULT TRUE,
-			created_at                 TIMESTAMP DEFAULT NOW(),
+			created_at                 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id                    BIGINT REFERENCES users(id) ON DELETE CASCADE,
 			UNIQUE (keyring_id)
 		)`,
@@ -285,7 +64,7 @@ func schemaDDL() []string {
 			id                    VARCHAR(64)  PRIMARY KEY,
 			user_id               BIGINT       NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			expires_at            TIMESTAMPTZ  NOT NULL,
-			created_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+			created_at            TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			is_visitor            BOOLEAN      NOT NULL DEFAULT FALSE,
 			visitor_llm_overrides JSONB,
 			share_link_session    BOOLEAN      NOT NULL DEFAULT FALSE,
@@ -302,7 +81,7 @@ func schemaDDL() []string {
 			password_hash      VARCHAR(255),
 			expires_at         TIMESTAMPTZ,
 			tool_access_policy JSONB,
-			created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+			created_at         TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_archive_shares_user_id ON archive_shares (user_id)`,
 
@@ -314,7 +93,7 @@ func schemaDDL() []string {
 			ip_address  VARCHAR(45),
 			user_agent  TEXT,
 			details     JSONB,
-			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_log_user_id    ON audit_log (user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_log_event_type ON audit_log (event_type)`,
@@ -325,8 +104,8 @@ func schemaDDL() []string {
 			id             SERIAL PRIMARY KEY,
 			image_data     BYTEA,
 			thumbnail_data BYTEA,
-			created_at     TIMESTAMP DEFAULT NOW(),
-			updated_at     TIMESTAMP DEFAULT NOW(),
+			created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id        BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_media_blobs_user_id ON media_blobs (user_id)`,
@@ -344,8 +123,8 @@ func schemaDDL() []string {
 			available_for_task BOOLEAN NOT NULL DEFAULT FALSE,
 			media_type         VARCHAR(255),
 			processed          BOOLEAN NOT NULL DEFAULT FALSE,
-			created_at         TIMESTAMP DEFAULT NOW(),
-			updated_at         TIMESTAMP DEFAULT NOW(),
+			created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			embedding          TEXT,
 			year               INTEGER,
 			month              INTEGER,
@@ -400,8 +179,8 @@ func schemaDDL() []string {
 			is_spam         BOOLEAN NOT NULL DEFAULT FALSE,
 			is_important    BOOLEAN NOT NULL DEFAULT FALSE,
 			use_by_ai       BOOLEAN NOT NULL DEFAULT TRUE,
-			created_at      TIMESTAMP DEFAULT NOW(),
-			updated_at      TIMESTAMP DEFAULT NOW(),
+			created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id         BIGINT REFERENCES users(id) ON DELETE CASCADE,
 			source          VARCHAR(255),
 			CONSTRAINT uq_email_uid_folder_user UNIQUE (uid, folder, user_id)
@@ -419,7 +198,7 @@ func schemaDDL() []string {
 			size            INTEGER,
 			data            BYTEA,
 			image_thumbnail BYTEA,
-			created_at      TIMESTAMP DEFAULT NOW(),
+			created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id         BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_attachments_email_id ON attachments (email_id)`,
@@ -443,8 +222,8 @@ func schemaDDL() []string {
 			subject        VARCHAR(1000),
 			text           TEXT,
 			processed      BOOLEAN NOT NULL DEFAULT FALSE,
-			created_at     TIMESTAMP DEFAULT NOW(),
-			updated_at     TIMESTAMP DEFAULT NOW(),
+			created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id        BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_chat_session ON messages (chat_session)`,
@@ -458,7 +237,7 @@ func schemaDDL() []string {
 			id            SERIAL PRIMARY KEY,
 			message_id    INTEGER NOT NULL REFERENCES messages(id)    ON DELETE CASCADE,
 			media_item_id INTEGER NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
-			created_at    TIMESTAMP DEFAULT NOW(),
+			created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id       BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_message_attachments_message_id    ON message_attachments (message_id)`,
@@ -490,8 +269,8 @@ func schemaDDL() []string {
 			numinstagram      INTEGER DEFAULT 0,
 			description       TEXT,
 			total             INTEGER DEFAULT 0,
-			created_at        TIMESTAMP DEFAULT NOW(),
-			updated_at        TIMESTAMP DEFAULT NOW(),
+			created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id           BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_contacts_email    ON contacts (email)`,
@@ -511,8 +290,8 @@ func schemaDDL() []string {
 			is_active      BOOLEAN NOT NULL DEFAULT TRUE,
 			is_personal    BOOLEAN NOT NULL DEFAULT FALSE,
 			is_deleted     BOOLEAN NOT NULL DEFAULT FALSE,
-			created_at     TIMESTAMP DEFAULT NOW(),
-			updated_at     TIMESTAMP DEFAULT NOW(),
+			created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id        BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_relationship_source  ON relationships (source_id)`,
@@ -527,8 +306,8 @@ func schemaDDL() []string {
 			description             TEXT,
 			cover_photo_uri         VARCHAR(500),
 			last_modified_timestamp TIMESTAMP,
-			created_at              TIMESTAMP DEFAULT NOW(),
-			updated_at              TIMESTAMP DEFAULT NOW(),
+			created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id                 BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_facebook_albums_user_id ON facebook_albums (user_id)`,
@@ -538,7 +317,7 @@ func schemaDDL() []string {
 			id            SERIAL PRIMARY KEY,
 			album_id      INTEGER NOT NULL REFERENCES facebook_albums(id) ON DELETE CASCADE,
 			media_item_id INTEGER NOT NULL REFERENCES media_items(id)     ON DELETE CASCADE,
-			created_at    TIMESTAMP DEFAULT NOW(),
+			created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id       BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_album_media_user_id ON album_media (user_id)`,
@@ -551,8 +330,8 @@ func schemaDDL() []string {
 			post_text    TEXT,
 			external_url VARCHAR(2000),
 			post_type    VARCHAR(50),
-			created_at   TIMESTAMP DEFAULT NOW(),
-			updated_at   TIMESTAMP DEFAULT NOW(),
+			created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id      BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_facebook_posts_user_id ON facebook_posts (user_id)`,
@@ -562,7 +341,7 @@ func schemaDDL() []string {
 			id            SERIAL PRIMARY KEY,
 			post_id       INTEGER NOT NULL REFERENCES facebook_posts(id) ON DELETE CASCADE,
 			media_item_id INTEGER NOT NULL REFERENCES media_items(id)    ON DELETE CASCADE,
-			created_at    TIMESTAMP DEFAULT NOW(),
+			created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id       BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_post_media_user_id ON post_media (user_id)`,
@@ -574,8 +353,8 @@ func schemaDDL() []string {
 			description TEXT,
 			tags        TEXT,
 			story       TEXT,
-			created_at  TIMESTAMP DEFAULT NOW(),
-			updated_at  TIMESTAMP DEFAULT NOW(),
+			created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id     BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_artefacts_user_id ON artefacts (user_id)`,
@@ -586,7 +365,7 @@ func schemaDDL() []string {
 			artefact_id   INTEGER NOT NULL REFERENCES artefacts(id)   ON DELETE CASCADE,
 			media_item_id INTEGER NOT NULL REFERENCES media_items(id) ON DELETE RESTRICT,
 			sort_order    INTEGER NOT NULL DEFAULT 0,
-			created_at    TIMESTAMP DEFAULT NOW(),
+			created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id       BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_artefact_media_artefact_id   ON artefact_media (artefact_id)`,
@@ -612,8 +391,8 @@ func schemaDDL() []string {
 			is_private          BOOLEAN NOT NULL DEFAULT FALSE,
 			is_sensitive        BOOLEAN NOT NULL DEFAULT FALSE,
 			is_encrypted        BOOLEAN NOT NULL DEFAULT FALSE,
-			created_at          TIMESTAMP DEFAULT NOW(),
-			updated_at          TIMESTAMP DEFAULT NOW(),
+			created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id             BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_refdocs_available_for_task ON reference_documents (available_for_task)`,
@@ -651,9 +430,9 @@ func schemaDDL() []string {
 			gemini_file_uri       VARCHAR(1000),
 			filename              VARCHAR(500) NOT NULL,
 			state                 VARCHAR(50)  NOT NULL DEFAULT 'ACTIVE',
-			verified_at           TIMESTAMP    DEFAULT NOW(),
-			created_at            TIMESTAMP    DEFAULT NOW(),
-			updated_at            TIMESTAMP    DEFAULT NOW(),
+			verified_at           TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+			created_at            TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+			updated_at            TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
 			user_id               BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_gemini_file_reference_doc ON gemini_files (reference_document_id)`,
@@ -673,8 +452,8 @@ func schemaDDL() []string {
 			region           VARCHAR(255),
 			source           VARCHAR(255),
 			source_reference VARCHAR(500),
-			created_at       TIMESTAMP DEFAULT NOW(),
-			updated_at       TIMESTAMP DEFAULT NOW(),
+			created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id          BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_places_user_id ON places (user_id)`,
@@ -691,8 +470,8 @@ func schemaDDL() []string {
 			altitude         DOUBLE PRECISION,
 			source           VARCHAR(255),
 			source_reference VARCHAR(500),
-			created_at       TIMESTAMP DEFAULT NOW(),
-			updated_at       TIMESTAMP DEFAULT NOW(),
+			created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id          BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_locations_user_id ON locations (user_id)`,
@@ -701,8 +480,8 @@ func schemaDDL() []string {
 		`CREATE TABLE IF NOT EXISTS interests (
 			id         SERIAL PRIMARY KEY,
 			name       VARCHAR(500) NOT NULL,
-			created_at TIMESTAMP DEFAULT NOW(),
-			updated_at TIMESTAMP DEFAULT NOW(),
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id    BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_interests_user_id ON interests (user_id)`,
@@ -723,8 +502,8 @@ func schemaDDL() []string {
 			psychological_profile_ai TEXT,
 			personality_profile_ai   TEXT,
 			interests_ai             TEXT,
-			created_at               TIMESTAMP DEFAULT NOW(),
-			updated_at               TIMESTAMP DEFAULT NOW(),
+			created_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id                  BIGINT REFERENCES users(id) ON DELETE CASCADE,
 			CONSTRAINT uq_subject_configuration_user UNIQUE (user_id)
 		)`,
@@ -738,15 +517,15 @@ func schemaDDL() []string {
 			question_instructions   TEXT NOT NULL DEFAULT '',
 			pam_bot_instructions    TEXT,
 			user_id                 BIGINT REFERENCES users(id) ON DELETE SET NULL,
-			updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			updated_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 
 		// ── pam_bot (dementia companion — same multi-tenant rules as other archive tables) ──
 		`CREATE TABLE IF NOT EXISTS pam_bot_sessions (
 			id                    SERIAL PRIMARY KEY,
 			user_id               BIGINT REFERENCES users(id) ON DELETE CASCADE,
-			started_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			last_interaction_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			started_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			last_interaction_at   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			interaction_count     INTEGER NOT NULL DEFAULT 0,
 			latest_summary        TEXT,
 			latest_analysis       TEXT,
@@ -764,7 +543,7 @@ func schemaDDL() []string {
 			subject_category VARCHAR(100),
 			bot_message      TEXT NOT NULL,
 			user_action      VARCHAR(50),
-			created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			created_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_pbt_session_turn ON pam_bot_turns (session_id, turn_number)`,
 		`CREATE TABLE IF NOT EXISTS pam_bot_subjects (
@@ -772,7 +551,7 @@ func schemaDDL() []string {
 			user_id           BIGINT REFERENCES users(id) ON DELETE CASCADE,
 			subject_tag       VARCHAR(200) NOT NULL,
 			subject_category  VARCHAR(100),
-			last_discussed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_discussed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			discuss_count     INTEGER NOT NULL DEFAULT 1
 		)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_pbs_user_tag ON pam_bot_subjects (user_id, subject_tag)`,
@@ -785,8 +564,8 @@ func schemaDDL() []string {
 			description  VARCHAR(500),
 			instructions TEXT         NOT NULL,
 			creativity   DOUBLE PRECISION NOT NULL DEFAULT 0.5,
-			created_at   TIMESTAMP DEFAULT NOW(),
-			updated_at   TIMESTAMP DEFAULT NOW(),
+			created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id      BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_custom_voices_user_id ON custom_voices (user_id)`,
@@ -796,8 +575,8 @@ func schemaDDL() []string {
 			id              SERIAL PRIMARY KEY,
 			title           VARCHAR(500) NOT NULL,
 			voice           VARCHAR(100) NOT NULL,
-			created_at      TIMESTAMP DEFAULT NOW(),
-			updated_at      TIMESTAMP DEFAULT NOW(),
+			created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			last_message_at TIMESTAMP,
 			user_id         BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
@@ -813,7 +592,7 @@ func schemaDDL() []string {
 			voice           VARCHAR(100),
 			temperature     DOUBLE PRECISION,
 			turn_number     INTEGER NOT NULL,
-			created_at      TIMESTAMP DEFAULT NOW(),
+			created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id         BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_chat_turn_conv_turn    ON chat_turns (conversation_id, turn_number)`,
@@ -826,8 +605,8 @@ func schemaDDL() []string {
 			name                 VARCHAR(500) NOT NULL,
 			profile              TEXT,
 			generation_pending   BOOLEAN NOT NULL DEFAULT FALSE,
-			created_at           TIMESTAMP DEFAULT NOW(),
-			updated_at           TIMESTAMP DEFAULT NOW(),
+			created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id              BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_complete_profiles_user_id ON complete_profiles (user_id)`,
@@ -839,7 +618,7 @@ func schemaDDL() []string {
 			content      TEXT         NOT NULL,
 			voice        VARCHAR(100),
 			llm_provider VARCHAR(100),
-			created_at   TIMESTAMP DEFAULT NOW(),
+			created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id      BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_saved_responses_user_id ON saved_responses (user_id)`,
@@ -853,8 +632,8 @@ func schemaDDL() []string {
 			last_run_at    TIMESTAMP    NOT NULL,
 			result         VARCHAR(50)  NOT NULL,
 			result_message TEXT,
-			created_at     TIMESTAMP DEFAULT NOW(),
-			updated_at     TIMESTAMP DEFAULT NOW(),
+			created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id        BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_import_control_last_run_type    ON import_control_last_run (import_type)`,
@@ -871,8 +650,8 @@ func schemaDDL() []string {
 			id             SERIAL PRIMARY KEY,
 			name           VARCHAR(500) NOT NULL,
 			classification VARCHAR(20)  NOT NULL,
-			created_at     TIMESTAMP DEFAULT NOW(),
-			updated_at     TIMESTAMP DEFAULT NOW(),
+			created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id        BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_email_classifications_user_id ON email_classifications (user_id)`,
@@ -882,8 +661,8 @@ func schemaDDL() []string {
 			id           SERIAL PRIMARY KEY,
 			primary_name VARCHAR(500) NOT NULL,
 			email        VARCHAR(300) NOT NULL,
-			created_at   TIMESTAMP DEFAULT NOW(),
-			updated_at   TIMESTAMP DEFAULT NOW(),
+			created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id      BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_email_matches_user_id ON email_matches (user_id)`,
@@ -894,8 +673,8 @@ func schemaDDL() []string {
 			email      VARCHAR(300) NOT NULL,
 			name       VARCHAR(500) NOT NULL,
 			name_email BOOLEAN      NOT NULL DEFAULT FALSE,
-			created_at TIMESTAMP DEFAULT NOW(),
-			updated_at TIMESTAMP DEFAULT NOW(),
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id    BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_email_exclusions_user_id ON email_exclusions (user_id)`,
@@ -905,8 +684,8 @@ func schemaDDL() []string {
 			id              SERIAL PRIMARY KEY,
 			key             TEXT  NOT NULL UNIQUE,
 			encrypted_value BYTEA NOT NULL,
-			created_at      TIMESTAMP DEFAULT NOW(),
-			updated_at      TIMESTAMP DEFAULT NOW(),
+			created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id         BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_private_store_user_id ON private_store (user_id)`,
@@ -916,8 +695,8 @@ func schemaDDL() []string {
 			id         SERIAL PRIMARY KEY,
 			comment    VARCHAR(500) NOT NULL DEFAULT 'Don''t think I''m stupid enough to use this as a master key',
 			public_key TEXT NOT NULL,
-			created_at TIMESTAMP DEFAULT NOW(),
-			updated_at TIMESTAMP DEFAULT NOW(),
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id    BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_master_keys_user_id ON master_keys (user_id)`,
@@ -931,8 +710,8 @@ func schemaDDL() []string {
 			value        TEXT,
 			is_mandatory BOOLEAN NOT NULL DEFAULT FALSE,
 			description  TEXT,
-			created_at   TIMESTAMP DEFAULT NOW(),
-			updated_at   TIMESTAMP DEFAULT NOW(),
+			created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id      BIGINT REFERENCES users(id) ON DELETE SET NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_app_configuration_key     ON app_configuration (key)`,
@@ -954,8 +733,8 @@ func schemaDDL() []string {
 			state          VARCHAR(20)  NOT NULL DEFAULT 'active',
 			provider       VARCHAR(20),
 			writeup        TEXT,
-			created_at     TIMESTAMP DEFAULT NOW(),
-			updated_at     TIMESTAMP DEFAULT NOW(),
+			created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			last_turn_at   TIMESTAMP,
 			user_id        BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
@@ -970,7 +749,7 @@ func schemaDDL() []string {
 			question      TEXT    NOT NULL,
 			answer        TEXT,
 			turn_number   INTEGER NOT NULL,
-			created_at    TIMESTAMP DEFAULT NOW(),
+			created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			user_id       BIGINT REFERENCES users(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_interview_turns_interview_turn ON interview_turns (interview_id, turn_number)`,

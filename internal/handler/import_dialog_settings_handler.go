@@ -28,14 +28,14 @@ func NewImportDialogSettingsHandler(privateStore *service.PrivateStoreService, s
 
 // allowedImportDialogKinds maps URL segment -> private_store key suffix (import_dialog_<kind>_v1).
 var allowedImportDialogKinds = map[string]string{
-	"imap":         "imap",
-	"gmail":        "gmail",
-	"imessage":     "imessage",
-	"whatsapp":     "whatsapp",
-	"facebook_all": "facebook_all",
-	"instagram":    "instagram",
-	"filesystem":            "filesystem",
-	"filesystem_reference":  "filesystem_reference",
+	"imap":                 "imap",
+	"gmail":                "gmail",
+	"imessage":             "imessage",
+	"whatsapp":             "whatsapp",
+	"facebook_all":         "facebook_all",
+	"instagram":            "instagram",
+	"filesystem":           "filesystem",
+	"filesystem_reference": "filesystem_reference",
 }
 
 func importDialogStoreKey(kind string) string {

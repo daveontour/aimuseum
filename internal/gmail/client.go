@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/oauth2"
 	gmailv1 "google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
-	"golang.org/x/oauth2"
 )
 
 const pageSize = 500

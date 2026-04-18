@@ -213,12 +213,12 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	if isVisitor {
 		a := auth.Access
 		out["visitor_access"] = map[string]any{
-			"restricted":             a.Restricted,
-			"can_messages_chat":      a.AllowMessagesChat(),
-			"can_emails":             a.AllowEmails(),
-			"can_contacts":           a.AllowContacts(),
-			"can_relationships":      a.AllowRelationships(),
-			"can_sensitive_private":  a.AllowSensitivePrivate(),
+			"restricted":            a.Restricted,
+			"can_messages_chat":     a.AllowMessagesChat(),
+			"can_emails":            a.AllowEmails(),
+			"can_contacts":          a.AllowContacts(),
+			"can_relationships":     a.AllowRelationships(),
+			"can_sensitive_private": a.AllowSensitivePrivate(),
 		}
 	}
 	owner, _ := h.svc.GetUserLLMStored(r.Context(), user.ID)

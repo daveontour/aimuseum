@@ -107,8 +107,8 @@ func toSubjectConfigResponse(cfg *model.SubjectConfig) *model.SubjectConfigRespo
 		InstagramHandle:        cfg.InstagramHandle,
 		WritingStyleAI:         cfg.WritingStyleAI,
 		PsychologicalProfileAI: cfg.PsychologicalProfileAI,
-		CreatedAt:              isoString(ptrTime(cfg.CreatedAt)),
-		UpdatedAt:              isoString(ptrTime(cfg.UpdatedAt)),
+		CreatedAt:              isoString(ptrTime(cfg.CreatedAt.Time)),
+		UpdatedAt:              isoString(ptrTime(cfg.UpdatedAt.Time)),
 	}
 }
 

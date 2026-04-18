@@ -4,22 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 
 	appai "github.com/daveontour/aimuseum/internal/ai"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 // PamBotSession holds state for a single Pam Bot companion session.
 type PamBotSession struct {
 	ID                  int
 	UserID              *int64
-	StartedAt           time.Time
-	LastInteractionAt   time.Time
+	StartedAt           sqlutil.DBTime
+	LastInteractionAt   sqlutil.DBTime
 	InteractionCount    int
 	LatestSummary       *string
 	LatestAnalysis      *string
-	LatestSummaryAt     *time.Time
+	LatestSummaryAt     sqlutil.NullDBTime
 	LastFacebookPostID  *int64
 	LastFacebookAlbumID *int64
 }
@@ -28,7 +27,7 @@ type PamBotSession struct {
 type PamBotSubject struct {
 	SubjectTag      string
 	SubjectCategory string
-	LastDiscussedAt time.Time
+	LastDiscussedAt sqlutil.DBTime
 	DiscussCount    int
 }
 
@@ -43,11 +42,11 @@ type PamBotTurn struct {
 
 // PamBotRepo provides all DB access for the Pam Bot feature.
 type PamBotRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewPamBotRepo creates a PamBotRepo.
-func NewPamBotRepo(pool *pgxpool.Pool) *PamBotRepo {
+func NewPamBotRepo(pool *sql.DB) *PamBotRepo {
 	return &PamBotRepo{pool: pool}
 }
 
@@ -68,7 +67,7 @@ func (r *PamBotRepo) GetOrCreateSession(ctx context.Context) (*PamBotSession, er
 
 	s := &PamBotSession{}
 	var lastFBPost, lastFBAlbum sql.NullInt64
-	err := r.pool.QueryRow(ctx, q, args...).Scan(
+	err := r.pool.QueryRowContext(ctx, q, args...).Scan(
 		&s.ID, &s.UserID, &s.StartedAt, &s.LastInteractionAt, &s.InteractionCount,
 		&s.LatestSummary, &s.LatestAnalysis, &s.LatestSummaryAt,
 		&lastFBPost, &lastFBAlbum,
@@ -89,7 +88,7 @@ func (r *PamBotRepo) GetOrCreateSession(ctx context.Context) (*PamBotSession, er
 	}
 
 	// Create a new session
-	err = r.pool.QueryRow(ctx,
+	err = r.pool.QueryRowContext(ctx,
 		`INSERT INTO pam_bot_sessions (user_id) VALUES ($1)
 		 RETURNING id, user_id, started_at, last_interaction_at, interaction_count,
 		           latest_summary, latest_analysis, latest_summary_at,
@@ -125,7 +124,7 @@ func (r *PamBotRepo) GetRecentSubjects(ctx context.Context, limit int) ([]PamBot
 	args = append(args, limit)
 	q += fmt.Sprintf(" ORDER BY last_discussed_at DESC LIMIT $%d", len(args))
 
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.pool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetRecentSubjects: %w", err)
 	}
@@ -144,7 +143,7 @@ func (r *PamBotRepo) GetRecentSubjects(ctx context.Context, limit int) ([]PamBot
 
 // GetRecentTurns returns the last N turns of a session as ConvTurn history for the LLM.
 func (r *PamBotRepo) GetRecentTurns(ctx context.Context, sessionID, limit int) ([]appai.ConvTurn, error) {
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.pool.QueryContext(ctx,
 		`SELECT user_action, bot_message FROM pam_bot_turns
 		 WHERE session_id = $1
 		 ORDER BY turn_number DESC LIMIT $2`,
@@ -175,7 +174,7 @@ func (r *PamBotRepo) GetRecentTurns(ctx context.Context, sessionID, limit int) (
 
 // GetRecentTurnsRaw returns turns in chronological order for summary generation.
 func (r *PamBotRepo) GetRecentTurnsRaw(ctx context.Context, sessionID, limit int) ([]PamBotTurn, error) {
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.pool.QueryContext(ctx,
 		`SELECT turn_number, COALESCE(subject_tag,''), COALESCE(subject_category,''),
 		        bot_message, COALESCE(user_action,'')
 		 FROM pam_bot_turns
@@ -216,7 +215,7 @@ func (r *PamBotRepo) SaveTurn(ctx context.Context, sessionID, turnNumber int, su
 	if subjectCategory != "" {
 		catPtr = &subjectCategory
 	}
-	_, err := r.pool.Exec(ctx,
+	_, err := r.pool.ExecContext(ctx,
 		`INSERT INTO pam_bot_turns (user_id, session_id, turn_number, subject_tag, subject_category, bot_message, user_action)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 		uid, sessionID, turnNumber, tagPtr, catPtr, botMessage, userAction,
@@ -234,11 +233,11 @@ func (r *PamBotRepo) UpsertSubject(ctx context.Context, subjectTag, subjectCateg
 	if subjectCategory != "" {
 		catPtr = &subjectCategory
 	}
-	_, err := r.pool.Exec(ctx,
+	_, err := r.pool.ExecContext(ctx,
 		`INSERT INTO pam_bot_subjects (user_id, subject_tag, subject_category, last_discussed_at, discuss_count)
-		 VALUES ($1, $2, $3, NOW(), 1)
+		 VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 1)
 		 ON CONFLICT (user_id, subject_tag)
-		 DO UPDATE SET last_discussed_at = NOW(),
+		 DO UPDATE SET last_discussed_at = CURRENT_TIMESTAMP,
 		               discuss_count = pam_bot_subjects.discuss_count + 1,
 		               subject_category = EXCLUDED.subject_category`,
 		uid, subjectTag, catPtr,
@@ -251,9 +250,9 @@ func (r *PamBotRepo) UpsertSubject(ctx context.Context, subjectTag, subjectCateg
 
 // IncrementInteractionCount updates the session count and timestamp.
 func (r *PamBotRepo) IncrementInteractionCount(ctx context.Context, sessionID int) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.pool.ExecContext(ctx,
 		`UPDATE pam_bot_sessions
-		 SET interaction_count = interaction_count + 1, last_interaction_at = NOW()
+		 SET interaction_count = interaction_count + 1, last_interaction_at = CURRENT_TIMESTAMP
 		 WHERE id = $1`,
 		sessionID,
 	)
@@ -265,9 +264,9 @@ func (r *PamBotRepo) IncrementInteractionCount(ctx context.Context, sessionID in
 
 // UpdateSessionSummary saves the LLM-generated summary and cognitive analysis.
 func (r *PamBotRepo) UpdateSessionSummary(ctx context.Context, sessionID int, summary, analysis string) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.pool.ExecContext(ctx,
 		`UPDATE pam_bot_sessions
-		 SET latest_summary = $1, latest_analysis = $2, latest_summary_at = NOW()
+		 SET latest_summary = $1, latest_analysis = $2, latest_summary_at = CURRENT_TIMESTAMP
 		 WHERE id = $3`,
 		summary, analysis, sessionID,
 	)
@@ -287,7 +286,7 @@ func (r *PamBotRepo) UpdateSessionFacebookContext(ctx context.Context, sessionID
 	if albumID != 0 {
 		albumPtr = &albumID
 	}
-	_, err := r.pool.Exec(ctx,
+	_, err := r.pool.ExecContext(ctx,
 		`UPDATE pam_bot_sessions SET last_facebook_post_id = $2, last_facebook_album_id = $3 WHERE id = $1`,
 		sessionID, postPtr, albumPtr,
 	)

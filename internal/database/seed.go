@@ -2,13 +2,12 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // exclusionsJSON matches the shape of static/data/exclusions.json.
@@ -23,7 +22,7 @@ type exclusionsJSON struct {
 
 // SeedEmailExclusionsFromJSON reads exclusions from path and inserts any that are
 // not already in email_exclusions. Existing rows are left unchanged.
-func SeedEmailExclusionsFromJSON(ctx context.Context, pool *pgxpool.Pool, path string) error {
+func SeedEmailExclusionsFromJSON(ctx context.Context, db *sql.DB, path string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -45,7 +44,7 @@ func SeedEmailExclusionsFromJSON(ctx context.Context, pool *pgxpool.Pool, path s
 		if email == "" {
 			continue
 		}
-		n, err := insertExclusionIfNotExists(ctx, pool, email, "", false)
+		n, err := insertExclusionIfNotExists(ctx, db, email, "", false)
 		if err != nil {
 			return fmt.Errorf("seed email exclusion %q: %w", email, err)
 		}
@@ -57,7 +56,7 @@ func SeedEmailExclusionsFromJSON(ctx context.Context, pool *pgxpool.Pool, path s
 		if name == "" {
 			continue
 		}
-		n, err := insertExclusionIfNotExists(ctx, pool, "", name, false)
+		n, err := insertExclusionIfNotExists(ctx, db, "", name, false)
 		if err != nil {
 			return fmt.Errorf("seed name exclusion %q: %w", name, err)
 		}
@@ -70,7 +69,7 @@ func SeedEmailExclusionsFromJSON(ctx context.Context, pool *pgxpool.Pool, path s
 		if email == "" && name == "" {
 			continue
 		}
-		n, err := insertExclusionIfNotExists(ctx, pool, email, name, true)
+		n, err := insertExclusionIfNotExists(ctx, db, email, name, true)
 		if err != nil {
 			return fmt.Errorf("seed name_email exclusion %q / %q: %w", name, email, err)
 		}
@@ -85,10 +84,10 @@ func SeedEmailExclusionsFromJSON(ctx context.Context, pool *pgxpool.Pool, path s
 
 // insertExclusionIfNotExists inserts one row when no row exists with the same (email, name, name_email).
 // Returns 1 if inserted, 0 if already existed.
-func insertExclusionIfNotExists(ctx context.Context, pool *pgxpool.Pool, email, name string, nameEmail bool) (int, error) {
+func insertExclusionIfNotExists(ctx context.Context, db *sql.DB, email, name string, nameEmail bool) (int, error) {
 	var exists int
-	err := pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM email_exclusions WHERE email = $1 AND name = $2 AND name_email = $3`,
+	err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM email_exclusions WHERE email = ? AND name = ? AND name_email = ?`,
 		email, name, nameEmail).Scan(&exists)
 	if err != nil {
 		return 0, err
@@ -96,9 +95,8 @@ func insertExclusionIfNotExists(ctx context.Context, pool *pgxpool.Pool, email, 
 	if exists > 0 {
 		return 0, nil
 	}
-	// user_id NULL = global defaults for all tenants (FK allows NULL; no fixed user id at seed time)
-	_, err = pool.Exec(ctx,
-		`INSERT INTO email_exclusions (email, name, name_email, user_id) VALUES ($1, $2, $3, $4)`,
+	_, err = db.ExecContext(ctx,
+		`INSERT INTO email_exclusions (email, name, name_email, user_id) VALUES (?, ?, ?, ?)`,
 		email, name, nameEmail, nil)
 	if err != nil {
 		return 0, err
@@ -114,7 +112,7 @@ type emailMatchesJSON []struct {
 
 // SeedEmailMatchesFromJSON reads email matches from path and inserts any that are
 // not already in email_matches. Existing rows are left unchanged.
-func SeedEmailMatchesFromJSON(ctx context.Context, pool *pgxpool.Pool, path string) error {
+func SeedEmailMatchesFromJSON(ctx context.Context, db *sql.DB, path string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -140,7 +138,7 @@ func SeedEmailMatchesFromJSON(ctx context.Context, pool *pgxpool.Pool, path stri
 			if email == "" {
 				continue
 			}
-			n, err := insertEmailMatchIfNotExists(ctx, pool, primaryName, email)
+			n, err := insertEmailMatchIfNotExists(ctx, db, primaryName, email)
 			if err != nil {
 				return fmt.Errorf("seed email match %q / %q: %w", primaryName, email, err)
 			}
@@ -154,10 +152,10 @@ func SeedEmailMatchesFromJSON(ctx context.Context, pool *pgxpool.Pool, path stri
 	return nil
 }
 
-func insertEmailMatchIfNotExists(ctx context.Context, pool *pgxpool.Pool, primaryName, email string) (int, error) {
+func insertEmailMatchIfNotExists(ctx context.Context, db *sql.DB, primaryName, email string) (int, error) {
 	var exists int
-	err := pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM email_matches WHERE primary_name = $1 AND email = $2`,
+	err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM email_matches WHERE primary_name = ? AND email = ?`,
 		primaryName, email).Scan(&exists)
 	if err != nil {
 		return 0, err
@@ -165,8 +163,8 @@ func insertEmailMatchIfNotExists(ctx context.Context, pool *pgxpool.Pool, primar
 	if exists > 0 {
 		return 0, nil
 	}
-	_, err = pool.Exec(ctx,
-		`INSERT INTO email_matches (primary_name, email, user_id) VALUES ($1, $2, $3)`,
+	_, err = db.ExecContext(ctx,
+		`INSERT INTO email_matches (primary_name, email, user_id) VALUES (?, ?, ?)`,
 		primaryName, email, nil)
 	if err != nil {
 		return 0, err
@@ -179,7 +177,7 @@ type emailClassificationsJSON map[string][]string
 
 // SeedEmailClassificationsFromJSON reads email classifications from path and inserts any that are
 // not already in email_classifications. Existing rows are left unchanged.
-func SeedEmailClassificationsFromJSON(ctx context.Context, pool *pgxpool.Pool, path string) error {
+func SeedEmailClassificationsFromJSON(ctx context.Context, db *sql.DB, path string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -205,7 +203,7 @@ func SeedEmailClassificationsFromJSON(ctx context.Context, pool *pgxpool.Pool, p
 			if name == "" {
 				continue
 			}
-			n, err := insertEmailClassificationIfNotExists(ctx, pool, name, classification)
+			n, err := insertEmailClassificationIfNotExists(ctx, db, name, classification)
 			if err != nil {
 				return fmt.Errorf("seed email classification %q / %q: %w", name, classification, err)
 			}
@@ -219,10 +217,10 @@ func SeedEmailClassificationsFromJSON(ctx context.Context, pool *pgxpool.Pool, p
 	return nil
 }
 
-func insertEmailClassificationIfNotExists(ctx context.Context, pool *pgxpool.Pool, name, classification string) (int, error) {
+func insertEmailClassificationIfNotExists(ctx context.Context, db *sql.DB, name, classification string) (int, error) {
 	var exists int
-	err := pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM email_classifications WHERE name = $1 AND classification = $2`,
+	err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM email_classifications WHERE name = ? AND classification = ?`,
 		name, classification).Scan(&exists)
 	if err != nil {
 		return 0, err
@@ -230,8 +228,8 @@ func insertEmailClassificationIfNotExists(ctx context.Context, pool *pgxpool.Poo
 	if exists > 0 {
 		return 0, nil
 	}
-	_, err = pool.Exec(ctx,
-		`INSERT INTO email_classifications (name, classification, user_id) VALUES ($1, $2, $3)`,
+	_, err = db.ExecContext(ctx,
+		`INSERT INTO email_classifications (name, classification, user_id) VALUES (?, ?, ?)`,
 		name, classification, nil)
 	if err != nil {
 		return 0, err
@@ -241,9 +239,9 @@ func insertEmailClassificationIfNotExists(ctx context.Context, pool *pgxpool.Poo
 
 // SeedAppSystemInstructionsFromFiles fills the singleton app_system_instructions row
 // from static files when all three stored texts are empty (typical first boot).
-func SeedAppSystemInstructionsFromFiles(ctx context.Context, pool *pgxpool.Pool, staticDir string) error {
+func SeedAppSystemInstructionsFromFiles(ctx context.Context, db *sql.DB, staticDir string) error {
 	var chat, core, q string
-	err := pool.QueryRow(ctx, `
+	err := db.QueryRowContext(ctx, `
 		SELECT chat_instructions, core_instructions, question_instructions
 		FROM app_system_instructions WHERE id = 1`).Scan(&chat, &core, &q)
 	if err != nil {
@@ -280,12 +278,12 @@ func SeedAppSystemInstructionsFromFiles(ctx context.Context, pool *pgxpool.Pool,
 	if chat == "" && core == "" && q == "" {
 		return nil
 	}
-	_, err = pool.Exec(ctx, `
+	_, err = db.ExecContext(ctx, `
 		UPDATE app_system_instructions SET
-			chat_instructions = $1,
-			core_instructions = $2,
-			question_instructions = $3,
-			updated_at = NOW()
+			chat_instructions = ?,
+			core_instructions = ?,
+			question_instructions = ?,
+			updated_at = CURRENT_TIMESTAMP
 		WHERE id = 1`, chat, core, q)
 	if err != nil {
 		return fmt.Errorf("seed app_system_instructions update: %w", err)

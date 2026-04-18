@@ -1,7 +1,7 @@
 // Package model contains shared domain types used across handler/service/repository layers.
 package model
 
-import "time"
+import "github.com/daveontour/aimuseum/internal/sqlutil"
 
 // Email is the domain representation of a row in the emails table.
 type Email struct {
@@ -13,7 +13,7 @@ type Email struct {
 	ToAddresses    *string
 	CCAddresses    *string
 	BCCAddresses   *string
-	Date           *time.Time
+	Date           sqlutil.NullDBTime
 	RawMessage     *string
 	PlainText      *string
 	Snippet        *string
@@ -28,8 +28,8 @@ type Email struct {
 	IsImportant    bool
 	UseByAI        bool
 	Source         *string // import origin: "gmail", IMAP hostname, etc.
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	CreatedAt      sqlutil.DBTime
+	UpdatedAt      sqlutil.DBTime
 }
 
 // EmailMetadataResponse is the JSON shape returned by the metadata, search, and label endpoints.
@@ -43,11 +43,11 @@ type EmailMetadataResponse struct {
 	ToAddresses   *string    `json:"to_addresses"`
 	CCAddresses   *string    `json:"cc_addresses"`
 	BCCAddresses  *string    `json:"bcc_addresses"`
-	Date          *time.Time `json:"date"`
-	Snippet       *string    `json:"snippet"`
-	AttachmentIDs []int64    `json:"attachment_ids"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	Date          sqlutil.NullDBTime `json:"date"`
+	Snippet       *string          `json:"snippet"`
+	AttachmentIDs []int64          `json:"attachment_ids"`
+	CreatedAt     sqlutil.DBTime   `json:"created_at"`
+	UpdatedAt     sqlutil.DBTime   `json:"updated_at"`
 	IsPersonal    bool       `json:"is_personal"`
 	IsBusiness    bool       `json:"is_business"`
 	IsImportant   bool       `json:"is_important"`

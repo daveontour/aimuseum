@@ -7,8 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 // ErrAmbiguousUserFullName is returned when more than one user matches FindByFullName.
@@ -25,15 +24,15 @@ type User struct {
 	IsActive           bool
 	IsAdmin            bool
 	AllowServerLLMKeys bool
-	CreatedAt          time.Time
-	LastLoginAt        *time.Time
+	CreatedAt          sqlutil.DBTime
+	LastLoginAt        sqlutil.NullDBTime
 }
 
 // AuthSession represents a row from the sessions table.
 type AuthSession struct {
 	ID               string
 	UserID           int64
-	ExpiresAt        time.Time
+	ExpiresAt        sqlutil.DBTime
 	IsVisitor        bool
 	ShareLinkSession bool
 	VisitorKeyHintID *int64
@@ -41,11 +40,11 @@ type AuthSession struct {
 
 // UserRepo handles all database operations for users and auth sessions.
 type UserRepo struct {
-	pool *pgxpool.Pool
+	pool *sql.DB
 }
 
 // NewUserRepo creates a UserRepo.
-func NewUserRepo(pool *pgxpool.Pool) *UserRepo {
+func NewUserRepo(pool *sql.DB) *UserRepo {
 	return &UserRepo{pool: pool}
 }
 
@@ -53,7 +52,7 @@ func NewUserRepo(pool *pgxpool.Pool) *UserRepo {
 // displayName is stored in display_name (legacy/UI); firstName and familyName are stored explicitly.
 func (r *UserRepo) Create(ctx context.Context, email, passwordHash, displayName, firstName, familyName string) (*User, error) {
 	var u User
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`INSERT INTO users (email, password_hash, display_name, first_name, family_name)
 		 VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''))
 		 RETURNING id, email, password_hash,
@@ -67,12 +66,12 @@ func (r *UserRepo) Create(ctx context.Context, email, passwordHash, displayName,
 // FindByEmail returns the user with the given email, or nil if not found.
 func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*User, error) {
 	var u User
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT id, email, password_hash, COALESCE(display_name, ''), COALESCE(first_name, ''), COALESCE(family_name, ''), is_active, is_admin, created_at
 		 FROM users WHERE email = $1`,
 		email,
 	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.FirstName, &u.FamilyName, &u.IsActive, &u.IsAdmin, &u.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return &u, err
@@ -99,7 +98,7 @@ func (r *UserRepo) FindByFullName(ctx context.Context, fullName string) (*User, 
 		family = strings.Join(parts[1:], " ")
 	}
 
-	rows, err := r.pool.Query(ctx, findByFullNameSelect, first, family)
+	rows, err := r.pool.QueryContext(ctx, findByFullNameSelect, first, family)
 	if err != nil {
 		return nil, err
 	}
@@ -129,12 +128,12 @@ func (r *UserRepo) FindByFullName(ctx context.Context, fullName string) (*User, 
 // FindByID returns the user with the given ID, or nil if not found.
 func (r *UserRepo) FindByID(ctx context.Context, id int64) (*User, error) {
 	var u User
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT id, email, password_hash, COALESCE(display_name, ''), COALESCE(first_name, ''), COALESCE(family_name, ''), is_active, is_admin, allow_server_llm_keys, created_at
 		 FROM users WHERE id = $1`,
 		id,
 	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.FirstName, &u.FamilyName, &u.IsActive, &u.IsAdmin, &u.AllowServerLLMKeys, &u.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return &u, err
@@ -142,23 +141,23 @@ func (r *UserRepo) FindByID(ctx context.Context, id int64) (*User, error) {
 
 // UpdatePasswordHash replaces the password hash for a user.
 func (r *UserRepo) UpdatePasswordHash(ctx context.Context, id int64, hash string) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.pool.ExecContext(ctx,
 		`UPDATE users SET password_hash = $1 WHERE id = $2`,
 		hash, id,
 	)
 	return err
 }
 
-// TouchLastLogin sets last_login_at = NOW() for the given user.
+// TouchLastLogin sets last_login_at = CURRENT_TIMESTAMP for the given user.
 func (r *UserRepo) TouchLastLogin(ctx context.Context, id int64) {
 	// Best-effort — ignore error so login still succeeds if this fails.
-	_, _ = r.pool.Exec(ctx, `UPDATE users SET last_login_at = NOW() WHERE id = $1`, id)
+	_, _ = r.pool.ExecContext(ctx, `UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1`, id)
 }
 
 // AdminExists reports whether any user with is_admin = true exists.
 func (r *UserRepo) AdminExists(ctx context.Context) (bool, error) {
 	var exists bool
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM users WHERE is_admin = TRUE)`,
 	).Scan(&exists)
 	return exists, err
@@ -166,7 +165,7 @@ func (r *UserRepo) AdminExists(ctx context.Context) (bool, error) {
 
 // SetIsAdmin sets the is_admin flag for the given user.
 func (r *UserRepo) SetIsAdmin(ctx context.Context, id int64, isAdmin bool) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.pool.ExecContext(ctx,
 		`UPDATE users SET is_admin = $1 WHERE id = $2`,
 		isAdmin, id,
 	)
@@ -176,7 +175,7 @@ func (r *UserRepo) SetIsAdmin(ctx context.Context, id int64, isAdmin bool) error
 // EmailExists reports whether an email address is already registered.
 func (r *UserRepo) EmailExists(ctx context.Context, email string) (bool, error) {
 	var exists bool
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`, email,
 	).Scan(&exists)
 	return exists, err
@@ -199,10 +198,12 @@ func (r *UserRepo) CreateSession(ctx context.Context, id string, userID int64, e
 		shareLinkSession = false
 		hintArg = nil
 	}
-	_, err := r.pool.Exec(ctx,
+	// Use sqlutil.DBTime so SQLite stores RFC3339 text; raw time.Time can persist as Go String()+monotonic.
+	exp := sqlutil.DBTime{Time: expiresAt.UTC()}
+	_, err := r.pool.ExecContext(ctx,
 		`INSERT INTO sessions (id, user_id, expires_at, is_visitor, share_link_session, visitor_key_hint_id)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		id, userID, expiresAt, isVisitor, shareLinkSession, hintArg,
+		id, userID, exp, isVisitor, shareLinkSession, hintArg,
 	)
 	return err
 }
@@ -211,12 +212,12 @@ func (r *UserRepo) CreateSession(ctx context.Context, id string, userID int64, e
 func (r *UserRepo) FindSession(ctx context.Context, id string) (*AuthSession, error) {
 	var s AuthSession
 	var hint sql.NullInt64
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRowContext(ctx,
 		`SELECT id, user_id, expires_at, is_visitor, share_link_session, visitor_key_hint_id FROM sessions
-		 WHERE id = $1 AND expires_at > NOW()`,
+		 WHERE id = $1 AND expires_at > CURRENT_TIMESTAMP`,
 		id,
 	).Scan(&s.ID, &s.UserID, &s.ExpiresAt, &s.IsVisitor, &s.ShareLinkSession, &hint)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -229,17 +230,33 @@ func (r *UserRepo) FindSession(ctx context.Context, id string) (*AuthSession, er
 	return &s, nil
 }
 
+// visitorKeyHintsTableExists is true when visitor_key_hints exists. The SQLite
+// single-user schema omits keyring/hint tables; querying them would error.
+func visitorKeyHintsTableExists(ctx context.Context, pool *sql.DB) bool {
+	var n int
+	err := pool.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='visitor_key_hints'`).Scan(&n)
+	if err != nil {
+		// PostgreSQL (no sqlite_master) or other driver: assume full schema.
+		return true
+	}
+	return n > 0
+}
+
 // GetVisitorKeyPermissionsForOwner returns feature flags for a visitor_key_hints row
 // only when its keyring belongs to ownerUserID.
 func (r *UserRepo) GetVisitorKeyPermissionsForOwner(ctx context.Context, hintID, ownerUserID int64) (canMessages, canEmails, canContacts, canRelationships, canSensitivePrivate bool, ok bool, err error) {
-	e := r.pool.QueryRow(ctx, `
+	if !visitorKeyHintsTableExists(ctx, r.pool) {
+		return false, false, false, false, false, false, nil
+	}
+	e := r.pool.QueryRowContext(ctx, `
 		SELECT h.can_messages_chat, h.can_emails, h.can_contacts, h.can_relationship_sensitive, h.can_sensitive_private
 		FROM visitor_key_hints h
 		INNER JOIN sensitive_keyring k ON k.id = h.keyring_id AND k.is_master = FALSE
 		WHERE h.id = $1 AND k.user_id = $2`,
 		hintID, ownerUserID,
 	).Scan(&canMessages, &canEmails, &canContacts, &canRelationships, &canSensitivePrivate)
-	if errors.Is(e, pgx.ErrNoRows) {
+	if errors.Is(e, sql.ErrNoRows) {
 		return false, false, false, false, false, false, nil
 	}
 	if e != nil {
@@ -250,39 +267,40 @@ func (r *UserRepo) GetVisitorKeyPermissionsForOwner(ctx context.Context, hintID,
 
 // ExtendSession pushes expires_at forward.
 func (r *UserRepo) ExtendSession(ctx context.Context, id string, newExpiry time.Time) error {
-	_, err := r.pool.Exec(ctx,
+	exp := sqlutil.DBTime{Time: newExpiry.UTC()}
+	_, err := r.pool.ExecContext(ctx,
 		`UPDATE sessions SET expires_at = $1 WHERE id = $2`,
-		newExpiry, id,
+		exp, id,
 	)
 	return err
 }
 
 // DeleteSession removes a session (used on logout).
 func (r *UserRepo) DeleteSession(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, id)
+	_, err := r.pool.ExecContext(ctx, `DELETE FROM sessions WHERE id = $1`, id)
 	return err
 }
 
 // PurgeExpiredSessions deletes all sessions past their expiry.  Called
 // periodically from the background cleanup goroutine in AuthService.
 func (r *UserRepo) PurgeExpiredSessions(ctx context.Context) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM sessions WHERE expires_at <= NOW()`)
+	_, err := r.pool.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP`)
 	return err
 }
 
 // DeleteAllSessions removes every auth session row. Used on server startup so
 // cookies from a previous process cannot authenticate after a restart.
 func (r *UserRepo) DeleteAllSessions(ctx context.Context) (int64, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM sessions`)
+	tag, err := r.pool.ExecContext(ctx, `DELETE FROM sessions`)
 	if err != nil {
 		return 0, err
 	}
-	return tag.RowsAffected(), nil
+	return rowsAffectedOrZero(tag), nil
 }
 
 // ListAll returns every user ordered by created_at ascending.
 func (r *UserRepo) ListAll(ctx context.Context) ([]*User, error) {
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.pool.QueryContext(ctx,
 		`SELECT id, email, password_hash, COALESCE(display_name, ''), COALESCE(first_name, ''), COALESCE(family_name, ''), is_active, is_admin, allow_server_llm_keys, created_at
 		 FROM users ORDER BY created_at ASC`)
 	if err != nil {
@@ -303,12 +321,12 @@ func (r *UserRepo) ListAll(ctx context.Context) ([]*User, error) {
 // SetAllowServerLLMKeys sets whether the user may use server GEMINI_API_KEY, ANTHROPIC_API_KEY,
 // and TAVILY_API_KEY when they have not set their own (per-provider) keys.
 func (r *UserRepo) SetAllowServerLLMKeys(ctx context.Context, userID int64, allow bool) error {
-	_, err := r.pool.Exec(ctx, `UPDATE users SET allow_server_llm_keys = $2 WHERE id = $1`, userID, allow)
+	_, err := r.pool.ExecContext(ctx, `UPDATE users SET allow_server_llm_keys = $2 WHERE id = $1`, userID, allow)
 	return err
 }
 
 // Delete removes a user by ID; all associated data cascades via FK.
 func (r *UserRepo) Delete(ctx context.Context, id int64) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
+	_, err := r.pool.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id)
 	return err
 }

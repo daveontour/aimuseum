@@ -2,18 +2,18 @@ package contacts
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/daveontour/aimuseum/internal/sqlutil"
 )
 
 // ReadFromDatabase reads contact records from the database using the given query.
 // The query must return a single column with comma-separated email entries.
-func ReadFromDatabase(ctx context.Context, db *pgxpool.Pool, query string) ([]InputRecord, error) {
-	rows, err := db.Query(ctx, query)
+func ReadFromDatabase(ctx context.Context, db *sql.DB, query string) ([]InputRecord, error) {
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
@@ -57,8 +57,8 @@ func ReadFromDatabase(ctx context.Context, db *pgxpool.Pool, query string) ([]In
 }
 
 // ReadRelationshipsFromDatabase reads relationship records (from, to) from the database
-func ReadRelationshipsFromDatabase(ctx context.Context, db *pgxpool.Pool, query string) ([]RelationshipRecord, error) {
-	rows, err := db.Query(ctx, query)
+func ReadRelationshipsFromDatabase(ctx context.Context, db *sql.DB, query string) ([]RelationshipRecord, error) {
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
@@ -108,21 +108,26 @@ type SubjectIdentifiers struct {
 // Maps: id->id, primary_name->name, alternative_names->alternative_names, emails->email.
 // Truncates the contacts table (and dependent relationships) before inserting.
 // Preserves and restores subject (id=0) identifiers (whatsappid, imessageid, smsid, facebookid, instagramid).
-func WriteContactsToDatabase(ctx context.Context, db *pgxpool.Pool, records []FormattedOutputRecord, ownerUserID int64) error {
-	tx, err := db.Begin(ctx)
+func WriteContactsToDatabase(ctx context.Context, db *sql.DB, records []FormattedOutputRecord, ownerUserID int64) error {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	var subjectIds SubjectIdentifiers
-	err = tx.QueryRow(ctx, "SELECT whatsappid, imessageid, smsid, facebookid, instagramid FROM contacts WHERE id = 0").Scan(
+	err = tx.QueryRowContext(ctx, "SELECT whatsappid, imessageid, smsid, facebookid, instagramid FROM contacts WHERE id = 0").Scan(
 		&subjectIds.WhatsAppID, &subjectIds.IMessageID, &subjectIds.SMSID, &subjectIds.FacebookID, &subjectIds.InstagramID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("read subject identifiers: %w", err)
 	}
 
-	_, err = tx.Exec(ctx, "TRUNCATE contacts CASCADE")
+	if sqlutil.IsSQLite(ctx, db) {
+		// SQLite has no TRUNCATE; FKs from relationships ON DELETE CASCADE clear dependent rows.
+		_, err = tx.ExecContext(ctx, "DELETE FROM contacts")
+	} else {
+		_, err = tx.ExecContext(ctx, "TRUNCATE contacts CASCADE")
+	}
 	if err != nil {
 		return fmt.Errorf("truncate contacts: %w", err)
 	}
@@ -153,7 +158,7 @@ func WriteContactsToDatabase(ctx context.Context, db *pgxpool.Pool, records []Fo
 		if ownerUserID > 0 {
 			userIDArg = ownerUserID
 		}
-		_, err = tx.Exec(ctx,
+		_, err = tx.ExecContext(ctx,
 			`INSERT INTO contacts (id, name, alternative_names, email, numemails, numwhatsapp, numimessages, numfacebook, numsms, numinstagram, is_group, total, user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 			r.ID, r.PrimaryName, r.AlternativeNames, r.Emails,
 			nemails, nw, ni, nf, ns, ninst, r.IsGroupChat, total, userIDArg)
@@ -165,7 +170,7 @@ func WriteContactsToDatabase(ctx context.Context, db *pgxpool.Pool, records []Fo
 	// Restore subject (id=0) identifiers if we had them before truncate
 	if subjectIds.WhatsAppID != nil || subjectIds.IMessageID != nil || subjectIds.SMSID != nil ||
 		subjectIds.FacebookID != nil || subjectIds.InstagramID != nil {
-		_, err = tx.Exec(ctx,
+		_, err = tx.ExecContext(ctx,
 			`UPDATE contacts SET whatsappid = $1, imessageid = $2, smsid = $3, facebookid = $4, instagramid = $5 WHERE id = 0`,
 			subjectIds.WhatsAppID, subjectIds.IMessageID, subjectIds.SMSID, subjectIds.FacebookID, subjectIds.InstagramID)
 		if err != nil {
@@ -174,20 +179,40 @@ func WriteContactsToDatabase(ctx context.Context, db *pgxpool.Pool, records []Fo
 	}
 
 	// Reset sequence so future auto-inserts get correct next id
-	_, err = tx.Exec(ctx, "SELECT setval(pg_get_serial_sequence('contacts', 'id'), COALESCE((SELECT MAX(id) FROM contacts), 1))")
+	if sqlutil.IsSQLite(ctx, db) {
+		err = resetSQLiteContactsSequence(ctx, tx)
+	} else {
+		_, err = tx.ExecContext(ctx, "SELECT setval(pg_get_serial_sequence('contacts', 'id'), COALESCE((SELECT MAX(id) FROM contacts), 1))")
+	}
 	if err != nil {
 		return fmt.Errorf("reset contacts sequence: %w", err)
 	}
 
-	return tx.Commit(ctx)
+	return tx.Commit()
+}
+
+func resetSQLiteContactsSequence(ctx context.Context, tx *sql.Tx) error {
+	var maxID sql.NullInt64
+	if err := tx.QueryRowContext(ctx, "SELECT MAX(id) FROM contacts").Scan(&maxID); err != nil {
+		return err
+	}
+	n := int64(1)
+	if maxID.Valid && maxID.Int64 > 0 {
+		n = maxID.Int64
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM sqlite_sequence WHERE name = 'contacts'"); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, "INSERT INTO sqlite_sequence (name, seq) VALUES ('contacts', ?)", n)
+	return err
 }
 
 // LoadSubjectIdentifiers loads the subject's (id=0) identifiers from the contacts table.
-func LoadSubjectIdentifiers(ctx context.Context, db *pgxpool.Pool) (*SubjectIdentifiers, error) {
+func LoadSubjectIdentifiers(ctx context.Context, db *sql.DB) (*SubjectIdentifiers, error) {
 	var ids SubjectIdentifiers
-	err := db.QueryRow(ctx, "SELECT whatsappid, imessageid, smsid, facebookid, instagramid FROM contacts WHERE id = 0").Scan(
+	err := db.QueryRowContext(ctx, "SELECT whatsappid, imessageid, smsid, facebookid, instagramid FROM contacts WHERE id = 0").Scan(
 		&ids.WhatsAppID, &ids.IMessageID, &ids.SMSID, &ids.FacebookID, &ids.InstagramID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("load subject identifiers: %w", err)
 	}
 	return &ids, nil
@@ -213,7 +238,7 @@ type DirectionalCounts struct {
 
 // GetDirectionalMessageCounts returns message counts by direction for the given chat_session and service.
 // subjectIdentifiers: comma-separated values for the subject's identifier(s) for this service.
-func GetDirectionalMessageCounts(ctx context.Context, db *pgxpool.Pool, chatSession, service string, subjectID *string) (DirectionalCounts, error) {
+func GetDirectionalMessageCounts(ctx context.Context, db *sql.DB, chatSession, service string, subjectID *string) (DirectionalCounts, error) {
 	serviceVal := service
 	switch service {
 	case "whatsapp":
@@ -230,7 +255,7 @@ func GetDirectionalMessageCounts(ctx context.Context, db *pgxpool.Pool, chatSess
 		return DirectionalCounts{}, fmt.Errorf("unknown service: %s", service)
 	}
 
-	rows, err := db.Query(ctx,
+	rows, err := db.QueryContext(ctx,
 		`SELECT sender_id FROM messages WHERE chat_session = $1 AND service = $2`,
 		chatSession, serviceVal)
 	if err != nil {
